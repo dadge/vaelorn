@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test des manettes - Les Fragments de l'Aube</title>
+<style>
+  :root { --bg:#0b0a14; --panel:#1b1832; --edge:#6a64a0; --text:#f4f0ff; --dim:#a8a2c8; --accent:#ffd36b; --good:#5be37d; --bad:#ff5a5a;
+          --p1:#5aa8ff; --p2:#ff6a5a; --p3:#7dffb0; --p4:#ffd36b; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px; background:var(--bg); color:var(--text); font:16px/1.45 "Courier New", Consolas, monospace; }
+  h1 { color:var(--accent); font-size:26px; margin:0 0 6px; }
+  h2 { color:var(--good); font-size:18px; margin:22px 0 8px; }
+  p, li { color:var(--dim); }
+  .lang { float:right; }
+  button { background:var(--panel); color:var(--text); border:2px solid var(--edge); padding:4px 10px; font:inherit; cursor:pointer; }
+  .box { background:var(--panel); border:2px solid var(--edge); padding:12px 14px; margin:10px 0; }
+  .wake { border-color:var(--accent); color:var(--accent); font-size:18px; }
+  .slots { display:flex; gap:10px; flex-wrap:wrap; }
+  .slot { flex:1 1 200px; min-width:180px; border:2px solid var(--edge); padding:8px 10px; background:#100e20; }
+  .slot b { display:block; margin-bottom:4px; }
+  .slot.taken { background:#163a2a; }
+  .pad { display:grid; grid-template-columns: 1fr; gap:6px; }
+  .pad h3 { margin:0; font-size:16px; color:var(--text); word-break:break-all; }
+  .tag { display:inline-block; padding:0 8px; border:2px solid var(--edge); margin-right:6px; font-size:14px; }
+  .tag.ok { border-color:var(--good); color:var(--good); }
+  .tag.warn { border-color:var(--accent); color:var(--accent); }
+  .btns { display:flex; flex-wrap:wrap; gap:4px; }
+  .b { width:34px; height:30px; border:2px solid var(--edge); text-align:center; font-size:13px; line-height:26px; background:#100e20; color:var(--dim); position:relative; overflow:hidden; }
+  .b i { position:absolute; left:0; bottom:0; width:100%; background:var(--good); opacity:.75; height:0; }
+  .b span { position:relative; }
+  .b.on { border-color:var(--good); color:#0b0a14; }
+  .b.special { border-color:var(--accent); }
+  .b.special.on i { background:var(--accent); }
+  .axes { display:flex; flex-wrap:wrap; gap:8px; }
+  .axis { width:90px; font-size:12px; color:var(--dim); }
+  .axis .bar { position:relative; height:10px; border:2px solid var(--edge); background:#100e20; }
+  .axis .bar i { position:absolute; top:0; bottom:0; width:6px; margin-left:-3px; background:var(--accent); left:50%; }
+  .log { font-size:13px; color:var(--dim); max-height:120px; overflow:auto; }
+  .mono { color:var(--text); }
+  code { color:var(--text); }
+</style>
+</head>
+<body>
+<button class="lang" id="langBtn">FR / EN</button>
+<h1 id="title"></h1>
+<p id="intro"></p>
+
+<div class="box wake" id="wake"></div>
+
+<h2 id="hSlots"></h2>
+<p id="slotsHelp"></p>
+<div class="slots" id="slots"></div>
+
+<h2 id="hPads"></h2>
+<div id="pads"></div>
+
+<h2 id="hHelp"></h2>
+<ul id="help"></ul>
+<h2 id="hLog"></h2>
+<div class="log box" id="log"></div>
+
+<script>
+(function () {
+  'use strict';
+  var T = {
+    fr: {
+      title: 'Test des manettes',
+      intro: "Page de diagnostic autonome pour « Les Fragments de l'Aube » : elle montre ce que le navigateur voit de chaque manette (jusqu'à 4) et à quel joueur elle serait attribuée dans le jeu.",
+      wake: "Aucune manette détectée. Appuie sur un bouton de la manette (ou bouge un stick) pour la réveiller : le navigateur ne la révèle qu'après un premier appui.",
+      wakeOk: 'manette(s) détectée(s). Appuie sur un bouton pour vérifier chacune.',
+      hSlots: "Attribution simulée (comme à l'écran de sélection)",
+      slotsHelp: "Appuie sur A (bouton 0) d'une manette, ou sur Entrée / Espace au clavier, pour réclamer le plus petit emplacement libre. B (bouton 1) ou Échap relâche. Un appareil = un emplacement.",
+      slot: 'Joueur', free: 'Appuie sur A pour rejoindre', keyboard: 'Clavier', gamepad: 'Manette',
+      hPads: 'Manettes détectées', id: 'Identifiant', mapping: 'Mapping', standard: 'standard', nonstandard: 'NON standard (mappage de secours)',
+      connected: 'connectée', buttons: 'Boutons', axes: 'Axes', wouldBe: 'Serait le joueur', notAssigned: 'pas encore rejoint',
+      hat: 'Croix (axe 9)', special: 'attaque spéciale', hHelp: 'Boutons dans le jeu', hLog: 'Journal',
+      help: [
+        'Déplacement : stick gauche ou croix directionnelle.',
+        'Action (attaquer / interagir / relever) : A ; X = attaque ; B = interagir / relever.',
+        "Attaque spéciale : Y, RB ou RT (clavier : F ou X). Espace et A ne la déclenchent PAS.",
+        'Pause : Start (clavier : Échap).',
+        "Manette non standard (mapping vide) : le jeu utilise un mappage de secours : axes 0/1 = stick, axe 9 = croix, boutons 0/1/2 = A/B/X."
+      ],
+      connectedEv: 'Manette branchée', disconnectedEv: 'Manette débranchée', joined: 'a rejoint', left: 'a quitté'
+    },
+    en: {
+      title: 'Gamepad test',
+      intro: 'Standalone diagnostic page for "Les Fragments de l\'Aube": it shows what the browser sees of each gamepad (up to 4) and which player each one would be assigned to in the game.',
+      wake: 'No gamepad detected. Press a button on the gamepad (or move a stick) to wake it up: the browser only reveals it after a first press.',
+      wakeOk: 'gamepad(s) detected. Press a button to check each one.',
+      hSlots: 'Simulated assignment (as on the selection screen)',
+      slotsHelp: 'Press A (button 0) on a gamepad, or Enter / Space on the keyboard, to claim the lowest free slot. B (button 1) or Escape releases. One device = one slot.',
+      slot: 'Player', free: 'Press A to join', keyboard: 'Keyboard', gamepad: 'Gamepad',
+      hPads: 'Detected gamepads', id: 'Id', mapping: 'Mapping', standard: 'standard', nonstandard: 'NON-standard (fallback mapping)',
+      connected: 'connected', buttons: 'Buttons', axes: 'Axes', wouldBe: 'Would be player', notAssigned: 'has not joined yet',
+      hat: 'D-pad (axis 9)', special: 'special attack', hHelp: 'In-game buttons', hLog: 'Log',
+      help: [
+        'Move: left stick or D-pad.',
+        'Action (attack / interact / revive): A; X = attack; B = interact / revive.',
+        'Special attack: Y, RB or RT (keyboard: F or X). Space and A do NOT trigger it.',
+        'Pause: Start (keyboard: Escape).',
+        'Non-standard gamepad (empty mapping): the game uses a fallback mapping: axes 0/1 = stick, axis 9 = D-pad, buttons 0/1/2 = A/B/X.'
+      ],
+      connectedEv: 'Gamepad connected', disconnectedEv: 'Gamepad disconnected', joined: 'joined', left: 'left'
+    }
+  };
+  var lang = (/[?&]lang=(fr|en)/.exec(location.search) || [])[1] || ((navigator.language || 'fr').slice(0, 2) === 'fr' ? 'fr' : 'en');
+  try { var saved = localStorage.getItem('vaelorn.lang'); if (!/[?&]lang=/.test(location.search) && (saved === 'fr' || saved === 'en')) lang = saved; } catch (e) {}
+  function tr(k) { return T[lang][k]; }
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  var BUTTON_NAMES = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'Back', 'Start', 'L3', 'R3', '↑', '↓', '←', '→', 'Home'];
+  var SPECIAL = { 3: true, 5: true, 7: true };
+  var MAX_PLAYERS = 4;
+  var owners = [null, null, null, null];   // 'keyboard' | 'gamepad:N' | null
+  var prevDown = {};                       // "gamepad:N:b" -> bool
+  var logLines = [];
+
+  function log(msg) {
+    logLines.unshift(new Date().toLocaleTimeString() + '  ' + msg);
+    if (logLines.length > 30) logLines.pop();
+    $('log').innerHTML = logLines.map(esc).join('<br>');
+  }
+  function pads() {
+    var out = [];
+    try {
+      var raw = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (var i = 0; i < raw.length; i++) if (raw[i] && raw[i].connected !== false) out.push(raw[i]);
+    } catch (e) {}
+    return out;
+  }
+  function slotOf(dev) { return owners.indexOf(dev); }
+  function claim(dev) {
+    if (slotOf(dev) >= 0) return;
+    var free = owners.indexOf(null);
+    if (free < 0) return;
+    owners[free] = dev;
+    log(label(dev) + ' → ' + tr('slot') + ' ' + (free + 1) + ' (' + tr('joined') + ')');
+  }
+  function release(dev) {
+    var s = slotOf(dev);
+    if (s < 0) return;
+    owners[s] = null;
+    log(label(dev) + ' ' + tr('left'));
+  }
+  function label(dev) {
+    if (dev === 'keyboard') return tr('keyboard');
+    return tr('gamepad') + ' ' + (Number(dev.split(':')[1]) + 1);
+  }
+  function isStd(g) { return g.mapping === 'standard'; }
+  function down(g, i) { var b = g.buttons[i]; return !!b && (b.pressed || b.value > 0.5); }
+
+  function renderStatic() {
+    document.documentElement.lang = lang;
+    $('title').textContent = tr('title');
+    document.title = tr('title') + " - Les Fragments de l'Aube";
+    $('intro').textContent = tr('intro');
+    $('hSlots').textContent = tr('hSlots');
+    $('slotsHelp').textContent = tr('slotsHelp');
+    $('hPads').textContent = tr('hPads');
+    $('hHelp').textContent = tr('hHelp');
+    $('hLog').textContent = tr('hLog');
+    $('help').innerHTML = tr('help').map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('');
+  }
+
+  function renderSlots(list) {
+    var html = '';
+    for (var i = 0; i < MAX_PLAYERS; i++) {
+      var o = owners[i];
+      var name = o ? label(o) : tr('free');
+      var extra = '';
+      if (o && o !== 'keyboard') {
+        var idx = Number(o.split(':')[1]);
+        var g = list.filter(function (x) { return x.index === idx; })[0];
+        extra = g ? '<br><span class="mono">' + esc(g.id.length > 40 ? g.id.slice(0, 39) + '…' : g.id) + '</span>' : '<br>(?)';
+      }
+      html += '<div class="slot' + (o ? ' taken' : '') + '" style="border-color:var(--p' + (i + 1) + ')"><b style="color:var(--p' + (i + 1) + ')">' + tr('slot') + ' ' + (i + 1) + '</b>' + esc(name) + extra + '</div>';
+    }
+    $('slots').innerHTML = html;
+  }
+
+  function renderPads(list) {
+    if (list.length === 0) {
+      $('wake').textContent = tr('wake');
+      $('wake').style.display = '';
+      $('pads').innerHTML = '';
+      return;
+    }
+    $('wake').textContent = list.length + ' ' + tr('wakeOk');
+    var html = '';
+    list.forEach(function (g) {
+      var std = isStd(g);
+      var slot = slotOf('gamepad:' + g.index);
+      html += '<div class="box pad"><h3>' + tr('gamepad') + ' ' + (g.index + 1) + ' - index ' + g.index + '</h3>';
+      html += '<div><span class="tag ok">' + tr('connected') + '</span><span class="tag ' + (std ? 'ok' : 'warn') + '">' + tr('mapping') + ' : ' + esc(g.mapping || '(vide)') + ' - ' + (std ? tr('standard') : tr('nonstandard')) + '</span>';
+      html += '<span class="tag">' + (slot >= 0 ? tr('wouldBe') + ' ' + (slot + 1) : tr('notAssigned')) + '</span></div>';
+      html += '<div>' + tr('id') + ' : <span class="mono">' + esc(g.id) + '</span></div>';
+      html += '<div>' + tr('buttons') + ' (' + g.buttons.length + ')</div><div class="btns">';
+      for (var i = 0; i < g.buttons.length; i++) {
+        var b = g.buttons[i];
+        var nm = std && BUTTON_NAMES[i] ? BUTTON_NAMES[i] : String(i);
+        var v = Math.max(0, Math.min(1, b.value || (b.pressed ? 1 : 0)));
+        html += '<div class="b' + (SPECIAL[i] && std ? ' special' : '') + (b.pressed || v > 0.5 ? ' on' : '') + '" title="' + (SPECIAL[i] && std ? tr('special') : '') + '"><i style="height:' + Math.round(v * 100) + '%"></i><span>' + esc(nm) + '</span></div>';
+      }
+      html += '</div><div>' + tr('axes') + ' (' + g.axes.length + ')</div><div class="axes">';
+      for (var a = 0; a < g.axes.length; a++) {
+        var val = g.axes[a];
+        var pos = Math.max(-1, Math.min(1, val));
+        html += '<div class="axis">' + a + (a === 9 ? ' (' + tr('hat') + ')' : '') + ' : ' + val.toFixed(2) + '<div class="bar"><i style="left:' + ((pos + 1) * 50) + '%"></i></div></div>';
+      }
+      html += '</div></div>';
+    });
+    $('pads').innerHTML = html;
+  }
+
+  function pollJoins(list) {
+    list.forEach(function (g) {
+      var dev = 'gamepad:' + g.index;
+      var a = down(g, 0), bb = down(g, 1);
+      var ka = prevDown[dev + ':0'], kb = prevDown[dev + ':1'];
+      if (a && !ka) claim(dev);
+      if (bb && !kb) release(dev);
+      prevDown[dev + ':0'] = a; prevDown[dev + ':1'] = bb;
+    });
+    // pads disparus : l'emplacement est conservé (comme dans le jeu : reprise à la reconnexion au même indice)
+  }
+
+  var lastJson = '';
+  function frame() {
+    var list = pads();
+    pollJoins(list);
+    renderSlots(list);
+    // évite de reconstruire le DOM lourd si rien ne change visiblement
+    var sig = JSON.stringify(list.map(function (g) {
+      return [g.index, g.id, g.mapping, g.buttons.map(function (b) { return Math.round((b.value || 0) * 20) + (b.pressed ? 'p' : ''); }), g.axes.map(function (v) { return Math.round(v * 50); })];
+    })) + owners.join('|');
+    if (sig !== lastJson) { lastJson = sig; renderPads(list); }
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('gamepadconnected', function (e) { log(tr('connectedEv') + ' : ' + e.gamepad.index + ' ' + e.gamepad.id + ' (' + (e.gamepad.mapping || 'mapping vide') + ')'); });
+  window.addEventListener('gamepaddisconnected', function (e) { log(tr('disconnectedEv') + ' : ' + e.gamepad.index + ' ' + e.gamepad.id); });
+  window.addEventListener('keydown', function (e) {
+    if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') { claim('keyboard'); if (e.code === 'Space') e.preventDefault(); }
+    else if (e.code === 'Escape' || e.code === 'Backspace') release('keyboard');
+  });
+  $('langBtn').addEventListener('click', function () {
+    lang = lang === 'fr' ? 'en' : 'fr';
+    renderStatic(); lastJson = '';
+  });
+
+  renderStatic();
+  frame();
+})();
+</script>
+</body>
+</html>

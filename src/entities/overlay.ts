@@ -1,0 +1,409 @@
+/**
+ * Éléments d'interface GLOBAUX de l'écran partagé (caméra d'interface plein écran) : bandeau de salle, indice de
+ * salle, bannières de phase (« Tous à terre », « Salle terminée », « Niveau terminé »), barre de PV de boss, fondu
+ * enchaîné / flash plein écran, et menu pause. Aucune règle de jeu : lecture de GameState seulement.
+ */
+import type Phaser from 'phaser';
+import { GAME_HEIGHT, GAME_WIDTH } from '../core/constants';
+import type { EnemyState, GamePhase, LevelDef, RoomDef } from '../core/types';
+import { t } from '../i18n/i18n';
+import { HUD_DEPTH, bossBarRatio, fadeAlpha, hudRect, hudText, setTextIfChanged } from '../render/hud';
+import type { ViewContext } from './common';
+
+type Text = Phaser.GameObjects.Text;
+type Rect = Phaser.GameObjects.Rectangle;
+
+// ───────────────────────────── Bannière à fondu ─────────────────────────────
+
+const FADE_IN_MS = 220;
+const FADE_OUT_MS = 500;
+
+/** Alpha d'une bannière affichée `durMs` ms, après `elapsedMs` ms (fondu d'entrée puis de sortie). Pur. */
+export function bannerAlpha(elapsedMs: number, durMs: number): number {
+  if (elapsedMs < 0) return 0;
+  if (elapsedMs >= durMs) return 0;
+  const inn = Math.min(1, elapsedMs / FADE_IN_MS);
+  const out = Number.isFinite(durMs) ? Math.min(1, (durMs - elapsedMs) / FADE_OUT_MS) : 1;
+  return Math.max(0, Math.min(inn, out));
+}
+
+class BannerSlot {
+  private readonly bg: Rect;
+  private readonly title: Text;
+  private readonly sub: Text;
+  private elapsed = 0;
+  private dur = 0;
+  private active = false;
+
+  constructor(
+    ctx: ViewContext,
+    cx: number,
+    private readonly y: number,
+    titleSize: number,
+    subSize: number,
+    private readonly wrap: number,
+  ) {
+    this.bg = hudRect(ctx, cx, y, 10, 10, 0x0b0912, 0.74, HUD_DEPTH.banner);
+    this.bg.setVisible(false);
+    this.title = hudText(ctx, cx, y, '', { size: titleSize, originX: 0.5, originY: 0, align: 'center', depth: HUD_DEPTH.banner + 1, wrap });
+    this.sub = hudText(ctx, cx, y, '', { size: subSize, originX: 0.5, originY: 0, align: 'center', depth: HUD_DEPTH.banner + 1, bold: false, wrap });
+    this.title.setVisible(false);
+    this.sub.setVisible(false);
+  }
+
+  show(title: string, sub: string, durMs: number, titleColor = 0xffffff, subColor = 0xe6e0c8): void {
+    this.title.setText(title).setColor(`#${titleColor.toString(16).padStart(6, '0')}`);
+    this.sub.setText(sub).setColor(`#${subColor.toString(16).padStart(6, '0')}`);
+    this.layout();
+    this.elapsed = 0;
+    this.dur = durMs;
+    this.active = true;
+    this.apply(1);
+  }
+
+  /** Remplace les textes sans relancer le fondu (changement de langue). */
+  retext(title: string, sub: string): void {
+    if (!this.active) return;
+    this.title.setText(title);
+    this.sub.setText(sub);
+    this.layout();
+  }
+
+  hide(): void {
+    this.active = false;
+    this.apply(0);
+  }
+
+  get isActive(): boolean {
+    return this.active;
+  }
+
+  private layout(): void {
+    const pad = 14;
+    const hasSub = this.sub.text !== '';
+    this.title.setY(this.y + pad);
+    this.sub.setY(this.y + pad + this.title.height + 4);
+    const h = pad * 2 + this.title.height + (hasSub ? this.sub.height + 4 : 0);
+    const w = Math.max(this.title.width, hasSub ? this.sub.width : 0) + pad * 4;
+    this.bg.setSize(w, h);
+    this.bg.setPosition(this.title.x, this.y + h / 2);
+    this.sub.setVisible(hasSub);
+  }
+
+  update(dtMs: number): void {
+    if (!this.active) return;
+    this.elapsed += dtMs;
+    if (this.elapsed >= this.dur) {
+      this.hide();
+      return;
+    }
+    this.apply(bannerAlpha(this.elapsed, this.dur));
+  }
+
+  private apply(a: number): void {
+    const vis = a > 0.001 && this.active;
+    this.bg.setVisible(vis).setAlpha(a * 0.74);
+    this.title.setVisible(vis).setAlpha(a);
+    this.sub.setVisible(vis && this.sub.text !== '').setAlpha(a);
+  }
+
+  destroy(): void {
+    this.bg.destroy();
+    this.title.destroy();
+    this.sub.destroy();
+  }
+}
+
+// ───────────────────────────── Overlay global ─────────────────────────────
+
+export interface OverlayUpdate {
+  phase: GamePhase;
+  phaseTimerMs: number;
+  dtMs: number;
+  /** Temps réel (ms) depuis la dernière entrée de salle (fondu d'ouverture). */
+  sinceEnterMs: number;
+  exitOpen: boolean;
+  boss: EnemyState | null;
+}
+
+export class GameOverlay {
+  private readonly ctx: ViewContext;
+  private readonly roomBanner: BannerSlot;
+  private readonly hintBanner: BannerSlot;
+  private readonly bigBanner: BannerSlot;
+  private readonly exitBanner: BannerSlot;
+  private readonly fade: Rect;
+  private readonly flashRect: Rect;
+  private readonly bossBg: Rect;
+  private readonly bossFill: Rect;
+  private readonly bossName: Text;
+  private extraFade = 0;
+  private flashLeftMs = 0;
+  private flashTotalMs = 1;
+  private flashAlpha = 0;
+  private lastPhase: GamePhase = 'playing';
+  private lastExitOpen = false;
+  private exitPending = false;
+  private room: RoomDef | null = null;
+  private roomIndex = 0;
+  private roomTotal = 1;
+  private bossKind = '';
+
+  constructor(ctx: ViewContext, private readonly level: LevelDef) {
+    this.ctx = ctx;
+    const cx = GAME_WIDTH / 2;
+    this.roomBanner = new BannerSlot(ctx, cx, 24, 30, 16, 900);
+    this.hintBanner = new BannerSlot(ctx, cx, 120, 18, 14, 860);
+    this.exitBanner = new BannerSlot(ctx, cx, 24, 20, 14, 800);
+    this.bigBanner = new BannerSlot(ctx, cx, GAME_HEIGHT * 0.3, 44, 20, 1000);
+    this.flashRect = hudRect(ctx, cx, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0xffffff, 0, HUD_DEPTH.fade - 1);
+    this.flashRect.setVisible(false);
+    this.fade = hudRect(ctx, cx, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0, HUD_DEPTH.fade);
+    this.fade.setVisible(false);
+    // barre de boss
+    const bw = 560;
+    const by = GAME_HEIGHT - 34;
+    this.bossBg = hudRect(ctx, cx, by, bw + 8, 20, 0x0b0912, 0.88, HUD_DEPTH.banner);
+    this.bossBg.setStrokeStyle(2, 0xff6a6a, 0.9).setVisible(false);
+    this.bossFill = hudRect(ctx, cx - bw / 2, by, bw, 12, 0xe0304f, 1, HUD_DEPTH.banner + 1);
+    this.bossFill.setOrigin(0, 0.5).setVisible(false);
+    this.bossName = hudText(ctx, cx, by - 14, '', { size: 16, originX: 0.5, originY: 1, color: 0xffd0d0, depth: HUD_DEPTH.banner + 2 });
+    this.bossName.setVisible(false);
+  }
+
+  /** Nouvelle salle : bandeau de nom + indice d'introduction (sauf redémarrage après défaite : bandeau court). */
+  onRoomEntered(room: RoomDef, roomIndex: number, reason: 'start' | 'next' | 'restart'): void {
+    this.room = room;
+    this.roomIndex = roomIndex;
+    this.roomTotal = this.level.rooms.length;
+    this.roomBanner.show(t(room.nameKey), t('hud.room.number', { n: roomIndex + 1, total: this.roomTotal }), reason === 'restart' ? 2200 : 3800, 0xf0e2b0);
+    if (room.introHintKey && reason !== 'restart') this.hintBanner.show(t(room.introHintKey), '', 7000, 0xffffff);
+    else this.hintBanner.hide();
+    this.exitBanner.hide();
+    this.lastExitOpen = false;
+    this.exitPending = false;
+  }
+
+  /** Fondu au noir supplémentaire (0..1), combiné par maximum au fondu de salle (sortie de scène). */
+  setExtraFade(alpha: number): void {
+    this.extraFade = Math.max(0, Math.min(1, alpha));
+  }
+
+  /** Flash plein écran (couleur, intensité max 0..1, durée ms). */
+  flash(color: number, alpha: number, durMs: number): void {
+    this.flashRect.setFillStyle(color, 1);
+    this.flashAlpha = alpha;
+    this.flashLeftMs = durMs;
+    this.flashTotalMs = Math.max(1, durMs);
+  }
+
+  /** Re-traduit les textes visibles (changement de langue). */
+  retranslate(): void {
+    if (this.room) {
+      this.roomBanner.retext(t(this.room.nameKey), t('hud.room.number', { n: this.roomIndex + 1, total: this.roomTotal }));
+      if (this.room.introHintKey) this.hintBanner.retext(t(this.room.introHintKey), '');
+    }
+    this.applyPhaseBanner(this.lastPhase, true);
+    if (this.bossKind) this.bossName.setText(t(`enemy.${this.bossKind}`));
+  }
+
+  private applyPhaseBanner(phase: GamePhase, retext = false): void {
+    switch (phase) {
+      case 'wipe':
+        if (retext) this.bigBanner.retext(t('hud.allDown'), t('hud.restartRoom'));
+        else this.bigBanner.show(t('hud.allDown'), t('hud.restartRoom'), Infinity, 0xff6a6a);
+        break;
+      case 'roomCleared':
+        if (retext) this.bigBanner.retext(t('hud.roomCleared'), '');
+        else this.bigBanner.show(t('hud.roomCleared'), '', Infinity, 0xf5c53d);
+        break;
+      case 'levelComplete':
+        if (retext) this.bigBanner.retext(t('hud.levelComplete'), '');
+        else this.bigBanner.show(t('hud.levelComplete'), '', Infinity, 0xf5c53d);
+        break;
+      default:
+        if (!retext) this.bigBanner.hide();
+        break;
+    }
+  }
+
+  update(a: OverlayUpdate): void {
+    if (a.phase !== this.lastPhase) {
+      this.lastPhase = a.phase;
+      this.applyPhaseBanner(a.phase);
+    }
+    if (a.exitOpen && !this.lastExitOpen && a.phase === 'playing') this.exitPending = true;
+    if (!a.exitOpen) this.exitPending = false;
+    this.lastExitOpen = a.exitOpen;
+    // l'annonce de sortie attend que les bandeaux d'arrivée de salle soient passés (pas de chevauchement)
+    if (this.exitPending && !this.roomBanner.isActive && !this.hintBanner.isActive) {
+      this.exitPending = false;
+      this.exitBanner.show(t('hint.gatherAtExit'), '', 3600, 0xfff6c8);
+    }
+    this.roomBanner.update(a.dtMs);
+    this.hintBanner.update(a.dtMs);
+    this.exitBanner.update(a.dtMs);
+    this.bigBanner.update(a.dtMs);
+
+    // fondu enchaîné entre salles
+    const fa = Math.max(this.extraFade, fadeAlpha(a.phase, a.phaseTimerMs, a.sinceEnterMs));
+    this.fade.setVisible(fa > 0.003).setAlpha(fa);
+
+    // flash
+    if (this.flashLeftMs > 0) {
+      this.flashLeftMs -= a.dtMs;
+      const k = Math.max(0, this.flashLeftMs / this.flashTotalMs);
+      this.flashRect.setVisible(k > 0).setAlpha(this.flashAlpha * k);
+    }
+
+    // boss
+    const boss = a.boss;
+    this.bossBg.setVisible(!!boss);
+    this.bossFill.setVisible(!!boss);
+    this.bossName.setVisible(!!boss);
+    if (boss) {
+      if (boss.kind !== this.bossKind) {
+        this.bossKind = boss.kind;
+        this.bossName.setText(t(`enemy.${boss.kind}`));
+      }
+      const r = bossBarRatio(boss);
+      this.bossFill.setSize(Math.max(1, 560 * r), 12);
+      // les phases de boss donnent une teinte plus vive
+      this.bossFill.setFillStyle(boss.phase >= 2 ? 0xff3050 : boss.phase === 1 ? 0xe0504f : 0xe0304f, 1);
+    }
+  }
+
+  destroy(): void {
+    this.roomBanner.destroy();
+    this.hintBanner.destroy();
+    this.exitBanner.destroy();
+    this.bigBanner.destroy();
+    this.fade.destroy();
+    this.flashRect.destroy();
+    this.bossBg.destroy();
+    this.bossFill.destroy();
+    this.bossName.destroy();
+    void this.ctx;
+  }
+}
+
+// ───────────────────────────── Menu pause ─────────────────────────────
+
+export type PauseChoice = 'resume' | 'quit';
+const PAUSE_ITEMS: readonly PauseChoice[] = ['resume', 'quit'];
+
+/** Prochaine sélection d'un menu circulaire (pur). */
+export function wrapIndex(index: number, delta: number, count: number): number {
+  if (count <= 0) return 0;
+  return (((index + delta) % count) + count) % count;
+}
+
+/** Menu pause : reprendre / quitter vers le menu. Textes via i18n. */
+export class PauseMenu {
+  private readonly dim: Rect;
+  private readonly panel: Rect;
+  private readonly title: Text;
+  private readonly items: Text[] = [];
+  private readonly hint: Text;
+  private readonly controls: Text;
+  private index = 0;
+  private shown = false;
+  private confirmingQuit = false;
+
+  constructor(ctx: ViewContext) {
+    const cx = GAME_WIDTH / 2;
+    const cy = GAME_HEIGHT / 2;
+    this.dim = hudRect(ctx, cx, cy, GAME_WIDTH, GAME_HEIGHT, 0x05040a, 0.66, HUD_DEPTH.pause);
+    this.panel = hudRect(ctx, cx, cy, 520, 340, 0x1c1530, 0.97, HUD_DEPTH.pause + 1);
+    this.panel.setStrokeStyle(3, 0xf0e2b0, 1);
+    this.title = hudText(ctx, cx, cy - 140, '', { size: 38, originX: 0.5, color: 0xf0e2b0, depth: HUD_DEPTH.pause + 2 });
+    PAUSE_ITEMS.forEach((_, i) => {
+      this.items.push(hudText(ctx, cx, cy - 60 + i * 56, '', { size: 28, originX: 0.5, depth: HUD_DEPTH.pause + 2 }));
+    });
+    this.hint = hudText(ctx, cx, cy + 62, '', { size: 14, originX: 0.5, color: 0xb8c0d8, bold: false, depth: HUD_DEPTH.pause + 2, wrap: 480, align: 'center' });
+    this.controls = hudText(ctx, cx, cy + 100, '', { size: 14, originX: 0.5, color: 0xe6e0c8, bold: false, depth: HUD_DEPTH.pause + 2, wrap: 480, align: 'center' });
+    this.setVisible(false);
+  }
+
+  private setVisible(v: boolean): void {
+    this.dim.setVisible(v);
+    this.panel.setVisible(v);
+    this.title.setVisible(v);
+    this.hint.setVisible(v);
+    this.controls.setVisible(v);
+    for (const i of this.items) i.setVisible(v);
+  }
+
+  get visible(): boolean {
+    return this.shown;
+  }
+
+  /** Choix actuellement sélectionné. */
+  get choice(): PauseChoice {
+    return PAUSE_ITEMS[this.index];
+  }
+
+  /** Vrai quand l'écran « Quitter ? Oui / Non » est affiché (ligne 0 = « Non » = 'resume', ligne 1 = « Oui » = 'quit'). */
+  get confirming(): boolean {
+    return this.confirmingQuit;
+  }
+
+  /** Affiche la confirmation de sortie, « Non » sélectionné par défaut. */
+  askQuit(): void {
+    this.confirmingQuit = true;
+    this.index = 0;
+    this.retranslate();
+  }
+
+  /** Revient au menu pause principal (curseur sur « Reprendre »). */
+  cancelQuit(): void {
+    this.confirmingQuit = false;
+    this.index = 0;
+    this.retranslate();
+  }
+
+  show(): void {
+    this.index = 0;
+    this.confirmingQuit = false;
+    this.shown = true;
+    this.setVisible(true);
+    this.retranslate();
+  }
+
+  hide(): void {
+    this.shown = false;
+    this.setVisible(false);
+  }
+
+  /** Déplace la sélection (−1 haut, +1 bas). */
+  move(delta: number): void {
+    this.index = wrapIndex(this.index, delta, PAUSE_ITEMS.length);
+    this.refreshItems();
+  }
+
+  retranslate(): void {
+    setTextIfChanged(this.title, t('hud.pause'));
+    this.hint.setText(this.confirmingQuit ? t('game.pause.quit.confirm') : t('game.pause.hint'));
+    this.controls.setText(`${t('controls.keyboard')} : ${t('controls.keyboard.move')} - ${t('controls.keyboard.action')} - ${t('controls.keyboard.pause')}\n${t('controls.gamepad')} : ${t('controls.gamepad.move')} - ${t('controls.gamepad.action')} - ${t('controls.gamepad.pause')}`);
+    this.refreshItems();
+  }
+
+  private refreshItems(): void {
+    PAUSE_ITEMS.forEach((c, i) => {
+      const sel = i === this.index;
+      const label = this.confirmingQuit ? (c === 'resume' ? t('game.pause.quit.no') : t('game.pause.quit.yes')) : c === 'resume' ? t('hud.resume') : t('hud.quitToMenu');
+      this.items[i].setText(sel ? `> ${label} <` : label);
+      this.items[i].setColor(sel ? '#ffe27a' : '#ffffff');
+    });
+  }
+
+  destroy(): void {
+    this.dim.destroy();
+    this.panel.destroy();
+    this.title.destroy();
+    this.hint.destroy();
+    this.controls.destroy();
+    for (const i of this.items) i.destroy();
+    this.items.length = 0;
+  }
+}

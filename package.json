@@ -1,0 +1,27 @@
+{
+  "name": "vaelorn-dungeon-crawler",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Les Fragments de l'Aube — dungeon crawler coopératif local (1-4 joueurs), Phaser 3 + TypeScript",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "i18n:merge": "node scripts/merge-i18n.mjs"
+  },
+  "dependencies": {
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vite": "^7.3.7",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}
