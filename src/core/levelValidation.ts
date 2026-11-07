@@ -23,13 +23,31 @@
  *  'enter:<zoneId>' doit désigner une ZoneDef existante de la salle (et atteignable) ; une salle `dark: true` doit contenir au moins
  *  un brasero `lit: true` accessible depuis les spawns (point de recharge, à chaque n) et TOUS ses spawns joueurs doivent se trouver à
  *  ≤ LIGHT_FULL_TILES tuiles d'un brasero `lit: true` ou d'un décor `torch` (zone de départ éclairée).
+ *  Mécanismes inédits (niveaux 4-6) :
+ *   - `statuePair` : 2 statues dont les tuiles ET les `standTile` sont du sol, toutes 4 distinctes ; `facing`/`targetDir` valides ;
+ *     pas déjà résolue au départ ; une statue est SOLIDE (la BFS ne la traverse pas ; aucun spawn/ennemi/plaque/levier/clé/
+ *     piédestal/socle dessus) ; les deux `standTile` doivent être atteignables ;
+ *   - `hourglass` : ≥ 2 leviers (tuiles de sol distinctes), ≥ 1 tuile de herse (sol, distinctes, jamais un levier), `displayTile`
+ *     de sol, `periodMs` > 0, `closeStepMs` > 0 si présent ; la herse est FERMÉE au départ (aucun spawn/ennemi/levier dessus) ; les
+ *     leviers doivent être atteignables (la herse est comptée franchissable) ; une PORTE ne peut pas exiger un sablier dans son
+ *     `requires` (une porte reste ouverte pour toujours : le sablier perdrait son sens) — utiliser `exit.requires` ou `when` ;
+ *   - `lightBridge` : ≥ 1 tuile de sol distinctes, `lanternSlot` entier 0..3, `radiusTiles` > 0 ; le pont est ÉTEINT au départ
+ *     (aucun spawn/ennemi/levier dessus) et toutes ses tuiles doivent être atteignables (comptées franchissables).
+ *   Les jetons d'exigence '<id>' vers ces mécanismes se valident comme les autres (id existant dans la salle).
  *  i18n : si `opts.dictionaries` est fourni, toutes les clés requises (voir `collectRequiredI18nKeys`) doivent exister
  *  et être non vides dans CHAQUE dictionnaire.
  *
  * ── Règle « mécanisme coopératif » ──
- *  Chaque salle doit contenir au moins un mécanisme de type plate/lever/key/block/runePuzzle/brazier avec
- *  `(minPlayers ?? 1) <= 1` (donc présent même à 1 joueur), SAUF salle de boss pure : aucune entrée `mechanisms` et
- *  au moins un ennemi boss (`golem` ou `morvane`).
+ *  Chaque salle doit contenir au moins un mécanisme de type plate/lever/key/block/runePuzzle/brazier/statuePair/hourglass/
+ *  lightBridge avec `(minPlayers ?? 1) <= 1` (donc présent même à 1 joueur), SAUF salle de boss pure : aucune entrée
+ *  `mechanisms` et au moins un ennemi boss (`isBoss` : golem, morvane, frostqueen, forgelord, voidlord) OU demi-boss (`isMiniBoss` : warden, pyromancer,
+ *  wraith) — arène de combat pur ; helpers `isAnyBossKind` de `enemies.ts`. Les demi-boss restent soumis à `validateBossStructure`.
+ *
+ * ── Structure boss (niveaux 4-6) : `validateBossStructure(level, { minMiniBosses })` ──
+ *  Fonction séparée de `validateLevel` : le niveau contient au moins `minMiniBosses` demi-boss (`EnemyDef.isMiniBoss`) présents à
+ *  CHAQUE nombre de joueurs (spawn avec `(minPlayers ?? 1) <= 1`) ; la sortie de chaque salle contenant un demi-boss exige 'clear'
+ *  (directement, ou via une porte dont les `requires` en dépendent) OU est inaccessible tant qu'une porte dépendant de 'clear'
+ *  est fermée ; la salle finale contient un boss (`isBoss`), présent à chaque nombre de joueurs.
  *
  * ── Atteignabilité (n = 1, 2, 3, 4 joueurs) ──
  *  BFS 4-connexe sur les tuiles de sol depuis les n premiers spawns, portes comptées comme franchissables (ouvertes) et
@@ -42,9 +60,10 @@
  */
 
 import { LIGHT_FULL_TILES } from './constants';
+import { isAnyBossKind, isBossKind, isMiniBossKind } from './enemies';
 import type {
   DecorDef,
-  EnemyKind,
+  Dir,
   LevelDef,
   MechanismDef,
   ObjectiveDef,
@@ -71,8 +90,8 @@ export interface I18nKeyRef {
 
 const FLOOR_GLYPHS = new Set(['.', ',']);
 const VALID_GLYPHS = new Set(['#', '.', ',', 'o', '~', ' ']);
-const COOP_TYPES = new Set(['plate', 'lever', 'key', 'block', 'runePuzzle', 'brazier']);
-const BOSS_KINDS = new Set<EnemyKind>(['golem', 'morvane']);
+const COOP_TYPES = new Set(['plate', 'lever', 'key', 'block', 'runePuzzle', 'brazier', 'statuePair', 'hourglass', 'lightBridge']);
+const DIRS = new Set<Dir>(['up', 'down', 'left', 'right']);
 const WALL_DECOR = new Set<DecorDef['type']>(['torch', 'banner']);
 const MAX_SLOT = 3;
 
@@ -122,19 +141,23 @@ function tileKey(room: RoomDef, x: number, y: number): number {
   return y * Math.max(1, rowWidth(room)) + x;
 }
 
-/** Tuiles occupées par un brasero (solide : non traversable) — clés `tileKey`. */
+/** Tuiles occupées par un brasero ou une statue jumelle (solides : non traversables) — clés `tileKey`. */
 function brazierBlocked(room: RoomDef): Set<number> {
   const out = new Set<number>();
   for (const m of room.mechanisms ?? []) {
     if (m.type === 'brazier' && isTile(m.tile)) out.add(tileKey(room, m.tile[0], m.tile[1]));
+    if (m.type === 'statuePair' && Array.isArray(m.statues)) {
+      for (const s of m.statues) if (s && isTile(s.tile)) out.add(tileKey(room, s.tile[0], s.tile[1]));
+    }
   }
   return out;
 }
 
-function bfs(room: RoomDef, sources: readonly TileXY[]): Set<number> {
+function bfs(room: RoomDef, sources: readonly TileXY[], extraBlocked?: ReadonlySet<number>): Set<number> {
   const seen = new Set<number>();
   const queue: TileXY[] = [];
   const blocked = brazierBlocked(room);
+  if (extraBlocked) for (const k of extraBlocked) blocked.add(k);
   for (const s of sources) {
     if (isTile(s) && isFloor(room, s[0], s[1]) && !blocked.has(tileKey(room, s[0], s[1])) && !seen.has(tileKey(room, s[0], s[1]))) {
       seen.add(tileKey(room, s[0], s[1]));
@@ -352,6 +375,10 @@ function validateRoomStatic(room: RoomDef, level: LevelDef, err: (m: string) => 
   const mechIds = new Set<string>();
   const doorTiles = new Map<string, string>();
   const blockTiles = new Map<string, string>();
+  /** Tuiles solides des statues jumelles / herses de sablier (fermées au départ) / ponts de lumière (éteints au départ). */
+  const statueTiles = new Map<string, string>();
+  const gateTiles = new Map<string, string>();
+  const bridgeTiles = new Map<string, string>();
   const tk = (t: TileXY): string => `${t[0]},${t[1]}`;
 
   for (const m of room.mechanisms ?? []) {
@@ -368,6 +395,15 @@ function validateRoomStatic(room: RoomDef, level: LevelDef, err: (m: string) => 
     if (m.type === 'block' && isTile(m.tile)) {
       for (const t of squareTiles(m.tile)) blockTiles.set(tk(t), m.id);
     }
+    if (m.type === 'statuePair' && Array.isArray(m.statues)) {
+      for (const s of m.statues) if (s && isTile(s.tile)) statueTiles.set(tk(s.tile), m.id);
+    }
+    if (m.type === 'hourglass' && Array.isArray(m.gate)) {
+      for (const t of m.gate) if (isTile(t)) gateTiles.set(tk(t), m.id);
+    }
+    if (m.type === 'lightBridge' && Array.isArray(m.tiles)) {
+      for (const t of m.tiles) if (isTile(t)) bridgeTiles.set(tk(t), m.id);
+    }
   }
 
   // exigences
@@ -376,6 +412,9 @@ function validateRoomStatic(room: RoomDef, level: LevelDef, err: (m: string) => 
     for (const r of m.requires ?? []) {
       const pb = requirementProblem(r, room, level, m.id);
       if (pb) err(`${P} : porte "${m.id}" requires "${r}" : ${pb}`);
+      else if (room.mechanisms.some((o) => o.id === r && o.type === 'hourglass')) {
+        err(`${P} : porte "${m.id}" requires "${r}" : un sablier ne peut pas ouvrir une porte (elle reste ouverte pour toujours) — utiliser exit.requires ou when`);
+      }
     }
   }
 
@@ -424,14 +463,47 @@ function validateRoomStatic(room: RoomDef, level: LevelDef, err: (m: string) => 
     overlapCheck(s, `playerSpawns[${i}]`, doorTiles, 'la porte');
     overlapCheck(s, `playerSpawns[${i}]`, blockTiles, 'le bloc');
     overlapCheck(s, `playerSpawns[${i}]`, brazierTiles, 'le brasero');
+    overlapCheck(s, `playerSpawns[${i}]`, statueTiles, 'la statue');
+    overlapCheck(s, `playerSpawns[${i}]`, gateTiles, 'la herse');
+    overlapCheck(s, `playerSpawns[${i}]`, bridgeTiles, 'le pont de lumière');
   });
   (room.enemies ?? []).forEach((e, i) => {
     overlapCheck(e.tile, `ennemi[${i}] (${e.kind})`, doorTiles, 'la porte');
     overlapCheck(e.tile, `ennemi[${i}] (${e.kind})`, blockTiles, 'le bloc');
     overlapCheck(e.tile, `ennemi[${i}] (${e.kind})`, brazierTiles, 'le brasero');
+    overlapCheck(e.tile, `ennemi[${i}] (${e.kind})`, statueTiles, 'la statue');
+    overlapCheck(e.tile, `ennemi[${i}] (${e.kind})`, gateTiles, 'la herse');
+    overlapCheck(e.tile, `ennemi[${i}] (${e.kind})`, bridgeTiles, 'le pont de lumière');
   });
   for (const m of room.mechanisms ?? []) {
-    if (m.type === 'plate') overlapCheck(m.tile, `plaque "${m.id}"`, doorTiles, 'la porte');
+    if (m.type === 'plate') {
+      overlapCheck(m.tile, `plaque "${m.id}"`, doorTiles, 'la porte');
+      overlapCheck(m.tile, `plaque "${m.id}"`, statueTiles, 'la statue');
+    }
+    if (m.type === 'statuePair' && Array.isArray(m.statues)) {
+      // les socles (standTile) ne peuvent être ni une statue (de ce mécanisme ou d'un autre), ni une herse, ni une porte, ni un bloc
+      m.statues.forEach((s, i) => {
+        if (!s) return;
+        overlapCheck(s.standTile, `socle ${i} de "${m.id}"`, statueTiles, 'la statue');
+        overlapCheck(s.standTile, `socle ${i} de "${m.id}"`, doorTiles, 'la porte');
+        overlapCheck(s.standTile, `socle ${i} de "${m.id}"`, blockTiles, 'le bloc');
+        overlapCheck(s.standTile, `socle ${i} de "${m.id}"`, brazierTiles, 'le brasero');
+        overlapCheck(s.standTile, `socle ${i} de "${m.id}"`, gateTiles, 'la herse');
+        overlapCheck(s.tile, `statue ${i} de "${m.id}"`, doorTiles, 'la porte');
+        overlapCheck(s.tile, `statue ${i} de "${m.id}"`, blockTiles, 'le bloc');
+        overlapCheck(s.tile, `statue ${i} de "${m.id}"`, brazierTiles, 'le brasero');
+        overlapCheck(s.tile, `statue ${i} de "${m.id}"`, gateTiles, 'la herse');
+      });
+    }
+    if (m.type === 'hourglass' && Array.isArray(m.levers)) {
+      m.levers.forEach((t, i) => {
+        overlapCheck(t, `levier ${i} du sablier "${m.id}"`, doorTiles, 'la porte');
+        overlapCheck(t, `levier ${i} du sablier "${m.id}"`, blockTiles, 'le bloc');
+        overlapCheck(t, `levier ${i} du sablier "${m.id}"`, statueTiles, 'la statue');
+        overlapCheck(t, `levier ${i} du sablier "${m.id}"`, brazierTiles, 'le brasero');
+        overlapCheck(t, `levier ${i} du sablier "${m.id}"`, bridgeTiles, 'le pont de lumière');
+      });
+    }
     if (m.type === 'brazier') {
       overlapCheck(m.tile, `brasero "${m.id}"`, doorTiles, 'la porte');
       overlapCheck(m.tile, `brasero "${m.id}"`, blockTiles, 'le bloc');
@@ -439,11 +511,14 @@ function validateRoomStatic(room: RoomDef, level: LevelDef, err: (m: string) => 
     if (m.type === 'lever' || m.type === 'key') {
       overlapCheck(m.tile, `${m.type === 'lever' ? 'levier' : 'clé'} "${m.id}"`, doorTiles, 'la porte');
       overlapCheck(m.tile, `${m.type === 'lever' ? 'levier' : 'clé'} "${m.id}"`, blockTiles, 'le bloc');
+      overlapCheck(m.tile, `${m.type === 'lever' ? 'levier' : 'clé'} "${m.id}"`, statueTiles, 'la statue');
+      overlapCheck(m.tile, `${m.type === 'lever' ? 'levier' : 'clé'} "${m.id}"`, gateTiles, 'la herse');
     }
     if (m.type === 'runePuzzle') {
       (m.pedestals ?? []).forEach((p, i) => {
         overlapCheck(p.tile, `piédestal ${i} de "${m.id}"`, doorTiles, 'la porte');
         overlapCheck(p.tile, `piédestal ${i} de "${m.id}"`, blockTiles, 'le bloc');
+        overlapCheck(p.tile, `piédestal ${i} de "${m.id}"`, statueTiles, 'la statue');
       });
     }
   }
@@ -515,7 +590,7 @@ function validateRoomStatic(room: RoomDef, level: LevelDef, err: (m: string) => 
 
   // mécanisme coopératif
   const hasCoop = (room.mechanisms ?? []).some((m) => COOP_TYPES.has(m.type) && (m.minPlayers ?? 1) <= 1);
-  const pureBoss = (room.mechanisms ?? []).length === 0 && (room.enemies ?? []).some((e) => BOSS_KINDS.has(e.kind));
+  const pureBoss = (room.mechanisms ?? []).length === 0 && (room.enemies ?? []).some((e) => isAnyBossKind(e.kind));
   if (!hasCoop && !pureBoss) {
     err(`${P} : aucun mécanisme coopératif (plate/lever/key/block/runePuzzle/brazier présent dès 1 joueur) et ce n'est pas une salle de boss pure`);
   }
@@ -603,6 +678,79 @@ function validateMechanismStatic(
       for (const s of m.sequence ?? []) {
         if (!symbols.has(s)) err(`${P} : ${L} le symbole "${s}" de la séquence n'a pas de piédestal`);
       }
+      break;
+    }
+    case 'statuePair': {
+      if (!DIRS.has(m.targetDir)) err(`${P} : ${L} targetDir invalide "${String(m.targetDir)}"`);
+      if (!Array.isArray(m.statues) || m.statues.length !== 2) {
+        err(`${P} : ${L} doit avoir exactement 2 statues`);
+        break;
+      }
+      const used = new Map<string, string>();
+      m.statues.forEach((s, i) => {
+        if (!s) {
+          err(`${P} : ${L} statue ${i} absente`);
+          return;
+        }
+        tile(s.tile, `${L} statues[${i}].tile`);
+        tile(s.standTile, `${L} statues[${i}].standTile`);
+        if (!DIRS.has(s.facing)) err(`${P} : ${L} statues[${i}].facing invalide "${String(s.facing)}"`);
+        for (const [key, what] of [
+          [s.tile, `statues[${i}].tile`],
+          [s.standTile, `statues[${i}].standTile`],
+        ] as const) {
+          if (!isTile(key)) continue;
+          const k = `${key[0]},${key[1]}`;
+          const other = used.get(k);
+          if (other !== undefined) err(`${P} : ${L} ${what} [${k}] est confondue avec ${other} (les 4 tuiles doivent être distinctes)`);
+          else used.set(k, what);
+        }
+      });
+      if (m.statues.every((s) => s && s.facing === m.targetDir)) {
+        err(`${P} : ${L} est déjà résolue au départ (les deux statues regardent déjà targetDir "${m.targetDir}")`);
+      }
+      break;
+    }
+    case 'hourglass': {
+      if (typeof m.periodMs !== 'number' || !(m.periodMs > 0)) err(`${P} : ${L} periodMs doit être un nombre > 0`);
+      if (m.closeStepMs !== undefined && (typeof m.closeStepMs !== 'number' || !(m.closeStepMs > 0))) {
+        err(`${P} : ${L} closeStepMs doit être un nombre > 0`);
+      }
+      tile(m.displayTile, `${L} displayTile`);
+      const seen = new Map<string, string>();
+      const distinct = (list: unknown, name: string, min: number): void => {
+        if (!Array.isArray(list) || list.length < min) {
+          err(`${P} : ${L} ${name} doit contenir au moins ${min} tuile(s)`);
+          return;
+        }
+        list.forEach((t, i) => {
+          tile(t, `${L} ${name}[${i}]`);
+          if (!isTile(t)) return;
+          const k = `${t[0]},${t[1]}`;
+          const prev = seen.get(k);
+          if (prev !== undefined) err(`${P} : ${L} ${name}[${i}] [${k}] est confondue avec ${prev}`);
+          else seen.set(k, `${name}[${i}]`);
+        });
+      };
+      distinct(m.levers, 'levers', 2);
+      distinct(m.gate, 'gate', 1);
+      break;
+    }
+    case 'lightBridge': {
+      if (!slotOk(m.lanternSlot)) err(`${P} : ${L} lanternSlot doit être un entier 0..3`);
+      if (typeof m.radiusTiles !== 'number' || !(m.radiusTiles > 0)) err(`${P} : ${L} radiusTiles doit être un nombre > 0`);
+      if (!Array.isArray(m.tiles) || m.tiles.length === 0) {
+        err(`${P} : ${L} tiles doit contenir au moins 1 tuile`);
+        break;
+      }
+      const seen = new Set<string>();
+      m.tiles.forEach((t, i) => {
+        tile(t, `${L} tiles[${i}]`);
+        if (!isTile(t)) return;
+        const k = `${t[0]},${t[1]}`;
+        if (seen.has(k)) err(`${P} : ${L} tiles[${i}] [${k}] dupliquée`);
+        seen.add(k);
+      });
       break;
     }
     default:
@@ -758,6 +906,15 @@ function validateReachability(level: LevelDef, usable: Set<string>, err: (m: str
             const used = new Set(m.sequence);
             return m.pedestals.filter((p) => used.has(p.symbol)).every((p) => touch(room, p.tile)) && m.sequence.every((s) => m.pedestals.some((p) => p.symbol === s));
           }
+          case 'statuePair':
+            // statues solides : on agit depuis les socles, qui doivent être atteignables (un joueur par socle, ou allers-retours en solo)
+            return (m.statues ?? []).length === 2 && m.statues.every((s) => inSet(room, s.standTile));
+          case 'hourglass':
+            // la herse est comptée franchissable ; chaque levier s'actionne depuis sa tuile ou une voisine
+            return (m.levers ?? []).length >= 2 && m.levers.every((t) => touch(room, t));
+          case 'lightBridge':
+            // tuiles de sol comptées franchissables (éclairées) : toutes doivent être atteignables
+            return (m.tiles ?? []).length > 0 && m.tiles.every((t) => inSet(room, t));
           default:
             return false;
         }
@@ -836,6 +993,95 @@ function validateReachability(level: LevelDef, usable: Set<string>, err: (m: str
     const ns = collected.get(text) ?? [];
     err(`${text} (n=${ns.join(',')})`);
   }
+}
+
+// ───────────────────────────── Structure boss / demi-boss ─────────────────────────────
+
+/** Options de `validateBossStructure`. */
+export interface BossStructureOptions {
+  /** Nombre minimal de demi-boss (`EnemyDef.isMiniBoss`) que le niveau doit contenir à chaque nombre de joueurs (0 = aucun exigé). */
+  minMiniBosses: number;
+}
+
+/**
+ * Valide la structure « demi-boss / boss » d'un niveau des paliers 4-6 (même convention que `validateLevel` : liste d'erreurs
+ * lisibles en français, vide = conforme). Règles :
+ *  - au moins `opts.minMiniBosses` demi-boss (`EnemyDef.isMiniBoss`, via `ENEMIES`) PRÉSENTS à chaque nombre de joueurs 1..4
+ *    (une apparition avec `minPlayers > n` ne compte pas pour n) ;
+ *  - la sortie de CHAQUE salle contenant une apparition de demi-boss exige la mort du demi-boss : `exit.requires` contient 'clear',
+ *    directement ou par une porte (transitivement via `requires`), OU la zone de sortie est inatteignable depuis les spawns tant
+ *    que les portes dépendant de 'clear' restent fermées ;
+ *  - la salle finale (dernière) contient une apparition de boss (`EnemyDef.isBoss`) présente à chaque nombre de joueurs.
+ * @param level niveau à contrôler
+ * @param opts voir `BossStructureOptions`
+ */
+export function validateBossStructure(level: LevelDef, opts: BossStructureOptions): string[] {
+  const errors: string[] = [];
+  const rooms = level.rooms ?? [];
+  if (!isInt(opts.minMiniBosses) || opts.minMiniBosses < 0) {
+    errors.push(`structure boss : minMiniBosses doit être un entier >= 0 (reçu ${String(opts.minMiniBosses)})`);
+    return errors;
+  }
+  if (rooms.length === 0) {
+    errors.push(`niveau "${level.id}" : aucune salle (structure boss)`);
+    return errors;
+  }
+
+  // demi-boss présents à chaque n
+  const short: string[] = [];
+  for (let n = 1; n <= 4; n++) {
+    let count = 0;
+    for (const room of rooms) {
+      for (const e of room.enemies ?? []) if (isMiniBossKind(e.kind) && (e.minPlayers ?? 1) <= n) count++;
+    }
+    if (count < opts.minMiniBosses) short.push(`${count} à n=${n}`);
+  }
+  if (short.length > 0) errors.push(`niveau "${level.id}" : ${opts.minMiniBosses} demi-boss exigé(s) mais trouvé(s) ${short.join(', ')}`);
+
+  // la sortie des salles à demi-boss exige la victoire
+  for (const room of rooms) {
+    const minis = (room.enemies ?? []).filter((e) => isMiniBossKind(e.kind));
+    if (minis.length === 0) continue;
+    const P = `salle "${room.id}"`;
+    const doorsById = new Map<string, MechanismDef>();
+    for (const m of room.mechanisms ?? []) if (m.type === 'door') doorsById.set(m.id, m);
+    const dependsOnClear = (tokens: readonly string[], seen: Set<string>): boolean =>
+      tokens.some((t) => {
+        if (t === 'clear') return true;
+        const door = doorsById.get(t);
+        if (!door || door.type !== 'door' || seen.has(t)) return false;
+        seen.add(t);
+        return dependsOnClear(door.requires ?? [], seen);
+      });
+    if (dependsOnClear(room.exit?.requires ?? [], new Set())) continue;
+    // sinon : la sortie doit être coupée du reste de la salle par une porte dépendant de 'clear'
+    const clearDoors = [...doorsById.values()].filter((d) => d.type === 'door' && dependsOnClear(d.requires ?? [], new Set()));
+    let sealed = false;
+    if (clearDoors.length > 0 && room.exit?.rect && rectInBounds(room, room.exit.rect)) {
+      const closed = new Set<number>();
+      for (const d of clearDoors) {
+        if (d.type !== 'door') continue;
+        for (const t of d.tiles ?? []) if (isTile(t)) closed.add(tileKey(room, t[0], t[1]));
+      }
+      const reach = bfs(room, (room.playerSpawns ?? []).slice(0, 4), closed);
+      sealed = !rectTiles(room.exit.rect).some((t) => reach.has(tileKey(room, t[0], t[1])));
+    }
+    if (!sealed) {
+      errors.push(
+        `${P} : contient un demi-boss (${minis.map((e) => e.kind).join(', ')}) mais sa sortie n'exige pas 'clear' ` +
+          `(exit.requires doit inclure 'clear', ou une porte qui en dépend et qui barre l'accès à la sortie)`,
+      );
+    }
+  }
+
+  // salle finale : boss présent à chaque n
+  const last = rooms[rooms.length - 1];
+  const missing: number[] = [];
+  for (let n = 1; n <= 4; n++) {
+    if (!(last.enemies ?? []).some((e) => isBossKind(e.kind) && (e.minPlayers ?? 1) <= n)) missing.push(n);
+  }
+  if (missing.length > 0) errors.push(`salle finale "${last.id}" : aucun boss (isBoss) présent (n=${missing.join(',')})`);
+  return errors;
 }
 
 // ───────────────────────────── Fabriques de test ─────────────────────────────

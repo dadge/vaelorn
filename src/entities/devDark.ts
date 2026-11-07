@@ -44,6 +44,20 @@ function occupiedTiles(room: RoomDef): Set<string> {
         add(m.displayTile[0], m.displayTile[1]);
         for (const p of m.pedestals) add(p.tile[0], p.tile[1]);
         break;
+      case 'statuePair':
+        for (const st of m.statues) {
+          add(st.tile[0], st.tile[1]);
+          add(st.standTile[0], st.standTile[1]);
+        }
+        break;
+      case 'hourglass':
+        add(m.displayTile[0], m.displayTile[1]);
+        for (const t of m.levers) add(t[0], t[1]);
+        for (const t of m.gate) add(t[0], t[1]);
+        break;
+      case 'lightBridge':
+        for (const t of m.tiles) add(t[0], t[1]);
+        break;
       default:
         add(m.tile[0], m.tile[1]);
     }

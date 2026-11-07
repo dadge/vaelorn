@@ -14,6 +14,23 @@ function secs(ms: number): string {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
+function describeWhere(def: MechanismDef): string {
+  switch (def.type) {
+    case 'door':
+      return `tuiles ${def.tiles.map((t) => t.join(',')).join(' ')}`;
+    case 'runePuzzle':
+      return `affichage ${def.displayTile.join(',')}`;
+    case 'statuePair':
+      return `statues ${def.statues.map((s) => `${s.tile.join(',')} (socle ${s.standTile.join(',')})`).join(' / ')}`;
+    case 'hourglass':
+      return `leviers ${def.levers.map((t) => t.join(',')).join(' ')}, herse ${def.gate.map((t) => t.join(',')).join(' ')}`;
+    case 'lightBridge':
+      return `pont ${def.tiles.map((t) => t.join(',')).join(' ')} (lanterne slot ${def.lanternSlot}, rayon ${def.radiusTiles})`;
+    default:
+      return `tuile ${def.tile.join(',')}`;
+  }
+}
+
 function describeMechanism(def: MechanismDef, st: MechanismState | undefined): string {
   if (!st) return `${def.id} (${def.type}) : état absent`;
   const flags: string[] = [];
@@ -41,9 +58,20 @@ function describeMechanism(def: MechanismDef, st: MechanismState | undefined): s
     case 'runePuzzle':
       flags.push(st.active ? 'résolue' : `progression ${st.progress}${def.type === 'runePuzzle' ? `/${def.sequence.length}` : ''}`);
       break;
+    case 'statuePair':
+      flags.push(st.active ? 'résolues' : 'non résolues', `statues [${st.facings.join(', ')}]${def.type === 'statuePair' ? ` → cible ${def.targetDir}` : ''}`);
+      break;
+    case 'hourglass':
+      flags.push(
+        st.sandMs > 0 ? `sable ${Math.round(st.sandMs)} ms` : 'sable VIDE',
+        `herse ${st.closedCount}/${def.type === 'hourglass' ? def.gate.length : '?'} fermée(s)`,
+      );
+      break;
+    case 'lightBridge':
+      flags.push(`porteur ${st.bearerId === null ? 'aucun' : `J${st.bearerId + 1}`}`, `éclairé [${st.lit.map((l) => (l ? '1' : '0')).join('')}]`);
+      break;
   }
-  const where =
-    def.type === 'door' ? `tuiles ${def.tiles.map((t) => t.join(',')).join(' ')}` : def.type === 'runePuzzle' ? `affichage ${def.displayTile.join(',')}` : `tuile ${def.tile.join(',')}`;
+  const where = describeWhere(def);
   return `${def.id} (${st.type}, ${where}) : ${flags.join(', ')}`;
 }
 

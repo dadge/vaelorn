@@ -50,8 +50,10 @@ export const MAX_PROJECTILES = 200;
 export const MIN_HIT_FLASH_MS = 90;
 /** Part des PV max qu'un boss peut perdre par fenêtre de `BOSS_DAMAGE_WINDOW_MS` (plafond anti-cumul de spéciaux). */
 export const BOSS_DAMAGE_CAP_FRACTION = 0.2;
-/** Durée (ms) de la fenêtre du plafond de dégâts sur les boss. */
+/** Durée (ms) de la fenêtre du plafond de dégâts sur les boss ET les demi-boss. */
 export const BOSS_DAMAGE_WINDOW_MS = 2000;
+/** Part des PV max qu'un DEMI-boss (niveaux 4-6, `isMiniBoss`) peut perdre par fenêtre de `BOSS_DAMAGE_WINDOW_MS` (plafond plus doux). */
+export const MINIBOSS_DAMAGE_CAP_FRACTION = 0.35;
 
 // ───────────────────────────── Contexte ─────────────────────────────
 
@@ -199,18 +201,19 @@ export function buildPlayerProjectile(
 // ───────────────────────────── Dégâts ─────────────────────────────
 
 /**
- * Plafond glissant de dégâts sur un boss : au plus `BOSS_DAMAGE_CAP_FRACTION` des PV max par fenêtre de
- * `BOSS_DAMAGE_WINDOW_MS` (horloge = `room.elapsedMs`, état = `enemy.data.dmgWinStartMs` / `dmgWinTaken`, JSON pur).
+ * Plafond glissant de dégâts sur un boss : au plus `fraction` des PV max par fenêtre de `BOSS_DAMAGE_WINDOW_MS`
+ * (`BOSS_DAMAGE_CAP_FRACTION` = 20 % pour un boss de fin, `MINIBOSS_DAMAGE_CAP_FRACTION` = 35 % pour un demi-boss ;
+ * horloge = `room.elapsedMs`, état = `enemy.data.dmgWinStartMs` / `dmgWinTaken`, JSON pur et déterministe).
  * Empêche le cumul de spéciaux de réduire un boss à néant (et de sauter les phases). Retourne les dégâts autorisés.
  */
-function capBossDamage(ctx: CombatContext, enemy: EnemyState, applied: number): number {
+function capBossDamage(ctx: CombatContext, enemy: EnemyState, applied: number, fraction: number): number {
   const now = Number.isFinite(ctx.room.elapsedMs) ? ctx.room.elapsedMs : 0;
   const start = enemy.data.dmgWinStartMs;
   if (!Number.isFinite(start) || now < start || now - start >= BOSS_DAMAGE_WINDOW_MS) {
     enemy.data.dmgWinStartMs = now;
     enemy.data.dmgWinTaken = 0;
   }
-  const cap = enemy.maxHp * BOSS_DAMAGE_CAP_FRACTION;
+  const cap = enemy.maxHp * fraction;
   const taken = Number.isFinite(enemy.data.dmgWinTaken) ? enemy.data.dmgWinTaken : 0;
   const allowed = Math.max(0, Math.min(applied, cap - taken));
   enemy.data.dmgWinTaken = taken + allowed;
@@ -240,8 +243,10 @@ export function damageEnemy(
 ): number {
   if (!ctx.damageEnabled || enemy.dead || enemy.hp <= 0 || !(rawDamage > 0)) return 0;
   let applied = damageToEnemy(rawDamage, attacker ? attacker.difficulty : 2);
-  if (ENEMIES[enemy.kind]?.isBoss) {
-    applied = capBossDamage(ctx, enemy, applied);
+  const def = ENEMIES[enemy.kind];
+  const capFraction = def?.isBoss ? BOSS_DAMAGE_CAP_FRACTION : def?.isMiniBoss ? MINIBOSS_DAMAGE_CAP_FRACTION : 0;
+  if (capFraction > 0) {
+    applied = capBossDamage(ctx, enemy, applied, capFraction);
     if (applied <= 0) {
       if (enemy.hitFlashMs < MIN_HIT_FLASH_MS) enemy.hitFlashMs = MIN_HIT_FLASH_MS;
       return 0;

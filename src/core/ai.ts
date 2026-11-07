@@ -36,13 +36,14 @@
  *  telegraphSpread  ouverture totale (radians) de l'éventail annoncé autour de aimAngle, 0 si aucune
  *  hop              slime : 1 en l'air (bond), 0 au sol (animation squash/stretch)
  *  teleportTotalMs / teleportToX / teleportToY / teleportMoved   voir 'teleport'
- *  engaged          boss : 1 une fois le combat engagé (barre de vie à afficher)
+ *  engaged          boss / demi-boss : 1 une fois le combat engagé (barre de vie à afficher)
+ *  zoneCount/zoneX0..2/zoneY0..2/zoneRadius   seigneur du Néant (special VOIDZONE) : cercles de la zone de danger (bosses.ts)
  *  Clés internes (kbx, kby, stunMs, stunImmuneMs, wanderMs, burstMs, strafeMs, seq, combo…) : ne pas utiliser.
  *
- * Pour les boss, `enemy.phase` vaut 0 avant l'engagement puis 1..3 (voir bosses.ts).
+ * Pour les boss et demi-boss, `enemy.phase` vaut 0 avant l'engagement puis 1..N (N = 2 à 4, voir bosses.ts / bossData.ts).
  */
 import { PLAYER_RADIUS } from './constants';
-import { ENEMIES } from './enemies';
+import { ENEMIES, isAnyBossKind, isFlyingKind } from './enemies';
 import { angleBetween, clamp, dirFromVec, dist, vecFromAngle } from './geometry';
 import { ENEMY_SPECIALS, updateBoss } from './bosses';
 import type { EnemyAIContext, EnemyKind, EnemyState, PlayerState, Vec2 } from './types';
@@ -69,6 +70,14 @@ export const ENEMY_RENDER_DATA_KEYS = [
   'teleportToY',
   'teleportMoved',
   'engaged',
+  'zoneCount',
+  'zoneX0',
+  'zoneY0',
+  'zoneX1',
+  'zoneY1',
+  'zoneX2',
+  'zoneY2',
+  'zoneRadius',
 ] as const;
 
 // ───────────────────────────── Constantes ─────────────────────────────
@@ -89,8 +98,6 @@ const STUN_IMMUNE_AFTER_MS = 600;
 /** Distance (px) max d'errance autour du point d'apparition. */
 const WANDER_LEASH_PX = 70;
 
-const FLYING_KINDS: ReadonlySet<EnemyKind> = new Set<EnemyKind>(['bat', 'wisp', 'morvane']);
-
 interface HitProfile {
   /** Facteur de recul (0 = aucun). */
   kb: number;
@@ -108,6 +115,12 @@ const HIT_PROFILES: Readonly<Record<EnemyKind, HitProfile>> = {
   knight: { kb: 0, stunMs: 0 },
   golem: { kb: 0, stunMs: 0 },
   morvane: { kb: 0, stunMs: 0 },
+  warden: { kb: 0, stunMs: 0 },
+  frostqueen: { kb: 0, stunMs: 0 },
+  pyromancer: { kb: 0, stunMs: 0 },
+  forgelord: { kb: 0, stunMs: 0 },
+  wraith: { kb: 0, stunMs: 0 },
+  voidlord: { kb: 0, stunMs: 0 },
 };
 
 interface StrikeProfile {
@@ -151,7 +164,7 @@ function faceAngle(enemy: EnemyState, angle: number): void {
 }
 
 function isFlying(kind: EnemyKind): boolean {
-  return FLYING_KINDS.has(kind);
+  return isFlyingKind(kind);
 }
 
 /** Déplace l'ennemi via la collision du contexte ; retourne la distance réellement parcourue. */
@@ -305,7 +318,7 @@ const BOSS_STUN_DELAY_MAX_MS = 400;
 export function stunEnemy(enemy: EnemyState, ms: number): boolean {
   if (enemy.dead || !(ms > 0) || !Number.isFinite(ms)) return false;
   const def = ENEMIES[enemy.kind];
-  if (def?.isBoss) {
+  if (def && isAnyBossKind(def.kind)) {
     enemy.attackCooldownMs = Math.max(enemy.attackCooldownMs, Math.min(BOSS_STUN_DELAY_MAX_MS, ms * 0.3));
     return false;
   }
@@ -889,12 +902,13 @@ function updateRangedLike(
 /**
  * Un pas d'IA pour un ennemi. Distribue selon `ENEMIES[kind].ai` :
  * 'wander-chase' (slime), 'erratic-flyer' (chauve-souris), 'melee' (squelette, araignée, chevalier),
- * 'ranged' (archer), 'caster' (feu follet), 'boss-golem', 'boss-morvane' (bosses.ts).
+ * 'ranged' (archer), 'caster' (feu follet), 'boss-golem', 'boss-morvane' et les IA des niveaux 4-6
+ * ('miniboss-warden', 'boss-frostqueen', 'miniboss-pyromancer', 'boss-forgelord', 'miniboss-wraith', 'boss-voidlord') (bosses.ts).
  *
  * Ordre : timers (flash, cooldown, immunité de stun) → recul → étourdissement → ciblage → IA.
  * Ciblage : joueur VIVANT le plus proche dans `aggroRadius` (jamais un joueur à terre) avec hystérésis (la cible est
  * conservée tant qu'elle est vivante et dans aggroRadius × 1.4, sauf si un autre joueur est nettement plus proche) ;
- * sans cible : 'idle'. Un boss engagé n'a plus de limite d'aggro.
+ * sans cible : 'idle'. Un boss ou demi-boss engagé n'a plus de limite d'aggro.
  * Mute : `enemy` uniquement (et appelle les effets du contexte : projectiles, invocations, dégâts, événements).
  * @param enemy ennemi à mettre à jour (ignoré s'il est mort)
  * @param ctx contexte fourni par la simulation (dtMs = pas fixe)
@@ -915,7 +929,7 @@ export function updateEnemy(enemy: EnemyState, ctx: EnemyAIContext): void {
   if (tickStun(enemy, dt)) return;
 
   const hadTarget = enemy.targetId >= 0;
-  const aggro = def.isBoss && gd(d, 'engaged') > 0 ? Infinity : def.aggroRadius;
+  const aggro = isAnyBossKind(def.kind) && gd(d, 'engaged') > 0 ? Infinity : def.aggroRadius;
   const target = selectTarget(enemy, ctx, aggro);
   const newlyAggro = target !== null && !hadTarget;
 
@@ -935,6 +949,12 @@ export function updateEnemy(enemy: EnemyState, ctx: EnemyAIContext): void {
       break;
     case 'boss-golem':
     case 'boss-morvane':
+    case 'miniboss-warden':
+    case 'boss-frostqueen':
+    case 'miniboss-pyromancer':
+    case 'boss-forgelord':
+    case 'miniboss-wraith':
+    case 'boss-voidlord':
       updateBoss(enemy, ctx, target, dt);
       break;
   }

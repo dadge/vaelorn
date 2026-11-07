@@ -92,6 +92,51 @@ export const THEME_PALETTES: Readonly<Record<ZoneTheme, ThemePalette>> = {
     accentHi: 0xc8faff,
     accentDeep: 0x1b8cb4,
   },
+  // L4 : cavernes de glace — bleus et blancs, sol givré, murs de glace, éclats cyan
+  frost: {
+    outline: 0x0c1830,
+    void: 0x040a16,
+    floorMid: 0x6a94c4,
+    floorDark: 0x4f78a8,
+    floorLight: 0xaed0ee,
+    wallMid: 0xb4d8f4,
+    wallDark: 0x6a94c4,
+    wallLight: 0xeaf8ff,
+    wallTop: 0x23406e,
+    accent: 0x7af0ff,
+    accentHi: 0xffffff,
+    accentDeep: 0x3a90d8,
+  },
+  // L5 : forge volcanique — rouges, orange et noirs, sol de basalte, lave luisante
+  ember: {
+    outline: 0x1a0a0c,
+    void: 0x0a0405,
+    floorMid: 0x4a3a40,
+    floorDark: 0x362a30,
+    floorLight: 0x6a5560,
+    wallMid: 0x7a3e34,
+    wallDark: 0x3a2024,
+    wallLight: 0x8a5448,
+    wallTop: 0x1e1012,
+    accent: 0xff7a1e,
+    accentHi: 0xffd84a,
+    accentDeep: 0xc2300e,
+  },
+  // L6 : abysse astral — violets et noirs, étoiles, sol cristallin
+  void: {
+    outline: 0x0a0618,
+    void: 0x03020a,
+    floorMid: 0x2a2258,
+    floorDark: 0x161235,
+    floorLight: 0x4a3f94,
+    wallMid: 0x33298a,
+    wallDark: 0x161235,
+    wallLight: 0x8a6ee0,
+    wallTop: 0x0f0b26,
+    accent: 0xb48cff,
+    accentHi: 0xffffff,
+    accentDeep: 0x6a3cd0,
+  },
 };
 
 // ───────────────────────────── Héros ─────────────────────────────
@@ -206,7 +251,29 @@ export const ENEMY_COLORS = {
   knight: { steel: 0x8590b0, steelShade: 0x565f80, steelDark: 0x383e5c, steelLight: 0xc4cce4, plume: 0xc03a6a, plumeShade: 0x822448, shield: 0xe0b030, shieldShade: 0xa87a18, visor: 0xff4a4a },
 } as const;
 
-/** Couleurs des boss 48×48 (Gorgrim, golem de racines ; Morvane, seigneur déchu). */
+/**
+ * Couleurs des demi-boss 32×32 (niveaux 4-6) : gardien de givre (warden), pyromancien, spectre (wraith).
+ * Les frames sont `miniboss_<kind>_<0|1|hurt>`.
+ */
+export const MINIBOSS_COLORS = {
+  warden: {
+    iceHi: 0xeaf8ff, ice: 0xa4d4f4, iceShade: 0x5a90c8, iceDeep: 0x24467c,
+    steel: 0x8296bc, steelShade: 0x4c5c84,
+    glow: 0x7af0ff, glowHi: 0xffffff,
+  },
+  pyromancer: {
+    robeHi: 0xe8553a, robe: 0xb02a22, robeShade: 0x74161a, robeDeep: 0x420c14,
+    face: 0x1a0a14, fireHi: 0xffe27a, fire: 0xff8a1e, fireDeep: 0xe0401a,
+    staff: 0x7a4a26, staffShade: 0x52301a, gold: 0xf5c53d,
+  },
+  wraith: {
+    cloakHi: 0x8472cc, cloak: 0x4e3f96, cloakShade: 0x2e2460, cloakDeep: 0x1a1238,
+    bone: 0xdcd4f0, boneShade: 0xa49cc4,
+    eye: 0x9affd8, eyeDeep: 0x3fe0a8,
+  },
+} as const;
+
+/** Couleurs des boss 48×48 (Gorgrim, golem de racines ; Morvane, seigneur déchu ; + boss des niveaux 4-6). */
 export const BOSS_COLORS = {
   golem: {
     barkHi: 0xb0824c, bark: 0x7e5634, barkShade: 0x573820, barkDeep: 0x3a2414,
@@ -220,6 +287,28 @@ export const BOSS_COLORS = {
     bone: 0xdcd4f0, boneShade: 0xa49cc4,
     red: 0xff3050, redShade: 0xb01830, redDeep: 0x6a1228, lining: 0xc02848,
     crystal: 0x46e6ff, crystalHi: 0xc8faff, crystalShade: 0x1b8cb4,
+  },
+  // Reine des glaces (niveau 4) : robe de givre, couronne d'éclats, sceptre de cristal
+  frostqueen: {
+    gownHi: 0xeaf8ff, gown: 0xa8d6f6, gownShade: 0x5f98d0, gownDeep: 0x23467e,
+    skin: 0xe6f0fa, skinShade: 0xa8bcd8,
+    crownHi: 0xffffff, crown: 0x7af0ff, crownShade: 0x3a90d8,
+    cape: 0x3a5ca8, capeDeep: 0x1c2f66,
+    eye: 0xff4a8a,
+  },
+  // Seigneur de la forge (niveau 5) : armure d'acier noir, fissures de lave, marteau
+  forgelord: {
+    ironHi: 0x7a6a78, iron: 0x4a3c4a, ironShade: 0x2e222e, ironDeep: 0x160f16,
+    lavaHi: 0xffe27a, lava: 0xff8a1e, lavaDeep: 0xd0360e,
+    horn: 0xd8cbb0, hornShade: 0x9c8d72,
+    steelHi: 0xb4b0c0, steel: 0x7a7690,
+  },
+  // Seigneur du Vide (niveau 6) : robe étoilée, œil unique, éclats orbitaux
+  voidlord: {
+    robeHi: 0x5a46b8, robe: 0x32267c, robeShade: 0x1c1450, robeDeep: 0x0c0826,
+    star: 0xffffff, starGold: 0xffe27a,
+    coreHi: 0xf6e0ff, core: 0xd070ff, coreShade: 0x8a2ac0,
+    shard: 0x9a8aff, shardShade: 0x5a46c0,
   },
 } as const;
 
@@ -255,6 +344,44 @@ export const MECH_COLORS = {
   purpleDeep: 0x6a38c0,
   purpleDark: 0x2e1a5c,
   floorGlow: 0xfff6c8,
+} as const;
+
+/**
+ * Mécanismes des niveaux 4-6 : statues jumelles (pierre givrée + yeux lumineux), sablier (verre, sable, bronze),
+ * herse, pont de lumière (planches dorées sur abîme étoilé) et lanterne du porteur.
+ */
+export const PUZZLE_COLORS = {
+  // statues
+  statueHi: 0xdce6f4,
+  statue: 0xa6b4cc,
+  statueShade: 0x6c7a98,
+  statueDeep: 0x3a4262,
+  eyeLit: 0x7af0ff,
+  eyeSolved: 0x7dffb0,
+  // sablier
+  glassHi: 0xe4f8ff,
+  glass: 0xa4d8ec,
+  glassShade: 0x5a98b8,
+  sandHi: 0xffe08a,
+  sand: 0xe8b44a,
+  sandShade: 0xb07a22,
+  frameGold: 0xc8902e,
+  frameDark: 0x6a4818,
+  // herse
+  barHi: 0xa8b0c8,
+  bar: 0x6a7290,
+  barDark: 0x2c3048,
+  // pont de lumière
+  plankHi: 0xfffbe0,
+  plank: 0xffe27a,
+  plankShade: 0xe0a830,
+  abyss: 0x0c0818,
+  abyssMid: 0x1e1440,
+  abyssStar: 0x8a7ad8,
+  // lanterne
+  lanternGlass: 0xffd86a,
+  lanternCore: 0xfff6c8,
+  lanternIron: 0x5a4a3a,
 } as const;
 
 /** Couleurs des glyphes de runes (une couleur vive par symbole). */
@@ -414,7 +541,7 @@ function collect(obj: unknown, out: Set<number>): void {
 export const ALL_PALETTE_COLORS: ReadonlySet<number> = (() => {
   const s = new Set<number>();
   collect(
-    [THEME_PALETTES, HERO_COLORS, ENEMY_COLORS, BOSS_COLORS, HURT_COLORS, MECH_COLORS, RUNE_COLORS, DECOR_COLORS, FX_COLORS, UI_COLORS, LIGHT_COLORS, SLOT_SHADES, SLOT_LIGHTS, PLAYER_COLORS, OUTLINE, WHITE, EYE],
+    [THEME_PALETTES, HERO_COLORS, ENEMY_COLORS, MINIBOSS_COLORS, BOSS_COLORS, HURT_COLORS, MECH_COLORS, PUZZLE_COLORS, RUNE_COLORS, DECOR_COLORS, FX_COLORS, UI_COLORS, LIGHT_COLORS, SLOT_SHADES, SLOT_LIGHTS, PLAYER_COLORS, OUTLINE, WHITE, EYE],
     s,
   );
   return s;
@@ -428,4 +555,4 @@ export function themeColorCount(theme: ZoneTheme): number {
 }
 
 /** Clés d'ennemis disposant d'une palette (les boss ont BOSS_COLORS). */
-export type SmallEnemyKind = Exclude<EnemyKind, 'golem' | 'morvane'>;
+export type SmallEnemyKind = Extract<EnemyKind, 'slime' | 'bat' | 'skeleton' | 'archer' | 'spider' | 'wisp' | 'knight'>;

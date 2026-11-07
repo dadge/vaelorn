@@ -17,7 +17,9 @@
  *      (Danse des lames), puis déclenchement des spéciaux sur front montant de `ActionFrame.special` (joueur vivant, ne relevant
  *      pas, recharge écoulée) → événement `specialUsed` ; `specialReady` est émis en (a) quand la recharge atteint 0 ;
  *  (e) relevage (`updateRevive`) → reviveStarted / reviveInterrupted / playerRevived ;
- *  (f) mécanismes (`updateMechanisms`), `aliveEnemyCount` comptant aussi les apparitions encore en attente (jeton 'clear') ;
+ *  (f) mécanismes (`updateMechanisms`, y compris statues jumelles / sablier / pont de lumière : leurs tuiles solides sont reprises
+ *      par `solidRects()` dès le pas suivant et `ejectPlayersFromSolids` extrait un joueur dont le disque déborde sur une tuile qui
+ *      vient de s'éteindre/fermer), `aliveEnemyCount` comptant aussi les apparitions encore en attente (jeton 'clear') ;
  *  (g) apparitions d'ennemis (vagues, `when`, `minPlayers`) ; chaque `EnemySpawnDef` n'apparaît qu'une fois ;
  *  (h) IA des ennemis (`updateEnemy`) ;
  *  (i) projectiles et impacts ;
@@ -69,7 +71,7 @@ import {
   stepSpecialEffects,
   type CombatContext,
 } from './combat';
-import { getEnemyDef } from './enemies';
+import { getEnemyDef, isAnyBossKind, isFlyingKind } from './enemies';
 import { dirFromVec, distSq, pointInTileRect, tileCenter } from './geometry';
 import { RoomGrid } from './grid';
 import { lightSources, type LightSource } from './light';
@@ -77,8 +79,10 @@ import {
   areAllRequirementsMet,
   brazierAction,
   createRoomMechanisms,
+  hourglassLeverIndex,
   isRequirementMet,
   mechanismSolidRects,
+  statueRotationTarget,
   tileCenterPx,
   updateMechanisms,
   type RequirementContext,
@@ -132,8 +136,7 @@ export const MAX_ALIVE_ENEMIES = 40;
 export const ROOM_ENTER_INVULN_MS = 600;
 /** Vague attribuée aux ennemis invoqués par l'IA (ne retardent pas les vagues suivantes, comptent pour 'clear'). */
 export const SUMMON_WAVE = -1;
-/** Types d'ennemis volants : les fosses ne les bloquent pas (voir `collision.ts`). */
-const FLYING_KINDS: readonly EnemyKind[] = ['bat', 'wisp', 'morvane'];
+// Types d'ennemis volants (fosses non bloquantes, voir `collision.ts`) : `isFlyingKind` (enemies.ts).
 
 /** Durée maximale (ms) d'un pas : un `dtMs` plus grand est tronqué (le rendu doit appeler `step` plusieurs fois). */
 export const MAX_STEP_MS = 100;
@@ -448,7 +451,7 @@ export class GameSimulation implements IGameSimulation {
     return false;
   }
 
-  /** Un mécanisme interactif (levier, piédestal de runes, porte à clé détenue) est-il à portée de `p` ? */
+  /** Un mécanisme interactif (levier, piédestal de runes, porte à clé détenue, brasero, socle de statue, levier de sablier) est-il à portée de `p` ? */
   private interactableNear(p: PlayerState): boolean {
     const n = this.state.playerCount;
     const states = this.state.room.mechanisms;
@@ -472,6 +475,12 @@ export class GameSimulation implements IGameSimulation {
           break;
         case 'brazier':
           if (st.type === 'brazier' && brazierAction(def, st, p, n) !== null) return true;
+          break;
+        case 'statuePair':
+          if (st.type === 'statuePair' && statueRotationTarget(def, st, p) !== null) return true;
+          break;
+        case 'hourglass':
+          if (st.type === 'hourglass' && hourglassLeverIndex(def, p) >= 0) return true;
           break;
         default:
           break;
@@ -720,7 +729,7 @@ export class GameSimulation implements IGameSimulation {
         if (s.phase !== 'playing' || aliveList.length >= MAX_ALIVE_ENEMIES) return -1;
         if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return -1;
         const radius = getEnemyDef(kind).radius;
-        const at = sim.findFreeSpot(pos, radius, cctx.solids, FLYING_KINDS.includes(kind));
+        const at = sim.findFreeSpot(pos, radius, cctx.solids, isFlyingKind(kind));
         if (!at) return -1;
         const enemy = createEnemyState(kind, at, sim.allocId(), SUMMON_WAVE);
         s.room.enemies.push(enemy);
@@ -858,8 +867,8 @@ export class GameSimulation implements IGameSimulation {
         p.attackAnimMs = 0;
       });
     }
-    // Salle de boss : après un redémarrage, les spéciaux ne sont pas prêts d'emblée (moitié de la recharge).
-    const bossRoom = room.enemies.some((e) => getEnemyDef(e.kind).isBoss);
+    // Salle de boss ou de demi-boss : après un redémarrage, les spéciaux ne sont pas prêts d'emblée (moitié de la recharge).
+    const bossRoom = room.enemies.some((e) => isAnyBossKind(e.kind));
     for (const p of s.players) {
       const spCd = getCharacter(p.characterId).special?.cooldownMs ?? 0;
       p.specialCooldownMs = reason === 'restart' && bossRoom ? Math.round(spCd / 2) : 0;
@@ -890,14 +899,18 @@ export class GameSimulation implements IGameSimulation {
  * Crée une simulation neuve sur `level`. Les joueurs apparaissent sur les `playerSpawns` de la première salle, PV pleins
  * (indépendants de la difficulté). Les événements d'entrée (roomEntered 'start', enemySpawned…) sont renvoyés par le
  * premier appel à `step`.
- * @param config joueurs (1 à 4), graine du PRNG (`seed`) ; `config.levelId` est informatif (c'est `level.id` qui fait foi)
+ * `config.startRoomIndex` (reprise d'une sauvegarde, dev `?room=N`) : la simulation démarre dans cette salle (bornée à
+ * [0, nbSalles - 1]) ; les salles précédentes sont marquées validées (`clearedRooms`) et les objectifs personnels qui leur
+ * appartiennent sont considérés accomplis ; l'événement d'entrée est `roomEntered` 'start' avec le bon `roomIndex`.
+ * @param config joueurs (1 à 4), graine du PRNG (`seed`), salle de départ optionnelle ; `config.levelId` est informatif (c'est `level.id` qui fait foi)
  * @param level définition du niveau (non mutée)
  * @throws Error si `config.players` est vide ou si le niveau n'a aucune salle
  */
 export function createSimulation(config: SimConfig, level: LevelDef): GameSimulation {
   if (level.rooms.length === 0) throw new Error(`Le niveau ${level.id} n'a aucune salle`);
   const setups = normalizeSetups(config.players);
-  const first = level.rooms[0];
+  const startIndex = resolveStartRoomIndex(config.startRoomIndex, level.rooms.length);
+  const first = level.rooms[startIndex];
   const spawns = spawnPixels(first);
   const players = setups.map((setup, i) => createPlayerState(setup, spawns[i % spawns.length]));
   const state: GameState = {
@@ -909,16 +922,33 @@ export function createSimulation(config: SimConfig, level: LevelDef): GameSimula
     levelId: level.id,
     playerCount: players.length,
     players,
-    roomIndex: 0,
+    roomIndex: startIndex,
     phase: 'playing',
     phaseTimerMs: 0,
     room: newRoomState(first, players.length),
     objectives: createObjectives(level, players.length),
-    clearedRooms: [],
+    clearedRooms: level.rooms.slice(0, startIndex).map((r) => r.id),
   };
+  // Reprise : les objectifs personnels des salles précédentes sont considérés accomplis (ils persistent entre salles).
+  if (startIndex > 0) {
+    const before = new Set(state.clearedRooms);
+    for (const o of state.objectives) {
+      const def = level.objectives.find((d) => d.id === o.id);
+      if (def && before.has(def.roomId)) {
+        o.done = true;
+        o.progress = 1;
+      }
+    }
+  }
   const sim = new GameSimulation(state, level);
   sim.initialize();
   return sim;
+}
+
+/** Salle de départ valide : entier dans [0, roomCount - 1] ; absent ou non fini → 0. */
+export function resolveStartRoomIndex(value: number | undefined, roomCount: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(Math.max(0, roomCount - 1), Math.floor(value)));
 }
 
 /** Pas fixe recommandé, réexporté pour les appelants. */

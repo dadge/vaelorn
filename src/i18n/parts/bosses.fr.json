@@ -1,0 +1,14 @@
+{
+  "enemy.warden": "Gardien de givre",
+  "enemy.warden.desc": "Demi-boss : frappe lourde, charge et coup de sol. Il entre en rage quand il est à moitié vaincu.",
+  "enemy.frostqueen": "La Reine du Givre",
+  "enemy.frostqueen.desc": "Boss : éclats de glace en éventail et en anneau, glissade, téléportation et chauves-souris. Trois phases.",
+  "enemy.pyromancer": "Pyromancien ardent",
+  "enemy.pyromancer.desc": "Demi-boss : garde ses distances, lance des boules de feu, des novas et invoque des feux follets.",
+  "enemy.forgelord": "Seigneur de la Forge",
+  "enemy.forgelord.desc": "Boss : marteau et onde de choc, rafales de boules de feu, chevaliers invoqués, enrage final. Trois phases.",
+  "enemy.wraith": "Spectre du Néant",
+  "enemy.wraith.desc": "Demi-boss volant : disparaît et réapparaît, tire des traits sombres.",
+  "enemy.voidlord": "Seigneur du Néant",
+  "enemy.voidlord.desc": "Boss final : téléportation, spirales, anneaux, zones de danger et invocations. Quatre phases."
+}

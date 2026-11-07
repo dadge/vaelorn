@@ -8,8 +8,8 @@ import { PLAYER_COLORS } from '../core/constants';
 import { CHARACTERS } from '../core/characters';
 import type { Dir, PlayerState, SpecialKind } from '../core/types';
 import { ATLAS_KEY } from '../render/art';
-import { heroFrame, slashFrame } from '../render/art/animations';
-import { DEPTH_FX, type FxManager } from '../render/fx';
+import { heroFrame, lanternFrame, slashFrame } from '../render/art/animations';
+import { DEPTH_FX, FX_GLOW_KEY, type FxManager } from '../render/fx';
 import { HERO_HIT_FLASH_MS, PosInterp, dirVector, heroFrameFor, invulnVisible, reviveFxFrame, slashAlpha } from './animation';
 import { DEPTH, ySortDepth, type ViewContext } from './common';
 
@@ -30,6 +30,18 @@ export function spinDir(animMsLeft: number, offset = 0): Dir {
 /** Le spécial `kind` fait-il tourner le héros sur lui-même ? */
 export function specialSpins(kind: SpecialKind | undefined): boolean {
   return kind === 'whirlwind' || kind === 'bladeDance';
+}
+
+/** Taille (px) de la texture de halo `fx_glow`. */
+const GLOW_TEXTURE_PX = 64;
+/** Couleur dorée de la lanterne du pont de lumière. */
+const LANTERN_COLOR = 0xffd86a;
+
+/** Éléments de la lanterne du porteur (créés à la demande, voir `PlayerView.setLantern`). */
+interface LanternParts {
+  glow: Phaser.GameObjects.Image;
+  ring: Phaser.GameObjects.Arc;
+  icon: Phaser.GameObjects.Image;
 }
 
 export class PlayerView {
@@ -53,6 +65,10 @@ export class PlayerView {
   private lastFrame = '';
   private lastSlash = '';
   private hitFlashLeftMs = 0;
+  private readonly ctx: ViewContext;
+  private lantern: LanternParts | null = null;
+  /** Rayon (px) du halo de la lanterne portée, ou null (ce joueur ne porte pas de lanterne). */
+  private lanternRadiusPx: number | null = null;
 
   constructor(
     ctx: ViewContext,
@@ -60,6 +76,7 @@ export class PlayerView {
     p: PlayerState,
   ) {
     const { scene, rig } = ctx;
+    this.ctx = ctx;
     this.fx = ctx.fx;
     this.special = CHARACTERS[p.characterId].special?.kind;
     this.color = PLAYER_COLORS[playerId] ?? 0xffffff;
@@ -95,6 +112,14 @@ export class PlayerView {
   }
   get y(): number {
     return this.interp.y;
+  }
+
+  /**
+   * Ce joueur porte la lanterne d'un pont de lumière : halo doré, anneau au rayon d'éclairage et lanterne flottante près de
+   * l'épaule. `null` = pas de lanterne. Purement visuel : l'éclairage réel des tuiles est décidé par la simulation.
+   */
+  setLantern(radiusPx: number | null): void {
+    this.lanternRadiusPx = radiusPx !== null && radiusPx > 0 ? radiusPx : null;
   }
 
   /** Déclenche le flash blanc du lancement d'un spécial. */
@@ -140,6 +165,7 @@ export class PlayerView {
     }
 
     this.updateSpecial(p, x, y, dtMs);
+    this.updateLantern(x, y, timeMs, down);
 
     this.shadow.setPosition(x, y + 4);
     this.ring.setPosition(x, y + 4);
@@ -193,6 +219,33 @@ export class PlayerView {
     }
   }
 
+  /** Halo, anneau et lanterne du porteur (créés à la première utilisation, masqués sinon). */
+  private updateLantern(x: number, y: number, timeMs: number, down: boolean): void {
+    const r = this.lanternRadiusPx;
+    if (r === null || down) {
+      if (this.lantern) {
+        this.lantern.glow.setVisible(false);
+        this.lantern.ring.setVisible(false);
+        this.lantern.icon.setVisible(false);
+      }
+      return;
+    }
+    if (!this.lantern) {
+      const { scene, rig } = this.ctx;
+      const glow = rig.registerWorld(scene.add.image(0, 0, FX_GLOW_KEY));
+      glow.setBlendMode(1).setTint(LANTERN_COLOR).setDepth(DEPTH.shadow + 0.2);
+      const ring = rig.registerWorld(scene.add.circle(0, 0, 10, LANTERN_COLOR, 0));
+      ring.setStrokeStyle(1, LANTERN_COLOR, 0.5).setDepth(DEPTH.decal + 0.3);
+      const icon = rig.registerWorld(scene.add.image(0, 0, ATLAS_KEY, lanternFrame(0)));
+      this.lantern = { glow, ring, icon };
+    }
+    const { glow, ring, icon } = this.lantern;
+    const pulse = 0.5 + 0.5 * Math.sin(timeMs / 240);
+    glow.setVisible(true).setPosition(x, y - 2).setScale((r * 2) / GLOW_TEXTURE_PX).setAlpha(0.2 + 0.06 * pulse);
+    ring.setVisible(true).setPosition(x, y).setRadius(r).setStrokeStyle(1, LANTERN_COLOR, 0.28 + 0.2 * pulse);
+    icon.setVisible(true).setFrame(lanternFrame(timeMs)).setPosition(x + 8, y - 8 + Math.sin(timeMs / 260) * 1.2).setDepth(ySortDepth(y + 5) + 0.6);
+  }
+
   /** Fin de la ruée : nuage de poussière à l'arrivée (la traînée d'images rémanentes est tracée par `SpecialFx`). */
   private updateSpecial(p: PlayerState, x: number, y: number, dtMs: number): void {
     if (this.special === 'dash' && dtMs > 0 && this.prevSpecialAnim > 0 && !(p.specialAnimMs > 0)) {
@@ -212,5 +265,11 @@ export class PlayerView {
     this.reviveFx.destroy();
     this.barBg.destroy();
     this.barFill.destroy();
+    if (this.lantern) {
+      this.lantern.glow.destroy();
+      this.lantern.ring.destroy();
+      this.lantern.icon.destroy();
+      this.lantern = null;
+    }
   }
 }

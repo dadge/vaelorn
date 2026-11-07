@@ -17,8 +17,10 @@ export interface FrameSpec {
 const CHARACTERS: readonly CharacterId[] = ['david', 'sandrine', 'romain', 'valentine', 'aelith', 'brokk', 'grok', 'mira'];
 const DIRS: readonly Dir[] = ['down', 'up', 'left', 'right'];
 const ENEMIES: readonly EnemyKind[] = ['slime', 'bat', 'skeleton', 'archer', 'spider', 'wisp', 'knight'];
-const BOSSES = ['golem', 'morvane'] as const;
-const THEMES: readonly ZoneTheme[] = ['crypt', 'grove', 'citadel'];
+const BOSSES = ['golem', 'morvane', 'frostqueen', 'forgelord', 'voidlord'] as const;
+/** Demi-boss (niveaux 4-6) : frames 32×32 `miniboss_<kind>_<0|1|hurt>`. */
+const MINIBOSSES = ['warden', 'pyromancer', 'wraith'] as const;
+const THEMES: readonly ZoneTheme[] = ['crypt', 'grove', 'citadel', 'frost', 'ember', 'void'];
 const TILE_KINDS = ['floor', 'floor_alt', 'wall', 'wall_top', 'pillar', 'pit', 'void'] as const;
 const RUNES = ['sun', 'moon', 'star', 'eye', 'flame', 'wave'] as const;
 
@@ -48,6 +50,23 @@ export const EXTRA_FRAME_SPECS: readonly FrameSpec[] = [
   { name: 'fx_ember_0', size: [8, 8] },
   { name: 'fx_ember_1', size: [8, 8] },
   { name: 'fx_ember_2', size: [8, 8] },
+  // ── Mécanismes des niveaux 4-6 (src/render/art/mechanisms46.ts) ──
+  /** Statues jumelles : 4 directions, état normal (yeux cyan) et résolu (`_lit`, vert) ; socle d'activation au sol. */
+  ...(['up', 'down', 'left', 'right'] as const).flatMap((d): FrameSpec[] => [
+    { name: `statuepair_${d}`, size: [16, 16] },
+    { name: `statuepair_${d}_lit`, size: [16, 16] },
+  ]),
+  { name: 'statuepair_stand', size: [16, 16] },
+  /** Sablier : niveau de sable du haut 0 (vide) … 4 (plein) ; herse fermée / relevée. */
+  ...[0, 1, 2, 3, 4].map((l): FrameSpec => ({ name: `hourglass_${l}`, size: [16, 16] })),
+  { name: 'gate_closed', size: [16, 16] },
+  { name: 'gate_open', size: [16, 16] },
+  /** Pont de lumière : planches lumineuses / abîme étoilé. */
+  { name: 'bridge_lit', size: [16, 16] },
+  { name: 'bridge_dark', size: [16, 16] },
+  /** Lanterne du porteur (2 frames de flamme), aussi utilisée par le HUD. */
+  { name: 'lantern_0', size: [8, 8] },
+  { name: 'lantern_1', size: [8, 8] },
 ];
 
 /** Toutes les frames du contrat, avec leurs tailles. */
@@ -70,6 +89,11 @@ export function requiredFrameSpecs(): FrameSpec[] {
     add(`boss_${b}_0`, 48);
     add(`boss_${b}_1`, 48);
     add(`boss_${b}_hurt`, 48);
+  }
+  for (const m of MINIBOSSES) {
+    add(`miniboss_${m}_0`, 32);
+    add(`miniboss_${m}_1`, 32);
+    add(`miniboss_${m}_hurt`, 32);
   }
   for (const t of THEMES) for (const k of TILE_KINDS) add(`tile_${t}_${k}`);
   add('plate_up');

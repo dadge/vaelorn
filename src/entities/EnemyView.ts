@@ -8,9 +8,11 @@ import { ENEMIES } from '../core/enemies';
 import type { EnemyState } from '../core/types';
 import { ATLAS_KEY } from '../render/art';
 import { enemyFrame } from '../render/art/animations';
-import { type EnemyVisual, PosInterp, computeEnemyVisual, createEnemyVisual, isBossKind } from './animation';
+import { enemySpriteInfo } from '../render/art/enemyTiers';
+import { bossBarEntries, type BossBarEntry } from '../render/bossBars';
+import { type EnemyVisual, PosInterp, computeEnemyVisual, createEnemyVisual } from './animation';
 import { DEPTH, ySortDepth, type ViewContext } from './common';
-import { telegraphShapes } from './telegraph';
+import { telegraphShapes, voidZones } from './telegraph';
 
 const SPAWN_FADE_MS = 260;
 const BAR_SHOW_MS = 2600;
@@ -18,6 +20,7 @@ const BAR_FADE_MS = 600;
 
 export class EnemyView {
   readonly interp: PosInterp;
+  /** Demi-boss ou boss : pas de petite barre au-dessus de la tête (barre globale en haut de l'écran, voir overlay.ts). */
   readonly boss: boolean;
   /** Dernier numéro de frame de synchronisation où l'ennemi était présent dans l'état (balayage du pool). */
   seen = 0;
@@ -28,6 +31,7 @@ export class EnemyView {
   private readonly drawOffsetY: number;
   private readonly footOffsetY: number;
   private readonly barW: number;
+  private readonly shadowAlpha: number;
   private lastFrame = '';
   private lastHp: number;
   private lastHpChangeMs = -1e9;
@@ -35,16 +39,18 @@ export class EnemyView {
 
   constructor(ctx: ViewContext, e: EnemyState, instant: boolean) {
     const { scene, rig } = ctx;
-    this.boss = isBossKind(e.kind);
-    this.drawOffsetY = this.boss ? -6 : -2;
-    this.footOffsetY = this.boss ? 18 : ENEMIES[e.kind].radius;
+    const info = enemySpriteInfo(e.kind);
+    this.boss = info.tier !== 'small';
+    this.drawOffsetY = info.drawOffsetY;
+    this.footOffsetY = info.footOffsetY ?? ENEMIES[e.kind]?.radius ?? 6;
+    this.shadowAlpha = info.shadowAlpha;
     this.barW = this.boss ? 0 : 12;
     this.interp = new PosInterp(e.pos.x, e.pos.y);
     this.lastHp = e.hp;
     this.ageMs = instant ? SPAWN_FADE_MS : 0;
     this.shadow = rig.registerWorld(scene.add.image(0, 0, ATLAS_KEY, 'fx_shadow'));
-    this.shadow.setAlpha(0.4).setDepth(DEPTH.shadow);
-    if (this.boss) this.shadow.setScale(2.8, 2.2).setAlpha(0.3);
+    this.shadow.setAlpha(this.shadowAlpha).setDepth(DEPTH.shadow);
+    if (this.boss) this.shadow.setScale(info.shadowScale[0], info.shadowScale[1]);
     this.sprite = rig.registerWorld(scene.add.image(0, 0, ATLAS_KEY, enemyFrame(e.kind, 0)));
     if (this.boss) {
       this.barBg = null;
@@ -81,7 +87,7 @@ export class EnemyView {
     else this.sprite.clearTint();
     this.sprite.setDepth(ySortDepth(y + this.footOffsetY));
     this.shadow.setPosition(x, y + this.footOffsetY - 2);
-    this.shadow.setAlpha((this.boss ? 0.3 : 0.4) * visual.alpha * spawnA);
+    this.shadow.setAlpha(this.shadowAlpha * visual.alpha * spawnA);
 
     if (this.barBg && this.barFill) {
       const since = timeMs - this.lastHpChangeMs;
@@ -121,15 +127,21 @@ export class EnemyViews {
   private frameNo = 0;
   private instantNext = true;
   private bossState: EnemyState | null = null;
+  private barEntries: BossBarEntry[] = [];
 
   constructor(private readonly ctx: ViewContext) {
     this.telegraph = ctx.rig.registerWorld(ctx.scene.add.graphics());
     this.telegraph.setDepth(DEPTH.telegraph);
   }
 
-  /** Ennemi boss vivant de la salle (pour la barre de PV globale), ou null. */
+  /** Ennemi boss vivant de la salle (le plus prioritaire), ou null. */
   get boss(): EnemyState | null {
     return this.bossState;
+  }
+
+  /** Barres de PV globales : boss puis demi-boss vivants de la salle (au plus MAX_BOSS_BARS), recalculées à chaque `sync`. */
+  get bossBars(): readonly BossBarEntry[] {
+    return this.barEntries;
   }
 
   /** Nombre de vues actives (tests/debug). */
@@ -145,6 +157,7 @@ export class EnemyViews {
   sync(enemies: readonly EnemyState[], timeMs: number, stepped: boolean, alpha: number, dtMs: number): void {
     this.frameNo++;
     this.bossState = null;
+    this.barEntries = bossBarEntries(enemies, (k) => ENEMIES[k as keyof typeof ENEMIES]);
     let drew = false;
     const g = this.telegraph;
     for (let i = 0; i < enemies.length; i++) {
@@ -159,8 +172,8 @@ export class EnemyViews {
       }
       v.seen = this.frameNo;
       v.update(e, timeMs, stepped, alpha, dtMs, this.visual);
-      if (v.boss && e.hp > 0) this.bossState = e;
-      if (this.visual.windup) {
+      if (v.boss && e.hp > 0 && (!this.bossState || enemySpriteInfo(e.kind).tier === 'boss')) this.bossState = e;
+      if (this.visual.windup || voidZones(e).length > 0) {
         if (!drew) {
           g.clear();
           drew = true;
@@ -244,6 +257,7 @@ export class EnemyViews {
     this.telegraph.clear();
     this.telegraphDirty = false;
     this.bossState = null;
+    this.barEntries = [];
     this.instantNext = true;
   }
 

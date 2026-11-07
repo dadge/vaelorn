@@ -2,7 +2,7 @@
  * Mécanismes coopératifs (logique pure, déterministe, sans Phaser/DOM/Math.random/Date.now).
  *
  * Types gérés : plaques, leviers, clés personnelles, portes, blocs poussables 2×2, réceptacles,
- * énigmes de runes, braseros (voir `types.ts`). Les états (`MechanismState[]`) sont du JSON pur ; ils sont créés
+ * énigmes de runes, braseros, statues jumelles, sablier partagé, pont de lumière (voir `types.ts`). Les états (`MechanismState[]`) sont du JSON pur ; ils sont créés
  * par `createRoomMechanisms` puis mis à jour à chaque pas par `updateMechanisms`.
  *
  * Contrat d'utilisation côté simulation, par pas :
@@ -20,8 +20,30 @@
  *  - Braseros (salles sombres) : SOLIDES (comme une tuile de bloc : `mechanismSolidRects` les inclut, donc ils bloquent aussi
  *    les projectiles et la ligne de vue, et les personnages ne marchent pas dessus) ; waived ou `lit` ⇒ allumés d'office
  *    (`active: true`) ; `interact` à portée = recharger la torche (brasero allumé, torche non pleine) ou l'allumer
- *    (brasero éteint, torche non vide, `ownerSlot` respecté). Priorité d'un appui : porte à clé > levier > rune > brasero.
+ *    (brasero éteint, torche non vide, `ownerSlot` respecté). Priorité d'un appui d'interaction (un seul mécanisme le consomme) :
+ *    porte à clé > levier > rune > statue > sablier > brasero.
  *    Un appui sur un brasero allumé avec une torche pleine n'est PAS consommé.
+ *  - STATUES JUMELLES (`statuePair`, niveau 4) : solides (une tuile chacune, même waived). Un joueur VIVANT dont la tuile
+ *    (`floor(pos/TILE)`) est la `standTile` d'une statue et qui appuie sur `interact` fait pivoter l'AUTRE statue d'un quart de tour
+ *    horaire (up → right → down → left → up) : `statueRotated`. Résolue (`active`, verrouillée : plus aucune rotation) quand les
+ *    deux regardent `targetDir`. Waived : orientées d'office vers `targetDir`. Un appui sur une statue verrouillée n'est PAS consommé.
+ *  - SABLIER (`hourglass`, niveau 5) : `sandMs` s'écoule à chaque pas ; `active` = sable restant > 0 (jeton d'exigence '<id>').
+ *    État initial : sable 0, herse fermée (`closedCount = gate.length`). `interact` à ≤ INTERACT_RANGE d'un levier du sablier :
+ *    sable = `effectiveHourglassPeriodMs` (période × 2 en solo), herse rouverte d'un coup (`hourglassFlipped`). Sable à 0 :
+ *    `hourglassEmpty` (une fois, à la transition) puis une tuile de herse se ferme toutes les `closeStepMs` (défaut 700 ms), dans
+ *    l'ordre de `gate` (`gateClosed`) ; une tuile recouverte (même partiellement) par un joueur VIVANT, un ennemi
+ *    (`args.enemyCircles`) ou un bloc n'est pas fermée tant qu'elle l'est (le chrono attend à 0) : on n'enferme/n'écrase personne.
+ *    Les tuiles fermées sont solides (`mechanismSolidRects`). Waived : herse ouverte en permanence (active, sable = période, immobile).
+ *  - PONT DE LUMIÈRE (`lightBridge`, niveau 6) : à chaque pas, porteur = joueur `lanternSlot % n` s'il est vivant ; s'il est à terre,
+ *    le joueur vivant le plus proche de lui reprend la lanterne (`lightBridgeBearer` : évite l'impasse d'un porteur tombé loin de
+ *    l'équipe) ; aucun porteur seulement si tous sont à terre.
+ *    `lit[i]` = (porteur vivant ET distance(centre de la tuile, porteur) ≤ radiusTiles × TILE) OU tuile occupée par un joueur vivant
+ *    (`floor(pos/TILE)`). Les tuiles NON éclairées sont solides (vide) : une tuile reste donc éclairée tant qu'un joueur dont le
+ *    centre s'y trouve l'occupe (aucun joueur n'est piégé dans le solide ; la simulation extrait de toute façon, via
+ *    `ejectPlayersFromSolids`, un disque qui déborderait sur une tuile qui vient de s'éteindre). `active` = au moins une tuile
+ *    éclairée PAR LE PORTEUR ; comme jeton d'exigence, un pont compte comme satisfait si waived ou si le porteur est vivant
+ *    (`isMechanismSolved`). Waived : tout éclairé, `bearerId: null`. Limite : un ennemi n'éclaire pas les tuiles (un ennemi pris dans
+ *    une tuile qui s'éteint n'est pas extrait).
  *  - Au redémarrage d'une salle (défaite collective), la simulation recrée l'état avec `createRoomMechanisms`
  *    ET vide `player.keys` (les clés de la salle sont perdues avec l'état).
  */
@@ -45,9 +67,13 @@ import type {
   Dir,
   DoorDef,
   DoorState,
+  HourglassDef,
+  HourglassState,
   KeyState,
   LeverDef,
   LeverState,
+  LightBridgeDef,
+  LightBridgeState,
   MechanismState,
   PlateState,
   PlayerId,
@@ -57,6 +83,8 @@ import type {
   RuneState,
   SimEvent,
   SocketState,
+  StatuePairDef,
+  StatuePairState,
   TickInputs,
   TileXY,
   Vec2,
@@ -76,9 +104,15 @@ export const PUSH_AXIS_THRESHOLD = 0.3;
 export const KEY_PICKUP_RADIUS = 10;
 /** Durée (ms) du flash d'erreur d'une énigme de runes. */
 export const RUNE_ERROR_FLASH_MS = 600;
+/** Délai par défaut (ms) entre la fermeture de deux tuiles de herse d'un sablier (`HourglassDef.closeStepMs`). */
+export const DEFAULT_HOURGLASS_CLOSE_STEP_MS = 700;
+/** Multiplicateur de la période d'un sablier quand la partie est jouée en solo. */
+export const HOURGLASS_SOLO_MULT = 2;
 
 const BLOCK_PX = BLOCK_SIZE_TILES * TILE;
 const DIRS: readonly Dir[] = ['up', 'down', 'left', 'right'];
+/** Quart de tour horaire : up → right → down → left → up. */
+const CLOCKWISE: Readonly<Record<Dir, Dir>> = { up: 'right', right: 'down', down: 'left', left: 'up' };
 const DIR_VEC: Readonly<Record<Dir, Vec2>> = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
@@ -261,6 +295,33 @@ export function createRoomMechanisms(room: RoomDef, playerCount: number): Mechan
           errorFlashMs: 0,
           lastPedestal: -1,
         };
+      case 'statuePair': {
+        const facings: [Dir, Dir] = waived ? [def.targetDir, def.targetDir] : [def.statues[0].facing, def.statues[1].facing];
+        const solved = facings[0] === def.targetDir && facings[1] === def.targetDir;
+        return { id: def.id, type: 'statuePair', waived, active: waived || solved, facings, lastRotated: -1 };
+      }
+      case 'hourglass':
+        // Non waived : sable vide, herse entièrement fermée. Waived : herse ouverte en permanence, sable plein et immobile.
+        return {
+          id: def.id,
+          type: 'hourglass',
+          waived,
+          active: waived,
+          sandMs: waived ? effectiveHourglassPeriodMs(def, playerCount) : 0,
+          closedCount: waived ? 0 : def.gate.length,
+          stepMs: 0,
+          lastLever: -1,
+        };
+      case 'lightBridge':
+        // Non waived : tout éteint jusqu'au premier pas de `updateMechanisms`. Waived : tout éclairé, pas de porteur.
+        return {
+          id: def.id,
+          type: 'lightBridge',
+          waived,
+          active: waived,
+          bearerId: null,
+          lit: def.tiles.map(() => waived),
+        };
     }
   });
 }
@@ -273,7 +334,8 @@ export function createRoomMechanisms(room: RoomDef, playerCount: number): Mechan
  *  - 'obj:<id>'   : `ctx.objectiveDone(id)` ;
  *  - 'zone:<id>'  : `ctx.zoneOccupied(id)` ;
  *  - 'enter:<zoneId>' : `ctx.zoneEntered?.(zoneId)` (absent ⇒ false) : un joueur vivant est dans la zone ;
- *  - '<mechId>'   : mécanisme waived, ou actif/ouvert/résolu. Id inconnu ⇒ false.
+ *  - '<mechId>'   : mécanisme résolu (`isMechanismSolved` : waived, ou actif/ouvert/résolu ; sablier = sable restant > 0 ;
+ *                   pont de lumière = porteur vivant). Id inconnu ⇒ false.
  */
 export function isRequirementMet(req: Requirement, ctx: RequirementContext): boolean {
   if (req === 'clear') return ctx.aliveEnemyCount === 0;
@@ -282,7 +344,7 @@ export function isRequirementMet(req: Requirement, ctx: RequirementContext): boo
   if (req.startsWith('enter:')) return ctx.zoneEntered ? ctx.zoneEntered(req.slice(6)) === true : false;
   const st = ctx.mechanisms.find((m) => m.id === req);
   if (!st) return false;
-  return st.waived || st.active;
+  return isMechanismSolved(st);
 }
 
 /** Toutes les exigences sont-elles satisfaites ? (liste vide ⇒ true) */
@@ -309,32 +371,135 @@ export function requiredPushers(def: BlockDef, playerCount: number): number {
   return Math.max(1, Math.min(def.playersRequired ?? 2, Math.max(1, playerCount)));
 }
 
+function tileRectPx(t: readonly [number, number]): PixelRect {
+  return { x: t[0] * TILE, y: t[1] * TILE, w: TILE, h: TILE };
+}
+
 /**
- * Rectangles pixels SOLIDES pour les collisions des personnages : une tuile par tuile de porte FERMÉE,
- * plus les blocs (position interpolée, 32×32) et une tuile par brasero (toujours solide, même waived). À ajouter à la grille statique par la simulation.
+ * Solides FIXES (hors blocs) : tuiles de porte fermée, braseros, statues jumelles (toujours, même waived), tuiles de herse
+ * fermées d'un sablier, tuiles NON éclairées d'un pont de lumière.
  */
-export function mechanismSolidRects(room: RoomDef, mechanisms: readonly MechanismState[]): PixelRect[] {
-  const states = indexStates(mechanisms);
+function staticSolidRects(room: RoomDef, states: ReadonlyMap<string, MechanismState>): PixelRect[] {
   const rects: PixelRect[] = [];
   for (const def of room.mechanisms) {
-    if (def.type === 'door') {
-      const st = states.get(def.id);
-      if (st && st.type === 'door' && !st.open) {
-        for (const t of def.tiles) rects.push({ x: t[0] * TILE, y: t[1] * TILE, w: TILE, h: TILE });
-      }
-    } else if (def.type === 'block') {
-      const st = states.get(def.id);
-      if (st && st.type === 'block') rects.push(blockRect(st));
-    } else if (def.type === 'brazier') {
-      rects.push({ x: def.tile[0] * TILE, y: def.tile[1] * TILE, w: TILE, h: TILE });
+    const st = states.get(def.id);
+    switch (def.type) {
+      case 'door':
+        if (st && st.type === 'door' && !st.open) for (const t of def.tiles) rects.push(tileRectPx(t));
+        break;
+      case 'brazier':
+        rects.push(tileRectPx(def.tile));
+        break;
+      case 'statuePair':
+        for (const sd of def.statues) rects.push(tileRectPx(sd.tile));
+        break;
+      case 'hourglass':
+        if (st && st.type === 'hourglass' && !st.waived) {
+          const n = Math.min(st.closedCount, def.gate.length);
+          for (let i = 0; i < n; i++) rects.push(tileRectPx(def.gate[i]));
+        }
+        break;
+      case 'lightBridge':
+        if (st && st.type === 'lightBridge' && !st.waived) {
+          def.tiles.forEach((t, i) => {
+            if (st.lit[i] !== true) rects.push(tileRectPx(t));
+          });
+        }
+        break;
+      default:
+        break;
     }
   }
   return rects;
 }
 
+/** Quart de tour horaire d'une direction : up → right → down → left → up. */
+export function rotateClockwise(dir: Dir): Dir {
+  return CLOCKWISE[dir];
+}
+
 /**
- * Un disque (centre `pos`, rayon `radius`, 0 = point) touche-t-il une porte fermée ou un bloc ?
- * Les projectiles sont bloqués par ces éléments (en plus des murs de la grille).
+ * Période effective (ms) du sable d'un sablier : `def.periodMs`, MULTIPLIÉE PAR 2 quand la partie est jouée en solo
+ * (`playerCount <= 1`, `HOURGLASS_SOLO_MULT`) : un seul joueur doit retourner le sablier puis courir.
+ */
+export function effectiveHourglassPeriodMs(def: HourglassDef, playerCount: number): number {
+  return def.periodMs * (playerCount <= 1 ? HOURGLASS_SOLO_MULT : 1);
+}
+
+/** Délai effectif (ms) entre deux fermetures de tuiles de herse (`closeStepMs`, défaut `DEFAULT_HOURGLASS_CLOSE_STEP_MS`). */
+export function hourglassCloseStepMs(def: HourglassDef): number {
+  const v = def.closeStepMs;
+  return typeof v === 'number' && v > 0 ? v : DEFAULT_HOURGLASS_CLOSE_STEP_MS;
+}
+
+/** Tuile logique (`floor(pos/TILE)`) occupée par un joueur. */
+function tileOfPlayer(p: PlayerState): TileXY {
+  return [Math.floor(p.pos.x / TILE), Math.floor(p.pos.y / TILE)];
+}
+
+/**
+ * Index (0|1) de la statue dont `p` occupe la `standTile`, ou -1 (joueur à terre, ou sur aucun socle). `p` n'agit alors que sur
+ * l'AUTRE statue (`1 - index`).
+ */
+export function statueStandIndex(def: StatuePairDef, p: PlayerState): -1 | 0 | 1 {
+  if (p.status !== 'alive') return -1;
+  const t = tileOfPlayer(p);
+  for (const i of [0, 1] as const) {
+    const st = def.statues[i].standTile;
+    if (st[0] === t[0] && st[1] === t[1]) return i;
+  }
+  return -1;
+}
+
+/**
+ * Statue qu'un appui d'interaction de `p` ferait pivoter (index 0|1), ou null : mécanisme waived/résolu (verrouillé), `p` à terre
+ * ou hors de tout socle.
+ */
+export function statueRotationTarget(def: StatuePairDef, st: StatuePairState, p: PlayerState): 0 | 1 | null {
+  if (st.waived || st.active) return null;
+  const idx = statueStandIndex(def, p);
+  return idx < 0 ? null : ((1 - idx) as 0 | 1);
+}
+
+/**
+ * Index du levier de sablier le plus proche de `p` à ≤ INTERACT_RANGE (centre de tuile), ou -1 (joueur à terre, trop loin).
+ * Un appui d'interaction à cet endroit retourne le sablier.
+ */
+export function hourglassLeverIndex(def: HourglassDef, p: PlayerState): number {
+  if (p.status !== 'alive') return -1;
+  let best = -1;
+  let bd = Infinity;
+  def.levers.forEach((t, i) => {
+    const d = dist(p.pos, tileCenterPx(t));
+    if (d <= INTERACT_RANGE && d < bd) {
+      bd = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
+/**
+ * Rectangles pixels SOLIDES pour les collisions des personnages : une tuile par tuile de porte FERMÉE,
+ * les blocs (position interpolée, 32×32), une tuile par brasero (toujours solide, même waived), une tuile par statue jumelle
+ * (toujours), les tuiles de herse FERMÉES d'un sablier (les `closedCount` premières de `gate`) et les tuiles NON éclairées d'un
+ * pont de lumière. À ajouter à la grille statique par la simulation.
+ */
+export function mechanismSolidRects(room: RoomDef, mechanisms: readonly MechanismState[]): PixelRect[] {
+  const states = indexStates(mechanisms);
+  const rects = staticSolidRects(room, states);
+  for (const def of room.mechanisms) {
+    if (def.type !== 'block') continue;
+    const st = states.get(def.id);
+    if (st && st.type === 'block') rects.push(blockRect(st));
+  }
+  return rects;
+}
+
+/**
+ * Un disque (centre `pos`, rayon `radius`, 0 = point) touche-t-il un solide de mécanisme (porte fermée, bloc, brasero, statue,
+ * herse de sablier fermée) ? Les projectiles sont bloqués par ces éléments (en plus des murs de la grille). Les tuiles non
+ * éclairées d'un pont de lumière sont comptées aussi (vide solide), comme pour `mechanismSolidRects`.
  */
 export function mechanismBlocksProjectile(
   room: RoomDef,
@@ -348,7 +513,7 @@ export function mechanismBlocksProjectile(
   return false;
 }
 
-/** La tuile (tx,ty) est-elle (au moins partiellement) occupée par une porte fermée ou un bloc ? (IA / chemin) */
+/** La tuile (tx,ty) est-elle (au moins partiellement) occupée par un solide de mécanisme (porte fermée, bloc, brasero, statue, herse fermée, pont éteint) ? (IA / chemin) */
 export function isTileBlockedByMechanism(
   room: RoomDef,
   mechanisms: readonly MechanismState[],
@@ -359,9 +524,15 @@ export function isTileBlockedByMechanism(
   return mechanismSolidRects(room, mechanisms).some((r) => rectsOverlap(r, tileRect));
 }
 
-/** Un mécanisme est-il « résolu » (waived ou actif) ? */
+/**
+ * Un mécanisme est-il « résolu » (jeton d'exigence '<id>' satisfait) ? Waived ou `active`, avec une exception :
+ * un pont de lumière compte comme satisfait tant que son porteur est vivant (`bearerId !== null`), même si le halo ne touche
+ * encore aucune tuile. Sablier : `active` = sable restant > 0 ; statues jumelles : `active` = les deux regardent `targetDir`.
+ */
 export function isMechanismSolved(st: MechanismState): boolean {
-  return st.waived || st.active;
+  if (st.waived) return true;
+  if (st.type === 'lightBridge') return st.bearerId !== null;
+  return st.active;
 }
 
 // ───────────────────────────── Mise à jour ─────────────────────────────
@@ -373,10 +544,13 @@ export function isMechanismSolved(st: MechanismState): boolean {
  * dans `player.keys`). Déterministe. Retourne les événements : `mechanismChanged`, `keyPicked`, `doorOpened`,
  * `runeProgress`.
  *
- * Ordre : timers de leviers → blocs → plaques → réceptacles → portes à clé (consomme l'interaction) →
- * leviers → runes → braseros → ramassage de clés → portes sans clé (résolues en chaîne).
- * Une même pression d'interaction n'est consommée que par UN mécanisme (porte à clé > levier > rune > brasero).
- * Événements possibles en plus : `brazierLit`, `torchRefueled`.
+ * Ordre : timers de leviers → blocs → plaques → réceptacles → ponts de lumière (porteur, tuiles éclairées) → sabliers
+ * (écoulement du sable, fermeture progressive de la herse) → portes à clé (consomme l'interaction) → leviers → runes →
+ * statues jumelles (pivotement) → sabliers (retournement) → braseros → ramassage de clés → portes sans clé (résolues en chaîne).
+ * Une même pression d'interaction n'est consommée que par UN mécanisme (porte à clé > levier > rune > statue > sablier > brasero).
+ * Le sablier s'écoule AVANT son retournement : un appui au pas où le sable atteint 0 rouvre la herse (la tuile éventuellement
+ * fermée à ce pas est rouverte). Événements possibles en plus : `brazierLit`, `torchRefueled`, `statueRotated`,
+ * `hourglassFlipped`, `hourglassEmpty`, `gateClosed`.
  */
 export function updateMechanisms(args: MechanismUpdateArgs): SimEvent[] {
   const events: SimEvent[] = [];
@@ -391,9 +565,13 @@ export function updateMechanisms(args: MechanismUpdateArgs): SimEvent[] {
   updateBlocks(args, states, n);
   updatePlates(args, states, events);
   updateSockets(args, states, events);
+  updateLightBridges(args, states, events);
+  updateHourglassFlow(args, states, events);
   updateKeyDoors(args, states, events, pressed, consumed);
   updateLeverPresses(args, states, events, n, pressed, consumed);
   updateRunes(args, states, events, pressed, consumed);
+  updateStatuePairs(args, states, events, pressed, consumed);
+  updateHourglassFlips(args, states, events, pressed, consumed);
   updateBraziers(args, states, events, n, pressed, consumed);
   updateKeyPickups(args, states, events, n);
   updateOpenDoors(args, states, events);
@@ -682,6 +860,169 @@ function updateBraziers(
   }
 }
 
+// ── Statues jumelles ──
+
+/** Statues jumelles : un joueur vivant sur un socle + interaction fait pivoter l'AUTRE statue d'un quart de tour horaire. */
+function updateStatuePairs(
+  args: MechanismUpdateArgs,
+  states: Map<string, MechanismState>,
+  events: SimEvent[],
+  pressed: (p: PlayerState) => boolean,
+  consumed: Set<PlayerId>,
+): void {
+  const { room, players } = args;
+  for (const p of players) {
+    if (!pressed(p)) continue;
+    for (const def of room.mechanisms) {
+      if (def.type !== 'statuePair') continue;
+      const st = stateOfType(states, def.id, 'statuePair');
+      if (!st) continue;
+      const target = statueRotationTarget(def, st, p);
+      if (target === null) continue;
+      const facing = rotateClockwise(st.facings[target]);
+      st.facings[target] = facing;
+      st.lastRotated = target;
+      events.push({ type: 'statueRotated', mechanismId: def.id, index: target, facing, playerId: p.id });
+      setActive(st, st.facings[0] === def.targetDir && st.facings[1] === def.targetDir, events);
+      consumed.add(p.id);
+      break;
+    }
+  }
+}
+
+// ── Sablier ──
+
+/** La tuile `t` est-elle occupée (même partiellement) par un joueur vivant, un ennemi ou un bloc ? (une herse ne s'y ferme pas) */
+function isTileOccupied(args: MechanismUpdateArgs, states: Map<string, MechanismState>, t: TileXY): boolean {
+  const rect = tileRectPx(t);
+  for (const p of args.players) {
+    if (p.status === 'alive' && circleIntersectsRect(p.pos.x, p.pos.y, PLAYER_RADIUS, rect)) return true;
+  }
+  for (const c of args.enemyCircles ?? []) {
+    if (circleIntersectsRect(c.x, c.y, c.r, rect)) return true;
+  }
+  for (const bs of states.values()) {
+    if (bs.type === 'block' && rectsOverlap(blockRect(bs), rect)) return true;
+  }
+  return false;
+}
+
+/**
+ * Écoulement du sable et fermeture progressive de la herse. Sable à 0 : `hourglassEmpty` (à la transition seulement), puis une
+ * tuile toutes les `closeStepMs` (la première après un délai complet) ; une tuile occupée retarde sa fermeture (le chrono reste
+ * à 0 et la tuile se ferme dès qu'elle est libre).
+ */
+function updateHourglassFlow(args: MechanismUpdateArgs, states: Map<string, MechanismState>, events: SimEvent[]): void {
+  for (const def of args.room.mechanisms) {
+    if (def.type !== 'hourglass') continue;
+    const st = stateOfType(states, def.id, 'hourglass');
+    if (!st || st.waived) continue;
+    const step = hourglassCloseStepMs(def);
+    if (st.sandMs > 0) {
+      st.sandMs = Math.max(0, st.sandMs - args.dtMs);
+      if (st.sandMs <= 0) {
+        st.sandMs = 0;
+        st.stepMs = step;
+        setActive(st, false, events);
+        events.push({ type: 'hourglassEmpty', mechanismId: def.id });
+      }
+      continue;
+    }
+    if (st.closedCount >= def.gate.length) continue;
+    st.stepMs = Math.max(0, st.stepMs - args.dtMs);
+    if (st.stepMs > 0) continue;
+    if (isTileOccupied(args, states, def.gate[st.closedCount])) continue; // attend, chrono à 0
+    st.closedCount += 1;
+    st.stepMs = step;
+    events.push({ type: 'gateClosed', mechanismId: def.id, closedCount: st.closedCount });
+  }
+}
+
+/** Retournement : interaction à portée d'un levier du sablier → sable = période effective, herse rouverte d'un coup. */
+function updateHourglassFlips(
+  args: MechanismUpdateArgs,
+  states: Map<string, MechanismState>,
+  events: SimEvent[],
+  pressed: (p: PlayerState) => boolean,
+  consumed: Set<PlayerId>,
+): void {
+  const { room, players } = args;
+  const n = Math.max(1, players.length);
+  for (const p of players) {
+    if (!pressed(p)) continue;
+    let best: { def: HourglassDef; st: HourglassState; lever: number; d: number } | null = null;
+    for (const def of room.mechanisms) {
+      if (def.type !== 'hourglass') continue;
+      const st = stateOfType(states, def.id, 'hourglass');
+      if (!st || st.waived) continue;
+      const lever = hourglassLeverIndex(def, p);
+      if (lever < 0) continue;
+      const d = dist(p.pos, tileCenterPx(def.levers[lever]));
+      if (best === null || d < best.d) best = { def, st, lever, d };
+    }
+    if (!best) continue;
+    best.st.sandMs = effectiveHourglassPeriodMs(best.def, n);
+    best.st.closedCount = 0;
+    best.st.stepMs = hourglassCloseStepMs(best.def);
+    best.st.lastLever = best.lever;
+    setActive(best.st, true, events);
+    events.push({ type: 'hourglassFlipped', mechanismId: best.def.id, leverIndex: best.lever, playerId: p.id });
+    consumed.add(p.id);
+  }
+}
+
+// ── Pont de lumière ──
+
+/**
+ * Porteur de la lanterne d'un pont : joueur `lanternSlot % n` s'il est vivant. S'il est À TERRE, la lanterne est reprise par le joueur
+ * VIVANT le plus proche de lui (égalité : le plus petit id) : sans cela, un porteur tombé loin de l'équipe (ou sur l'autre rive) laisse
+ * les suiveurs bloqués sur un pont éteint, sans pouvoir ni le relever ni avancer, et sans défaite collective puisqu'ils sont vivants
+ * (impasse). Null seulement si plus personne n'est vivant.
+ */
+export function lightBridgeBearer(def: LightBridgeDef, players: readonly PlayerState[]): PlayerState | null {
+  const n = Math.max(1, players.length);
+  const b = playerById(players, resolveSlot(def.lanternSlot, n));
+  if (b && b.status === 'alive') return b;
+  let best: PlayerState | null = null;
+  let bestD = Infinity;
+  for (const p of players) {
+    if (p.status !== 'alive') continue;
+    const d = b ? dist(p.pos, b.pos) : 0;
+    if (d < bestD) {
+      best = p;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/** Éclairage des tuiles du pont (halo du porteur ou occupation par un joueur vivant), `active` = halo sur au moins une tuile. */
+function updateLightBridges(args: MechanismUpdateArgs, states: Map<string, MechanismState>, events: SimEvent[]): void {
+  for (const def of args.room.mechanisms) {
+    if (def.type !== 'lightBridge') continue;
+    const st = stateOfType(states, def.id, 'lightBridge');
+    if (!st || st.waived) continue;
+    const bearer = lightBridgeBearer(def, args.players);
+    st.bearerId = bearer ? bearer.id : null;
+    const reach = def.radiusTiles * TILE;
+    let byBearer = false;
+    const lit: boolean[] = def.tiles.map((t) => {
+      const lanternLit = bearer !== null && dist(tileCenterPx(t), bearer.pos) <= reach;
+      if (lanternLit) {
+        byBearer = true;
+        return true;
+      }
+      return args.players.some((p) => {
+        if (p.status !== 'alive') return false;
+        const pt = tileOfPlayer(p);
+        return pt[0] === t[0] && pt[1] === t[1];
+      });
+    });
+    st.lit = lit;
+    setActive(st, byBearer, events);
+  }
+}
+
 // ── Blocs ──
 
 function dominantDir(f: ActionFrame): Dir | null {
@@ -810,17 +1151,12 @@ function canBlockMoveTo(
     }
   }
   const target: PixelRect = { x: to[0] * TILE, y: to[1] * TILE, w: BLOCK_PX, h: BLOCK_PX };
+  // Solides fixes : portes fermées, braseros, statues, herse de sablier fermée, tuiles de pont éteintes.
+  for (const r of staticSolidRects(room, states)) {
+    if (rectsOverlap(target, r)) return false;
+  }
   for (const def of room.mechanisms) {
-    if (def.type === 'door') {
-      const ds = stateOfType(states, def.id, 'door');
-      if (ds && !ds.open) {
-        for (const t of def.tiles) {
-          if (rectsOverlap(target, { x: t[0] * TILE, y: t[1] * TILE, w: TILE, h: TILE })) return false;
-        }
-      }
-    } else if (def.type === 'brazier') {
-      if (rectsOverlap(target, { x: def.tile[0] * TILE, y: def.tile[1] * TILE, w: TILE, h: TILE })) return false;
-    } else if (def.type === 'block' && def.id !== blockId) {
+    if (def.type === 'block' && def.id !== blockId) {
       const bs = stateOfType(states, def.id, 'block');
       if (!bs) continue;
       if (rectsOverlap(target, blockRect(bs))) return false;

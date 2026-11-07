@@ -12,6 +12,7 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS, SIM_STEP_MS } from '../core/constants';
 import { CHARACTERS } from '../core/characters';
+import { AutoSaver } from '../core/autoSave';
 import { createSimulation, type GameSimulation } from '../core/simulation';
 import type { GameState, LevelDef, PlayerId, SimEvent, TickInputs, Vec2 } from '../core/types';
 import { PlayerView } from '../entities/PlayerView';
@@ -20,6 +21,7 @@ import { ProjectileViews } from '../entities/ProjectileView';
 import { RoomView } from '../entities/RoomView';
 import { DarkRoomView, torchLightPos } from '../entities/DarkRoomView';
 import { forceDarkLevel, isDevDarkAllowed } from '../entities/devDark';
+import { buildDevTestLevel, devTestKind } from '../entities/devRooms';
 import { GameOverlay, PauseMenu } from '../entities/overlay';
 import { Sfx, sfxForEvent } from '../entities/sfx';
 import type { ViewContext } from '../entities/common';
@@ -32,8 +34,13 @@ import { ViewRig } from '../render/camera';
 import { FxManager, damageNumberColor, ensureFxTextures } from '../render/fx';
 import { SpecialFx } from '../render/specialFx';
 import { heroFrame } from '../render/art/animations';
+import { spriteTier } from '../render/art/enemyTiers';
+import { lanternBearers } from '../render/mechHud';
 import { PlayerHud, TeamPanelHud, createSeparators, reviveRatioFor, specialHintLabel, type HudEnv } from '../render/hud';
 import { HUD_DEPTH, hudRect, hudText } from '../render/hud';
+import { isSavingAllowed } from '../render/saveMenuLogic';
+import { getSaveContext, getSaveRepository } from '../render/saveStore';
+import { getQuickParams } from '../render/menuLogic';
 import { SCENE_KEYS, type DialogueSceneData, type GameSceneData, type GameSession } from '../render/session';
 import { computeLayout, type SplitLayout } from '../render/splitscreen';
 
@@ -50,6 +57,8 @@ export class GameScene extends Phaser.Scene {
   private session!: GameSession;
   private level!: LevelDef;
   private sim!: GameSimulation;
+  /** Sauvegarde automatique (début de salle, fin de niveau) ; null si la scène n'a pas pu démarrer. Aucune règle ici. */
+  private autoSaver: AutoSaver | null = null;
   private layout!: SplitLayout;
   private rig!: ViewRig;
   private fx!: FxManager;
@@ -127,6 +136,7 @@ export class GameScene extends Phaser.Scene {
 
   init(data: GameSceneData): void {
     this.session = data.session;
+    this.autoSaver = null;
     this.roomView = null;
     this.darkRoom = null;
     this.darkIntroShown = false;
@@ -158,7 +168,9 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown);
-    const baseLevel = getLevelByIndex(this.session.levelIndex);
+    // dev : `?dev=statues|hourglass|bridge|bosses` remplace le niveau par une salle de test (voir entities/devRooms.ts)
+    const devKind = devTestKind(typeof window !== 'undefined' ? window.location.search : '', import.meta.env.DEV);
+    const baseLevel = devKind ? buildDevTestLevel(devKind) : getLevelByIndex(this.session.levelIndex);
     if (!baseLevel || this.session.players.length === 0) {
       this.showFatalError();
       return;
@@ -174,7 +186,23 @@ export class GameScene extends Phaser.Scene {
     // simulation (graine dérivée d'un compteur + horloge : la scène peut utiliser Date.now, pas le core)
     sessionCounter++;
     const seed = (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
-    this.sim = createSimulation({ levelId: level.id, players: this.session.players.slice(0, playerCount), seed }, level);
+    // Salle de départ : reprise d'une sauvegarde ou dev `?room=N` (honorée par la simulation, voir SimConfig.startRoomIndex).
+    const players = this.session.players.slice(0, playerCount);
+    this.sim = createSimulation({ levelId: level.id, players, seed, startRoomIndex: this.session.startRoomIndex }, level);
+
+    // Sauvegarde automatique : désactivée en démarrage rapide, `?nosave=1` et paramètres de dev (la vraie sauvegarde n'est jamais écrasée).
+    this.autoSaver = new AutoSaver({
+      repository: getSaveRepository(),
+      context: getSaveContext(),
+      levelId: level.id,
+      players,
+      completedLevelIds: this.session.completedLevelIds,
+      enabled: isSavingAllowed({ quick: getQuickParams()?.quick === true, search }),
+      onError: (err) => {
+        const text = err.code === 'quota' ? t('save.error.quota') : t('save.error.unavailable');
+        this.huds[0]?.showToast(text, 0xff8a6a, 5000);
+      },
+    });
 
     inputManager.setPlayerCount(playerCount);
     inputManager.reset();
@@ -205,8 +233,7 @@ export class GameScene extends Phaser.Scene {
     this.overlay = new GameOverlay(this.ctx, level);
     this.pauseMenu = new PauseMenu(this.ctx);
 
-    // salle de départ (dev : ?room=N) puis construction de la vue de la salle
-    this.applyStartRoom();
+    // construction de la vue de la salle de départ
     this.buildRoom('start');
 
     // écouteurs
@@ -226,26 +253,6 @@ export class GameScene extends Phaser.Scene {
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, t('game.error.level'), { fontFamily: 'monospace', fontSize: '24px', color: '#ff8a8a', align: 'center' })
       .setOrigin(0.5);
     this.time.delayedCall(2200, () => this.scene.start(SCENE_KEYS.Menu));
-  }
-
-  /** Dev : démarre dans la salle `session.startRoomIndex` (premier niveau uniquement ; lue sans modifier la session). */
-  private applyStartRoom(): void {
-    const wanted = this.session.startRoomIndex;
-    if (typeof wanted !== 'number' || !Number.isFinite(wanted) || wanted <= 0) return;
-    const index = Math.min(Math.floor(wanted), this.level.rooms.length - 1);
-    if (index <= 0) return;
-    const priv = this.sim as unknown as { loadRoom?: (i: number, reason: 'start' | 'next' | 'restart', events: SimEvent[]) => void };
-    if (typeof priv.loadRoom !== 'function') return;
-    try {
-      this.sim.step(SIM_STEP_MS, {}); // consomme les événements de la salle 0
-      for (let i = 0; i < index; i++) {
-        const id = this.level.rooms[i].id;
-        if (!this.sim.state.clearedRooms.includes(id)) this.sim.state.clearedRooms.push(id);
-      }
-      priv.loadRoom.call(this.sim, index, 'start', []);
-    } catch (err) {
-      console.warn('[GameScene] salle de départ ignorée', err);
-    }
   }
 
   // ───────────────────────────── Construction de salle ─────────────────────────────
@@ -319,6 +326,7 @@ export class GameScene extends Phaser.Scene {
         const events = this.sim.step(SIM_STEP_MS, inputs);
         if (i === 0) this.latched = null;
         stepped = true;
+        this.autoSaver?.handleEvents(events); // début de salle / fin de niveau : jamais en pleine salle
         for (let k = 0; k < events.length; k++) this.handleEvent(events[k], state);
       }
     }
@@ -340,6 +348,12 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < this.playerViews.length; i++) {
       const p = s.players[i];
       if (p) this.playerViews[i].update(p, timeMs, stepped, alpha, reviveRatioFor(p, s.players), dtMs);
+    }
+    // porteur(s) de lanterne du pont de lumière : halo doré (rendu seulement)
+    const bearers = lanternBearers(s, this.sim.room);
+    for (let i = 0; i < this.playerViews.length; i++) {
+      const b = bearers.find((x) => x.playerId === i);
+      this.playerViews[i].setLantern(b ? b.radiusPx : null);
     }
     this.enemyViews.sync(s.room.enemies, timeMs, stepped, alpha, dtMs);
     this.projViews.sync(s.room.projectiles, stepped, alpha);
@@ -372,7 +386,7 @@ export class GameScene extends Phaser.Scene {
       dtMs,
       sinceEnterMs: this.sinceEnterMs,
       exitOpen,
-      boss: this.enemyViews.boss,
+      bosses: this.enemyViews.bossBars,
     });
   }
 
@@ -443,12 +457,15 @@ export class GameScene extends Phaser.Scene {
         break;
       }
       case 'enemyDied': {
-        const boss = e.kind === 'golem' || e.kind === 'morvane';
-        fx.enemyDeath(e.pos.x, e.pos.y, e.kind, boss);
+        const tier = spriteTier(e.kind); // 'small' | 'mini' (demi-boss) | 'boss'
+        fx.enemyDeath(e.pos.x, e.pos.y, e.kind, tier !== 'small');
         if (e.byPlayer !== null && this.kills[e.byPlayer] !== undefined) this.kills[e.byPlayer]++;
-        if (boss) {
+        if (tier === 'boss') {
           this.rig.shake(700, 0.012);
           this.overlay.flash(0xffffff, 0.7, 500);
+        } else if (tier === 'mini') {
+          this.rig.shake(380, 0.008);
+          this.overlay.flash(0xffffff, 0.35, 300);
         }
         break;
       }
@@ -488,9 +505,54 @@ export class GameScene extends Phaser.Scene {
         fx.burst(e.pos.x, e.pos.y, 3, 0xffffff, 26, 180, 0);
         break;
       case 'bossPhase':
-        this.rig.shake(600, 0.011);
-        this.overlay.flash(0xffffff, 0.5, 400);
+        if (spriteTier(e.kind) === 'mini') {
+          this.rig.shake(400, 0.008);
+          this.overlay.flash(0xffffff, 0.3, 300);
+        } else {
+          this.rig.shake(600, 0.011);
+          this.overlay.flash(0xffffff, 0.5, 400);
+        }
         break;
+      case 'statueRotated': {
+        const c = this.roomView?.mechanismPartCenter(e.mechanismId, e.index);
+        if (c) {
+          fx.ring(c.x, c.y, 0x7af0ff, 26, 420);
+          fx.burst(c.x, c.y - 6, 10, 0xbfeaff, 40, 450, 20);
+          fx.dust(c.x, c.y + 6, 6, 8);
+        }
+        this.rig.shake(100, 0.0025);
+        break;
+      }
+      case 'hourglassFlipped': {
+        const c = this.roomView?.centerOfMechanism(e.mechanismId);
+        if (c) {
+          fx.pulse(c.x, c.y, 0xffc24a);
+          fx.ring(c.x, c.y, 0xffe08a, 28, 500);
+          fx.sparkles(c.x, c.y - 6, 0xffe08a, 10, 8);
+        }
+        break;
+      }
+      case 'hourglassEmpty': {
+        const c = this.roomView?.centerOfMechanism(e.mechanismId);
+        if (c) {
+          fx.ring(c.x, c.y, 0xff4a3a, 34, 600);
+          fx.burst(c.x, c.y - 4, 10, 0xff6a4a, 44, 500, 30);
+        }
+        this.rig.shake(160, 0.004);
+        for (let j = 0; j < this.huds.length; j++) {
+          if (state.players[j]?.status === 'alive') this.huds[j].showToast(t('hud.hourglass.emptyToast'), 0xff7a4a, 2600);
+        }
+        break;
+      }
+      case 'gateClosed': {
+        const c = this.roomView?.mechanismPartCenter(e.mechanismId, Math.max(0, e.closedCount - 1));
+        if (c) {
+          fx.dust(c.x, c.y + 4, 8, 8);
+          fx.ring(c.x, c.y, 0xc8c0b0, 18, 300);
+        }
+        this.rig.shake(120, 0.003);
+        break;
+      }
       case 'brazierLit': {
         const c = this.roomView?.centerOfMechanism(e.brazierId);
         if (c) {
@@ -595,6 +657,8 @@ export class GameScene extends Phaser.Scene {
       stats.downs[i] += Math.max(this.downs[i] ?? 0, s.players[i]?.downCount ?? 0);
       stats.kills[i] += this.kills[i] ?? 0;
     }
+    // Niveaux terminés reportés dans la session (la sauvegarde a déjà été écrite à l'événement `levelCompleted`).
+    if (this.autoSaver) this.session.completedLevelIds = [...this.autoSaver.completedLevelIds];
     const data: DialogueSceneData = { session: this.session, stage: 'outro' };
     this.leaveTo(SCENE_KEYS.Dialogue, data);
   }

@@ -4,12 +4,14 @@
  */
 import type { Bitmap } from './bitmap';
 import { buildBossFrames } from './bosses';
+import { buildBoss46Frames } from './bosses46';
 import { buildDecorFrames } from './decor';
 import { buildEnemyFrames } from './enemies';
 import { buildFxFrames } from './fx';
 import { buildHeroFrames } from './heroes';
 import { buildLightFrames } from './light';
 import { buildKeyIcons, buildMechanismFrames } from './mechanisms';
+import { buildMechanism46Frames } from './mechanisms46';
 import { buildTileFrames } from './tiles';
 import { buildUiFrames } from './ui';
 
@@ -19,8 +21,10 @@ export function buildAllFrames(): Record<string, Bitmap> {
     buildHeroFrames(),
     buildEnemyFrames(),
     buildBossFrames(),
+    buildBoss46Frames(),
     buildTileFrames(),
     buildMechanismFrames(),
+    buildMechanism46Frames(),
     buildDecorFrames(),
     buildFxFrames(),
     buildUiFrames(),

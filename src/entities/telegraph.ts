@@ -27,6 +27,24 @@ function pos(v: number | undefined): number {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
 }
 
+/** Nombre maximal de zones de danger du seigneur du Vide (bosses.ts : VOID_ZONE_MAX). */
+export const VOID_ZONE_MAX = 3;
+
+/** Zones de danger actives d'un ennemi (cercles du « special » VOIDZONE), lues dans `enemy.data` ; vide si aucune. */
+export function voidZones(e: Pick<EnemyState, 'data'>): TelegraphShape[] {
+  const d = e.data;
+  const r = pos(d.zoneRadius);
+  const n = Math.min(VOID_ZONE_MAX, Math.floor(pos(d.zoneCount)));
+  if (n <= 0 || r <= 0) return [];
+  const out: TelegraphShape[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = d[`zoneX${i}`];
+    const y = d[`zoneY${i}`];
+    if (typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y)) out.push({ kind: 'circle', x, y, r });
+  }
+  return out;
+}
+
 /** Formes du télégraphe d'un ennemi en 'windup', centrées sur sa position de rendu (x, y). */
 export function telegraphShapes(e: EnemyState, x: number, y: number): TelegraphShape[] {
   const def = ENEMIES[e.kind];
@@ -39,6 +57,11 @@ export function telegraphShapes(e: EnemyState, x: number, y: number): TelegraphS
   const cos = Math.cos(aim);
   const sin = Math.sin(aim);
   const aimLen = Math.max(AIM_MIN_LEN, Math.min(def.attackRange, AIM_MAX_LEN));
+
+  // zones de danger du seigneur du Vide : 1..3 cercles (centres zoneX0..2 / zoneY0..2, rayon zoneRadius) qui suivent les joueurs
+  // puis se verrouillent ; la simulation remet zoneCount à 0 quand elles disparaissent
+  const zones = voidZones(e);
+  if (zones.length > 0) return zones;
 
   if (spread > 0) {
     const r = length > 0 ? length : aimLen;

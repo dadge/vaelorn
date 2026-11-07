@@ -14,6 +14,12 @@
  * un panneau libre y installe le clavier (s'il est libre).
  *
  * Toute la logique (unicité, curseurs, emplacements, annulation) est pure : voir src/render/menuLogic.ts.
+ *
+ * MODE REPRISE (`data.resume`, entrée « Continuer » du menu) : l'équipe vient de la sauvegarde ; personnages et difficultés
+ * sont verrouillés (tous « prêts » d'office) et l'écran devient une salle d'attente « appuyez sur un bouton pour rejoindre » :
+ * le premier appareil à appuyer prend la place 1 (celui qui a validé « Continuer » la prend d'office), puis la 2, etc. Quand
+ * toutes les places sont réclamées, compte à rebours puis lancement directement dans la salle sauvegardée (dialogue d'intro
+ * seulement si on reprend au début d'un niveau). Voir src/render/saveMenuLogic.ts.
  */
 import Phaser from 'phaser';
 import { CHARACTERS, CHARACTER_IDS } from '../core/characters';
@@ -53,10 +59,12 @@ import {
   type SelectState,
   type SlotsState,
 } from '../render/menuLogic';
+import { createResumeSelectState, resumeDestination } from '../render/saveMenuLogic';
 import {
   SCENE_KEYS,
   type CharacterSelectSceneData,
   type DialogueSceneData,
+  type GameSceneData,
   type GameSession,
   type MenuSceneData,
 } from '../render/session';
@@ -151,6 +159,14 @@ export class CharacterSelectScene extends Phaser.Scene {
   private now = 0;
   private assignHints: string[] = [];
   private assignWarns: string[] = [];
+  /**
+   * Mode REPRISE (« Continuer ») : équipe figée par la sauvegarde. Personnages et difficultés sont pré-remplis et
+   * VERROUILLÉS (tous « prêts », on ne peut ni les changer ni les annuler) ; l'écran ne sert qu'à attribuer les appareils :
+   * chaque joueur appuie sur un bouton pour rejoindre (premier arrivé = place 1, etc.).
+   */
+  private resumeMode = false;
+  /** Vérifie l'état « tous prêts » à la prochaine frame (reprise : l'auto-réclamation a lieu dans `create`). */
+  private pendingStartCheck = false;
 
   constructor() {
     super(SCENE_KEYS.CharacterSelect);
@@ -158,7 +174,9 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   init(data: CharacterSelectSceneData): void {
     this.session = data.session;
-    this.state = createSelectState(data.session);
+    this.resumeMode = data.resume === true;
+    this.pendingStartCheck = false;
+    this.state = this.resumeMode ? createResumeSelectState(data.session) : createSelectState(data.session);
     this.slots = createSlots(data.session.playerCount);
     this.panels = [];
     this.flash = this.state.cursors.map(() => null);
@@ -183,7 +201,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.subtitle = createText(this, GAME_WIDTH / 2, 66, '', { size: 'sm', color: UI_THEME.textDim, origin: [0.5, 0.5], align: 'center' });
     this.countdown = new SegmentBar(this, GAME_WIDTH / 2 - 200, 62, 400, 10, 20, UI_THEME.good);
     this.countdown.graphics.setVisible(false);
-    this.hint = createText(this, GAME_WIDTH / 2, 686, t('pad.select.hint.choose'), { size: 'sm', color: UI_THEME.textDim, origin: [0.5, 0.5], align: 'center' });
+    this.hint = createText(this, GAME_WIDTH / 2, 686, this.resumeMode ? '' : t('pad.select.hint.choose'), { size: 'sm', color: UI_THEME.textDim, origin: [0.5, 0.5], align: 'center' });
     this.hint2 = createText(this, GAME_WIDTH / 2, 706, t('pad.select.hint.menu'), { size: 'sm', color: UI_THEME.textDim, origin: [0.5, 0.5], align: 'center' });
 
     this.buildPanels();
@@ -196,8 +214,12 @@ export class CharacterSelectScene extends Phaser.Scene {
     if (menuDevice && menuDevice.startsWith('gamepad:')) {
       const idx = Number(menuDevice.slice('gamepad:'.length));
       if (listGamepads().some((g) => g.index === idx)) this.slots = claimSlot(this.slots, menuDevice).slots;
+    } else if (this.resumeMode && menuDevice === 'keyboard') {
+      // Reprise : le clavier qui a validé « Continuer » prend aussi la place 1 (sinon il faudrait rappuyer sur Entrée).
+      this.slots = claimSlot(this.slots, menuDevice).slots;
     }
     setMenuDevice(null);
+    this.pendingStartCheck = this.resumeMode;
 
     this.refreshAll();
     this.refreshInputLines();
@@ -212,6 +234,10 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.now = time;
     this.bg.update(time);
     if (this.starting) return;
+    if (this.pendingStartCheck) {
+      this.pendingStartCheck = false;
+      this.updateStartState();
+    }
 
     for (const intent of this.nav.pollMenu()) this.onIntent(intent.source, intent.action);
 
@@ -366,7 +392,9 @@ export class CharacterSelectScene extends Phaser.Scene {
     });
     buttonZone.setInteractive({ useHandCursor: true });
     buttonZone.on('pointerdown', () => {
-      if (this.ensureClaimed(playerId)) this.applyResult(playerId, toggleReady(this.state, playerId));
+      if (!this.ensureClaimed(playerId)) return;
+      if (this.resumeMode) return; // reprise : l'état « prêt » est verrouillé
+      this.applyResult(playerId, toggleReady(this.state, playerId));
     });
 
     return {
@@ -439,10 +467,12 @@ export class CharacterSelectScene extends Phaser.Scene {
       }
       return;
     }
-    if (action === 'back' && !this.state.ready[slot]) {
+    // Reprise : « retour » relâche toujours la place (il n'y a pas de choix de personnage à annuler).
+    if (action === 'back' && (this.resumeMode || !this.state.ready[slot])) {
       this.slots = releaseSlot(this.slots, source).slots;
       this.refreshAll();
       this.refreshInputLines();
+      this.updateStartState(); // reprise : annule le compte à rebours si toutes les places n'étaient plus réclamées
       return;
     }
     this.onAction(slot, action);
@@ -475,6 +505,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       this.slots = r.slots;
       this.refreshAll();
       this.refreshInputLines();
+      this.updateStartState();
     }
     return false;
   }
@@ -547,6 +578,12 @@ export class CharacterSelectScene extends Phaser.Scene {
     inputManager.setPlayerCount(session.playerCount);
     slotsToDevices(this.slots).forEach((device, i) => inputManager.assignDevice(i as PlayerId, device));
     inputManager.reset();
+    if (this.resumeMode && resumeDestination(session) === 'game') {
+      // Reprise en cours de niveau : pas de dialogue d'introduction, directement la salle sauvegardée.
+      const game: GameSceneData = { session };
+      transitionTo(this, SCENE_KEYS.Game, game);
+      return;
+    }
     const data: DialogueSceneData = { session, stage: 'intro' };
     transitionTo(this, SCENE_KEYS.Dialogue, data);
   }
@@ -554,14 +591,15 @@ export class CharacterSelectScene extends Phaser.Scene {
   private backToMenu(): void {
     if (this.starting) return;
     this.starting = true;
-    const data: MenuSceneData = { session: applySelection(this.session, this.state) };
+    // Reprise : on ne renvoie pas l'équipe sauvegardée au menu (elle écraserait les choix de « Nouvelle partie »).
+    const data: MenuSceneData = this.resumeMode ? {} : { session: applySelection(this.session, this.state) };
     transitionTo(this, SCENE_KEYS.Menu, data);
   }
 
   // ───────────────────────────── Rafraîchissement ─────────────────────────────
 
   private relabel(): void {
-    this.hint.setText(t('pad.select.hint.choose'));
+    this.hint.setText(this.resumeMode ? '' : t('pad.select.hint.choose'));
     this.hint2.setText(t('pad.select.hint.menu'));
     for (const p of this.panels) {
       const keys = ['select.strength', 'select.resistance', 'select.speed', 'select.reviveSpeed'] as const;
@@ -583,11 +621,14 @@ export class CharacterSelectScene extends Phaser.Scene {
     const claimedAll = allClaimed(this.slots);
     const everyone = allReady(this.state) && claimedAll;
     const some = this.state.ready.some(Boolean);
-    this.title.setText(everyone ? t('select.start') : t('select.title'));
+    this.title.setText(everyone ? t('select.start') : this.resumeMode ? t('save.resume.title') : t('select.title'));
     this.title.setColor(everyone ? '#5be37d' : '#ffd36b');
     let sub = '';
     if (!everyone) {
-      if (!claimedAll) sub = t('pad.select.joined', { claimed: claimedCount(this.slots), total: this.slots.owners.length });
+      if (!claimedAll && this.resumeMode) {
+        const resume = t('save.resume', { level: this.session.levelIndex + 1, room: (this.session.startRoomIndex ?? 0) + 1 });
+        sub = t('save.resume.subtitle', { resume });
+      } else if (!claimedAll) sub = t('pad.select.joined', { claimed: claimedCount(this.slots), total: this.slots.owners.length });
       else if (some) sub = t('select.waiting');
     }
     this.subtitle.setText(sub);

@@ -21,9 +21,12 @@ de frames** (voir le tableau ci-dessous) : aucun autre code n'a à changer.
 | `atlas.ts` | `packAtlas()` : bitmaps → RGBA + rectangles de frames |
 | `heroKit.ts`, `heroes.ts` | Gabarit corps 16×16 paramétrique + 8 héros (4 directions × 2 marche + attaque + « à terre ») |
 | `enemies.ts`, `bosses.ts`, `tiles.ts`, `mechanisms.ts`, `decor.ts`, `fx.ts`, `ui.ts` | Une famille de sprites par fichier |
+| `bosses46.ts` | Demi-boss 32×32 (warden, pyromancer, wraith) et boss 48×48 (frostqueen, forgelord, voidlord) des niveaux 4-6 |
+| `mechanisms46.ts` | Statues jumelles, sablier, herse, pont de lumière, lanterne (niveaux 4-6) |
+| `enemyTiers.ts` | Table PURE `ENEMY_SPRITES : Record<EnemyKind, …>` : gabarit de sprite (small 16 / mini 32 / boss 48), préfixe de frame, décalages, ombre |
 | `light.ts` | Torches / salles sombres : `brazier_*`, `ui_torch_*`, `fx_ember_0..2` (voir « Lumière et obscurité ») |
 | `../darkness.ts` | `DarknessLayer` : voile d'obscurité (RenderTexture) + pinceaux lumineux générés par code (hors atlas) |
-| `../palettes.ts` | Toutes les couleurs (thèmes `crypt`/`grove`/`citadel`, héros, ennemis, boss, mécanismes, FX, UI) ; `ALL_PALETTE_COLORS` = liste blanche testée |
+| `../palettes.ts` | Toutes les couleurs (thèmes `crypt`/`grove`/`citadel`/`frost`/`ember`/`void`, héros, ennemis, demi-boss, boss, mécanismes, `PUZZLE_COLORS`, FX, UI) ; `ALL_PALETTE_COLORS` = liste blanche testée |
 
 ## Conventions d'usage (pour le rendu)
 
@@ -31,6 +34,8 @@ de frames** (voir le tableau ci-dessous) : aucun autre code n'a à changer.
 - **Héros** : `left` est le miroir exact de `right`. Pieds posés sur la rangée y = 14 de la frame 16×16 ; origine conseillée (0.5, 0.75).
   Les frames « attaque » montrent la pose ; l'arc d'épée est un FX séparé (`fx_slash_<dir>`, 24×24, à centrer devant le héros).
 - **Ennemis** : 2 frames, pas de gauche/droite (`flipX`). Boss 48×48 : `boss_<kind>_hurt` est une silhouette de dégâts (flash) à afficher quelques frames.
+- **Trois gabarits d'ennemis** (toujours à l'échelle 1:1, jamais un 16×16 agrandi) : *petit* `enemy_<kind>_<0|1>` 16×16 ; *demi-boss* `miniboss_<kind>_<0|1|hurt>` 32×32 (warden, pyromancer, wraith : pieds vers y = 29, origine = centre, dessin décalé de −4 px) ; *boss* `boss_<kind>_<0|1|hurt>` 48×48 (golem, morvane, frostqueen, forgelord, voidlord : pieds vers y = 45, décalage −6 px). Les demi-boss et boss ne sont jamais retournés (`flipX`) et n'ont pas de petite barre de PV : leur barre est en bas de l'écran (nom = `EnemyDef.nameKey`). Passer par `enemyFrame(kind, step)` / `bossFrame(kind, step, hurt)` / `enemySpriteInfo(kind)` : le préfixe et la taille viennent de `ENEMY_SPRITES`.
+- **Mécanismes des niveaux 4-6** : `statuepair_<up|down|left|right>` (+ `_lit` = résolu, yeux verts au lieu de cyan) 16×16 posées sur la tuile de la statue (solide) ; `statuepair_stand` = socle d'activation (fond transparent) ; `hourglass_<0..4>` = niveau de sable du haut (`hourglassFrame(fraction)` : vide seulement à 0) ; `gate_closed` (opaque, tuile de herse fermée) / `gate_open` (relevée, sol visible) ; `bridge_lit` (planches de lumière) / `bridge_dark` (abîme étoilé aux planches fantômes), opaques, dessinées PAR-DESSUS le sol `.` du pont ; `lantern_<0|1>` 8×8 (HUD et porteur ; flamme vacillante, `lanternFrame(timeMs)`).
 - **Tuiles** (toutes opaques et raccordables) : `wall` = *face* d'un mur (tuile dont le voisin du bas est praticable), `wall_top` = *dessus* (voisin du bas = mur/vide),
   `pillar` et `pit` incluent leur fond de sol, `void` = hors-salle. `tileFrame(theme, glyph, x, y, below?)` fait ce choix (variante `floor_alt` déterministe selon x,y).
 - **Plaques / leviers** : centre clair, teintables (couleur du slot « qui doit faire quoi »). `door_closed` se répète sur chaque tuile de porte ;
@@ -84,6 +89,12 @@ Taille = taille d'UNE frame. Les motifs utilisent `*` comme joker.
 |---|---|---|---|
 | `boss_golem_*` | 48×48 | Gorgrim, golem de racines (niveau 2) : boss_golem_0, boss_golem_1, boss_golem_hurt (silhouette de dégâts) | Sprite boss 48×48 à 2 frames d'idle/attaque + frame de dégâts (flash rouge/blanc) |
 | `boss_morvane_*` | 48×48 | Morvane, seigneur déchu (niveau 3) : boss_morvane_0, boss_morvane_1, boss_morvane_hurt | Sprite boss 48×48 à 2 frames (cape qui ondule) + frame de dégâts |
+| `miniboss_warden_*` | 32×32 | Gardien de givre (demi-boss, niveau 4) : cuirasse de glace, heaume à cornes, bouclier et marteau de givre. Frames : miniboss_warden_0, miniboss_warden_1, miniboss_warden_hurt | Sprite demi-boss 32×32 à 2 frames + frame de dégâts |
+| `miniboss_pyromancer_*` | 32×32 | Pyromancien (demi-boss, niveau 5) : robe cramoisie à capuche pointue, bâton de flamme, boule de feu | Sprite demi-boss 32×32 à 2 frames + frame de dégâts |
+| `miniboss_wraith_*` | 32×32 | Spectre (demi-boss, niveau 6) : manteau en lambeaux flottant, capuche creuse aux yeux spectraux, faux en os | Sprite demi-boss 32×32 à 2 frames + frame de dégâts |
+| `boss_frostqueen_*` | 48×48 | Reine des glaces (boss, niveau 4) : robe de givre, couronne d'éclats, sceptre de cristal, orbe de glace | Sprite boss 48×48 à 2 frames + frame de dégâts |
+| `boss_forgelord_*` | 48×48 | Seigneur de la forge (boss, niveau 5) : armure d'acier noir, cœur et fissures de lave, casque à cornes, marteau | Sprite boss 48×48 à 2 frames + frame de dégâts |
+| `boss_voidlord_*` | 48×48 | Seigneur du Vide (boss, niveau 6) : robe étoilée, œil unique, couronne d'éclats, orbes d'abysse | Sprite boss 48×48 à 2 frames + frame de dégâts |
 
 ### Tuiles de donjon
 
@@ -92,6 +103,9 @@ Taille = taille d'UNE frame. Les motifs utilisent `*` comme joker.
 | `tile_crypt_*` | 16×16 | Crypte (L1) : sol de dalles bleu-gris, mur de briques, dessus de mur, pilier, fosse, vide | Tileset 16×16 de 7 tuiles raccordables, palette pierre bleu-gris + accents orange |
 | `tile_grove_*` | 16×16 | Bosquet putride (L2) : herbe/terre, mur d'écorce, canopée, souche, mare toxique, vide | Tileset 16×16 de 7 tuiles raccordables, verts/ocres + champignons luisants |
 | `tile_citadel_*` | 16×16 | Citadelle de Morvane (L3) : dalles d'obsidienne, mur incrusté de cristaux, pilier à cristal, abysse, vide | Tileset 16×16 de 7 tuiles raccordables, violets/noirs + cristaux cyan |
+| `tile_frost_*` | 16×16 | Cavernes de glace (L4) : dalles givrées, mur de blocs de glace à stalactites, dessus de mur, pilier de glace, crevasse, vide | Tileset 16×16 de 7 tuiles raccordables, bleus/blancs + éclats cyan |
+| `tile_ember_*` | 16×16 | Forge volcanique (L5) : dalles de basalte à fissures de lave, mur de colonnes, pilier à braise, lac de lave (fosse), vide | Tileset 16×16 de 7 tuiles raccordables, noirs/rouges + lave orange |
+| `tile_void_*` | 16×16 | Abysse astral (L6) : sol cristallin étoilé, mur de cristal sombre, pilier de cristal, vide étoilé (fosse), vide | Tileset 16×16 de 7 tuiles raccordables, violets/noirs + étoiles |
 
 ### Mécanismes
 
@@ -108,6 +122,12 @@ Taille = taille d'UNE frame. Les motifs utilisent `*` comme joker.
 | `exit_*` | 16×16 | Sortie : disque doré à flèche (exit_open) / disque gris à cadenas (exit_closed) | Marqueur de sortie 16×16, 2 états |
 | `pedestal` | 16×16 | Piédestal de pierre (énigme de runes) | Piédestal 16×16 |
 | `rune_*` | 16×16 | Glyphes de runes : sun, moon, star, eye, flame, wave + rune_frame (cadre doré d'affichage) | 6 glyphes symboliques lisibles + cadre 16×16 |
+| `statuepair_<dir>`, `statuepair_<dir>_lit` | 16×16 | Statue jumelle (L4) : gardien de pierre regardant up/down/left/right (yeux et pointe de flèche cyan) ; `_lit` = résolu (vert) | Statue 16×16 en 4 directions × 2 états |
+| `statuepair_stand` | 16×16 | Socle d'activation au sol (disque de pierre à anneau de runes cyan), fond transparent | Socle 16×16 |
+| `hourglass_0` … `hourglass_4` | 16×16 | Sablier partagé (L5) : verre et cadre de bronze, niveau de sable du haut de 0 à 4 | Sablier 16×16 en 5 niveaux |
+| `gate_closed`, `gate_open` | 16×16 | Herse du sablier : grille de fer opaque / herse relevée (sol visible) | Tuile de herse 16×16, 2 états |
+| `bridge_lit`, `bridge_dark` | 16×16 | Pont de lumière (L6) : planches de lumière dorées sur abîme / abîme étoilé aux planches fantômes (opaques) | Tuile de pont 16×16, 2 états |
+| `lantern_0`, `lantern_1` | 8×8 | Lanterne du porteur (HUD et héros) : cage de fer, verre doré, flamme vacillante | Icône 8×8 à 2 frames |
 
 ### Décors
 
@@ -161,6 +181,6 @@ mécanismes, décors, FX et UI). L'encodeur PNG est minimal (zlib de Node) ; le 
 
 ## Tests
 
-`npx vitest run src/render/art/art.test.ts` vérifie : contrat des noms et tailles, absence de doublon, bornes et marges de l'atlas,
+`npx vitest run src/render/art` (art.test.ts, art46.test.ts : gabarits `ENEMY_SPRITES` couvrant tous les `EnemyKind`, frames 32×32 / 48×48, thèmes frost/ember/void, mécanismes 4-6) vérifie : contrat des noms et tailles, absence de doublon, bornes et marges de l'atlas,
 alpha ∈ {0, 255}, aucun pixel hors palette, 12 couleurs max par thème, héros tous distincts (pixels + silhouettes), 4 directions différentes,
 `left` = miroir de `right`, frames de marche différentes, déterminisme (deux builds → mêmes octets), helpers d'`animations.ts`, couverture du manifeste.

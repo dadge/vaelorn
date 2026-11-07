@@ -10,7 +10,7 @@
  */
 import type Phaser from 'phaser';
 import { PLAYER_COLORS } from '../core/constants';
-import { BOSS_COLORS, ENEMY_COLORS, hex } from './palettes';
+import { BOSS_COLORS, ENEMY_COLORS, MINIBOSS_COLORS, hex } from './palettes';
 import { ATLAS_KEY } from './art';
 import { enemyFrame, hitFrame, reviveFrame } from './art/animations';
 import type { EnemyKind, PlayerId } from '../core/types';
@@ -85,6 +85,18 @@ export function enemyDeathColor(kind: EnemyKind): number {
       return BOSS_COLORS.golem.glow;
     case 'morvane':
       return BOSS_COLORS.morvane.red;
+    case 'warden':
+      return MINIBOSS_COLORS.warden.ice;
+    case 'pyromancer':
+      return MINIBOSS_COLORS.pyromancer.fireDeep;
+    case 'wraith':
+      return MINIBOSS_COLORS.wraith.eye;
+    case 'frostqueen':
+      return BOSS_COLORS.frostqueen.crown;
+    case 'forgelord':
+      return BOSS_COLORS.forgelord.lava;
+    case 'voidlord':
+      return BOSS_COLORS.voidlord.core;
     default:
       return 0xffffff;
   }

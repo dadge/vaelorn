@@ -37,6 +37,11 @@ export interface GameSession {
    * niveau suivant.
    */
   startRoomIndex?: number;
+  /**
+   * Niveaux (identifiants) déjà terminés dans cette partie : reportés dans la sauvegarde (voir src/core/save.ts).
+   * Renseigné à la reprise (« Continuer ») ; GameScene le met à jour à la fin de chaque niveau pour le niveau suivant.
+   */
+  completedLevelIds?: string[];
 }
 
 /** Données de MenuScene : session précédente (pour restaurer les choix en revenant au menu). */
@@ -47,6 +52,11 @@ export interface MenuSceneData {
 /** Données de CharacterSelectScene : session construite par le menu (joueurs, difficultés, niveau de départ). */
 export interface CharacterSelectSceneData {
   session: GameSession;
+  /**
+   * Reprise d'une sauvegarde : l'équipe (personnages, difficultés) est FIGÉE et verrouillée ; l'écran ne sert qu'à
+   * attribuer les appareils (chaque joueur appuie sur un bouton pour rejoindre). Voir `src/render/saveMenuLogic.ts`.
+   */
+  resume?: boolean;
 }
 
 /** Événement DOM de dev émis sur `window` quand le démarrage rapide (?quick=1) lance Game ; `detail` = GameSession. */

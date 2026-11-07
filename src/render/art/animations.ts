@@ -5,9 +5,11 @@
 import type { CharacterId, Dir, EnemyKind, TileGlyph, ZoneTheme } from '../../core/types';
 import { hash2 } from './bitmap';
 import { RUNE_NAMES } from './contract';
+import { enemySpriteInfo } from './enemyTiers';
 
 export type HeroAnimState = 'walk' | 'attack' | 'downed';
-export type BossKind = 'golem' | 'morvane';
+/** Types disposant de frames « hurt » (demi-boss 32×32 et boss 48×48). */
+export type BossKind = Extract<EnemyKind, 'golem' | 'morvane' | 'warden' | 'frostqueen' | 'pyromancer' | 'forgelord' | 'wraith' | 'voidlord'>;
 
 /** Normalise un compteur d'animation en 0 | 1. */
 export function stepOf(n: number): 0 | 1 {
@@ -28,16 +30,18 @@ export function heroFrame(characterId: CharacterId, dir: Dir, step: 0 | 1, state
 
 /**
  * Frame d'un ennemi (2 frames : step 0|1, pas de gauche/droite → flipX côté rendu).
- * Pour les boss (`golem`, `morvane`) retourne la frame boss 48×48 correspondante.
+ *  - ennemis standards : `enemy_<kind>_<step>` (16×16) ;
+ *  - demi-boss (warden, pyromancer, wraith) : `miniboss_<kind>_<step>` (32×32) ;
+ *  - boss (golem, morvane, frostqueen, forgelord, voidlord) : `boss_<kind>_<step>` (48×48).
  */
 export function enemyFrame(kind: EnemyKind, step: number): string {
-  if (kind === 'golem' || kind === 'morvane') return `boss_${kind}_${stepOf(step)}`;
-  return `enemy_${kind}_${stepOf(step)}`;
+  return `${enemySpriteInfo(kind).prefix}_${kind}_${stepOf(step)}`;
 }
 
-/** Frame d'un boss 48×48 ; `hurt` = silhouette de dégâts (flash) à la place de l'animation. */
+/** Frame d'un demi-boss / boss ; `hurt` = silhouette de dégâts (flash) à la place de l'animation. */
 export function bossFrame(kind: BossKind, step: number, hurt = false): string {
-  return hurt ? `boss_${kind}_hurt` : `boss_${kind}_${stepOf(step)}`;
+  const prefix = enemySpriteInfo(kind).prefix;
+  return hurt ? `${prefix}_${kind}_hurt` : `${prefix}_${kind}_${stepOf(step)}`;
 }
 
 /** Part (0..1) de sols « alt » parmi les sols '.' (variété visuelle déterministe). */
@@ -165,4 +169,36 @@ export function torchIconFrame(fraction: number): string {
 export function emberFrame(progress: number): string {
   const p = Number.isFinite(progress) ? Math.max(0, Math.min(0.9999, progress)) : 0;
   return `fx_ember_${Math.floor(p * 3)}`;
+}
+
+// ───────────────────────────── Mécanismes des niveaux 4-6 ─────────────────────────────
+
+/** Statue jumelle regardant `dir` : `statuepair_<dir>` (yeux cyan) ou `statuepair_<dir>_lit` (puzzle résolu, vert). */
+export function statueFrame(dir: Dir, solved: boolean): string {
+  return `statuepair_${dir}${solved ? '_lit' : ''}`;
+}
+
+/** Nombre de niveaux de sable du sablier (frames `hourglass_0` … `hourglass_4`). */
+export const HOURGLASS_SAND_LEVELS = 4;
+
+/** Sablier selon la fraction de sable restante (0..1, hors bornes/NaN tolérés) : `hourglass_<0..4>` ; vide uniquement si fraction ≤ 0. */
+export function hourglassFrame(fraction: number): string {
+  const f = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0;
+  const level = f <= 0 ? 0 : Math.max(1, Math.round(f * HOURGLASS_SAND_LEVELS));
+  return `hourglass_${level}`;
+}
+
+/** Tuile de herse : `gate_closed` (barreaux) ou `gate_open` (relevée). */
+export function gateFrame(closed: boolean): string {
+  return closed ? 'gate_closed' : 'gate_open';
+}
+
+/** Tuile de pont de lumière : `bridge_lit` (planches de lumière) ou `bridge_dark` (abîme). */
+export function bridgeFrame(lit: boolean): string {
+  return lit ? 'bridge_lit' : 'bridge_dark';
+}
+
+/** Lanterne du porteur : `lantern_<0|1>`, vacille à ~7 Hz. */
+export function lanternFrame(timeMs: number): string {
+  return `lantern_${stepOf((Number.isFinite(timeMs) ? timeMs : 0) / 140)}`;
 }

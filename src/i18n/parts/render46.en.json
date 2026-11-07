@@ -1,0 +1,18 @@
+{
+  "dev.label.bridge": "Light bridge",
+  "dev.label.hourglass": "Hourglass",
+  "dev.label.statues": "Twin statue",
+  "dev.level.name": "Test room (dev)",
+  "dev.objective": "Test objective",
+  "dev.room.bosses": "Test: mini-bosses and bosses",
+  "dev.room.bridge": "Test: light bridge",
+  "dev.room.hourglass": "Test: shared hourglass",
+  "dev.room.statues": "Test: twin statues",
+  "hint.flipHourglass": "Press Action to flip the hourglass",
+  "hint.rotateStatue": "Press Action to rotate the other statue",
+  "hud.hourglass.empty": "Hourglass empty!",
+  "hud.hourglass.emptyToast": "The sand has run out: the gate is closing!",
+  "hud.hourglass.sand": "Hourglass: {seconds} s",
+  "hud.lantern.bearer": "You carry the lantern: guide the others",
+  "hud.lantern.follow": "Stay in {name}'s light"
+}

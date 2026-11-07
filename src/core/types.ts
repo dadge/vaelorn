@@ -166,7 +166,14 @@ export type EnemyKind =
   | 'wisp'
   | 'knight'
   | 'golem' // boss niveau 2 (Gorgrim)
-  | 'morvane'; // boss final niveau 3
+  | 'morvane' // boss final niveau 3
+  // ── Niveaux 4-6 : un demi-boss par « famille » (obligatoires à vaincre) + un boss de fin par niveau ──
+  | 'warden' // demi-boss niveau 4 (gardien de givre)
+  | 'frostqueen' // boss final niveau 4
+  | 'pyromancer' // demi-boss niveau 5
+  | 'forgelord' // boss final niveau 5
+  | 'wraith' // demi-boss niveau 6
+  | 'voidlord'; // boss final niveau 6
 
 export type EnemyAI =
   | 'wander-chase'
@@ -175,7 +182,13 @@ export type EnemyAI =
   | 'ranged'
   | 'caster'
   | 'boss-golem'
-  | 'boss-morvane';
+  | 'boss-morvane'
+  | 'miniboss-warden'
+  | 'boss-frostqueen'
+  | 'miniboss-pyromancer'
+  | 'boss-forgelord'
+  | 'miniboss-wraith'
+  | 'boss-voidlord';
 
 export interface EnemyDef {
   kind: EnemyKind;
@@ -193,7 +206,13 @@ export interface EnemyDef {
   attackCooldownMs: number;
   /** Rayon d'aggro (px). */
   aggroRadius: number;
+  /** Boss de fin de niveau (plafond de dégâts par fenêtre, barre de vie de boss…). */
   isBoss: boolean;
+  /**
+   * Demi-boss (niveaux 4-6) : ennemi nettement plus puissant qu'un ennemi normal, placé à mi-parcours ou dans une salle clé,
+   * à vaincre pour terminer le niveau (la sortie de sa salle exige 'clear'). `isBoss` reste false pour un demi-boss.
+   */
+  isMiniBoss?: boolean;
   /** Sprite : enemy_<kind>_<0|1> ou boss_<kind>_<0|1>. */
 }
 
@@ -287,7 +306,7 @@ export interface PlayerState {
 
 // ───────────────────────────── Données de niveau ─────────────────────────────
 
-export type ZoneTheme = 'crypt' | 'grove' | 'citadel';
+export type ZoneTheme = 'crypt' | 'grove' | 'citadel' | 'frost' | 'ember' | 'void';
 
 /**
  * Glyphes de la grille (RoomDef.layout) :
@@ -414,6 +433,57 @@ export interface BrazierDef extends MechanismBase {
   lightRadiusTiles?: number;
 }
 
+/**
+ * STATUE JUMELLE (niveau 4) : deux statues identiques. Un joueur VIVANT qui se tient sur la `standTile` d'une statue et
+ * appuie sur `interact` fait pivoter l'AUTRE statue d'un quart de tour (sens horaire : up → right → down → left → up).
+ * Résolue (verrouillante) quand les deux statues regardent `targetDir`. Les statues sont solides (comme un brasero).
+ * Chaque statue a un `standTile` éloigné de l'autre : il faut se coordonner (un joueur à chaque socle, ou faire des allers-retours en solo).
+ * Waived : statues déjà orientées vers `targetDir`, mécanisme résolu.
+ */
+export interface StatuePairDef extends MechanismBase {
+  type: 'statuePair';
+  statues: [
+    { tile: TileXY; standTile: TileXY; facing: Dir },
+    { tile: TileXY; standTile: TileXY; facing: Dir },
+  ];
+  targetDir: Dir;
+}
+
+/**
+ * SABLIER PARTAGÉ (niveau 5) : le sable s'écoule en permanence. Tant qu'il en reste (`sandMs > 0`), la herse (`gate`) est
+ * ouverte ; quand il est vide la herse se referme PROGRESSIVEMENT (une tuile toutes les `closeStepMs`, dans l'ordre de `gate`,
+ * une tuile occupée par un joueur/ennemi attend). `interact` à portée d'un des `levers` retourne le sablier : sable = période
+ * (et la herse se rouvre d'un coup). `periodMs` est doublée en solo (effectiveHourglassPeriodMs). Un joueur doit donc rester
+ * près d'un levier pendant que les autres passent, puis un autre prend le relais au levier suivant.
+ * `active` = sable restant (> 0). Waived : herse ouverte en permanence.
+ */
+export interface HourglassDef extends MechanismBase {
+  type: 'hourglass';
+  /** Tuiles des leviers du sablier (≥ 2, de part et d'autre de la herse). */
+  levers: TileXY[];
+  /** Tuiles de la herse, dans l'ordre de fermeture. */
+  gate: TileXY[];
+  /** Durée du sable après chaque retournement (ms). */
+  periodMs: number;
+  /** Délai entre la fermeture de deux tuiles de la herse (ms, défaut 700). */
+  closeStepMs?: number;
+  /** Tuile où le sablier est affiché (rendu). */
+  displayTile: TileXY;
+}
+
+/**
+ * PONT DE LUMIÈRE (niveau 6) : les `tiles` du pont (sol '.' dans la grille) ne sont praticables que lorsqu'elles sont
+ * ÉCLAIRÉES : à moins de `radiusTiles` tuiles du porteur de la lanterne (joueur `lanternSlot % nbJoueurs`, vivant), ou occupées
+ * par un joueur vivant (on ne piège jamais quelqu'un). Les tuiles non éclairées sont solides (vide). Le porteur doit guider les
+ * autres : ils ne traversent que dans le halo. Waived : pont toujours éclairé.
+ */
+export interface LightBridgeDef extends MechanismBase {
+  type: 'lightBridge';
+  tiles: TileXY[];
+  lanternSlot: number;
+  radiusTiles: number;
+}
+
 export type MechanismDef =
   | PlateDef
   | LeverDef
@@ -422,7 +492,10 @@ export type MechanismDef =
   | BlockDef
   | SocketDef
   | RunePuzzleDef
-  | BrazierDef;
+  | BrazierDef
+  | StatuePairDef
+  | HourglassDef
+  | LightBridgeDef;
 
 export interface EnemySpawnDef {
   kind: EnemyKind;
@@ -587,6 +660,34 @@ export interface BrazierState extends MechanismStateBase {
   litBy: PlayerId | null;
 }
 
+export interface StatuePairState extends MechanismStateBase {
+  type: 'statuePair';
+  /** Orientation courante des deux statues. active === les deux regardent targetDir. */
+  facings: [Dir, Dir];
+  /** Dernière statue pivotée (0/1), -1 sinon (rendu). */
+  lastRotated: -1 | 0 | 1;
+}
+
+export interface HourglassState extends MechanismStateBase {
+  type: 'hourglass';
+  /** Sable restant (ms) ; 0 = vide (la herse se ferme). */
+  sandMs: number;
+  /** Nombre de tuiles de herse fermées (0..gate.length). */
+  closedCount: number;
+  /** Chrono avant la fermeture de la prochaine tuile (ms). */
+  stepMs: number;
+  /** Index du dernier levier utilisé, -1 sinon (rendu). */
+  lastLever: number;
+}
+
+export interface LightBridgeState extends MechanismStateBase {
+  type: 'lightBridge';
+  /** Porteur de la lanterne (null si à terre / waived). */
+  bearerId: PlayerId | null;
+  /** Par tuile du pont (même ordre que def.tiles) : true = éclairée, donc praticable. */
+  lit: boolean[];
+}
+
 export type MechanismState =
   | PlateState
   | LeverState
@@ -595,7 +696,10 @@ export type MechanismState =
   | BlockState
   | SocketState
   | RuneState
-  | BrazierState;
+  | BrazierState
+  | StatuePairState
+  | HourglassState
+  | LightBridgeState;
 
 // ───────────────────────────── État de jeu ─────────────────────────────
 
@@ -673,7 +777,11 @@ export type SimEvent =
   | { type: 'brazierLit'; brazierId: string; playerId: PlayerId }
   | { type: 'torchRefueled'; playerId: PlayerId; brazierId: string }
   | { type: 'torchLow'; playerId: PlayerId }
-  | { type: 'torchOut'; playerId: PlayerId };
+  | { type: 'torchOut'; playerId: PlayerId }
+  | { type: 'statueRotated'; mechanismId: string; index: 0 | 1; facing: Dir; playerId: PlayerId }
+  | { type: 'hourglassFlipped'; mechanismId: string; leverIndex: number; playerId: PlayerId }
+  | { type: 'hourglassEmpty'; mechanismId: string }
+  | { type: 'gateClosed'; mechanismId: string; closedCount: number };
 
 // ───────────────────────────── Simulation (interface publique) ─────────────────────────────
 
@@ -687,6 +795,12 @@ export interface SimConfig {
   levelId: string;
   players: PlayerSetup[];
   seed: number;
+  /**
+   * Salle de départ (indice 0-based, défaut 0) : reprise d'une sauvegarde / dev `?room=N`. Borné à [0, nbSalles - 1] ;
+   * valeur non finie = 0. Les salles précédentes sont considérées validées (`clearedRooms`) et leurs objectifs personnels
+   * accomplis ; l'événement `roomEntered` a la raison 'start'.
+   */
+  startRoomIndex?: number;
 }
 
 /** Entrées d'un pas pour tous les joueurs (absent = aucune entrée). */

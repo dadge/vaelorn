@@ -10,7 +10,7 @@ import { Bitmap, CLEAR, hash2 } from './bitmap';
 export const BOSS_KINDS = ['golem', 'morvane'] as const;
 
 /** Dessine un calque 48×48, le cerne d'un trait interne `edge` puis le superpose à `dst`. */
-function layer(dst: Bitmap, edge: number, draw: (b: Bitmap) => void): void {
+export function layer(dst: Bitmap, edge: number, draw: (b: Bitmap) => void): void {
   const b = new Bitmap(dst.w, dst.h);
   draw(b);
   b.outline(edge);
@@ -210,7 +210,7 @@ function morvane(step: number): Bitmap {
 }
 
 /** Silhouette de dégâts : même forme, 4 niveaux de luminosité clair → rouge (le contour est conservé). */
-function toHurt(src: Bitmap): Bitmap {
+export function toHurt(src: Bitmap): Bitmap {
   const out = src.clone();
   out.recolor((col) => {
     if (col === OUTLINE) return OUTLINE;

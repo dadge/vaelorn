@@ -8,11 +8,18 @@
  * 100 % utilisable à la manette seule : croix / stick = naviguer et modifier, A = valider, B = fermer le panneau.
  * La manette qui lance « Jouer » réclame automatiquement l'emplacement 1 de l'écran de sélection.
  * Les choix sont mémorisés (localStorage) et passés à CharacterSelect sous forme de GameSession.
+ *
+ * SAUVEGARDE (règles dans src/render/saveMenuLogic.ts, stockage dans src/core/saveRepository.ts) : « Continuer (Niveau X — Salle Y) »
+ * en tête de liste UNIQUEMENT si une sauvegarde valide existe ; « Nouvelle partie » demande confirmation avant d'écraser une
+ * sauvegarde ; « Effacer la sauvegarde » (en bas de liste) est toujours confirmé ; une sauvegarde illisible est signalée (alerte
+ * une fois par lancement + ligne dédiée) avec le choix « conserver » / « repartir de zéro » (confirmation en plus) — elle n'est
+ * JAMAIS supprimée sans confirmation. Les dialogues se pilotent au clavier, à la manette et à la souris ; « retour » = choix sûr.
  */
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../core/constants';
 import type { CharacterId } from '../core/types';
 import { SUPPORTED_LANGUAGES, getLanguage, setLanguage, t } from '../i18n/i18n';
+import { CHARACTERS } from '../core/characters';
 import { MenuNavigator, inputManager, isNonStandardPad, listGamepads } from '../input';
 import type { MenuAction } from '../input';
 import { ATLAS_KEY } from '../render/art';
@@ -33,6 +40,24 @@ import {
 } from '../render/menuLogic';
 import { SCENE_KEYS, type CharacterSelectSceneData, type MenuSceneData } from '../render/session';
 import {
+  chooseInDialog,
+  eraseAction,
+  errorReasonKey,
+  menuSaveState,
+  newGameAction,
+  openSaveDialog,
+  resumeAutoClaimDevice,
+  saveDialogTexts,
+  saveMenuLayout,
+  sessionFromSave,
+  stepSaveDialog,
+  type MenuSaveState,
+  type SaveDialog,
+  type SaveDialogKind,
+  type SaveDialogStep,
+} from '../render/saveMenuLogic';
+import { getSaveContext, getSaveRepository } from '../render/saveStore';
+import {
   PANEL_STYLES,
   UI_THEME,
   css,
@@ -50,12 +75,17 @@ import {
 
 const ROWS_X = 450;
 const ROWS_W = 780;
-const ROW_H = 38;
-const ROW_GAP = 4;
+const ROW_H = 34; // 12 lignes au plus (4 joueurs + Continuer + Effacer la sauvegarde) doivent tenir au-dessus de la ligne d'aide
+const ROW_GAP = 3;
 const ROWS_TOP = 152;
 const VALUE_CX = 575;
 const VALUE_W = 380;
 const LABEL_MAX_W = 330;
+
+/** Durée (ms) d'affichage d'un message d'information (sauvegarde effacée…). */
+const NOTICE_MS = 3500;
+/** L'alerte « sauvegarde illisible » n'est affichée automatiquement qu'une fois par lancement du jeu. */
+let corruptNoticeShown = false;
 
 /** Écrit `content` dans `text` et le réduit si besoin pour tenir dans `maxWidth` (jamais agrandi). */
 function setFitted(text: Phaser.GameObjects.Text, content: string, maxWidth: number): void {
@@ -108,6 +138,14 @@ export class MenuScene extends Phaser.Scene {
   private lastSource: string | null = null;
   /** true dès que « Jouer » est validé : la scène ignore toute entrée pendant le fondu (évite d'écraser le périphérique mémorisé). */
   private starting = false;
+  /** État de la sauvegarde (relu à chaque ouverture du menu ; jamais modifié sans confirmation). */
+  private saveState: MenuSaveState = { kind: 'none' };
+  /** Dialogue modal ouvert (confirmation, sauvegarde illisible) et ses objets Phaser. */
+  private dialog: SaveDialog | null = null;
+  private dialogObjects: Phaser.GameObjects.GameObject[] = [];
+  private dialogButtons: UiButton[] = [];
+  /** Message d'information temporaire (affiché à la place de l'aide de la ligne). */
+  private notice: { text: string; until: number } | null = null;
 
   constructor() {
     super(SCENE_KEYS.Menu);
@@ -117,9 +155,14 @@ export class MenuScene extends Phaser.Scene {
     const stored = this.loadChoices();
     this.choices = data?.session ? choicesFromSession(data.session, stored ?? defaultMenuChoices()) : (stored ?? defaultMenuChoices());
     this.lastCharacters = data?.session ? data.session.players.map((p) => p.characterId) : [];
-    this.selectedId = 'play';
+    this.saveState = this.loadSaveState();
+    this.selectedId = saveMenuLayout(this.saveState).defaultRow;
     this.rows = [];
     this.controls = null;
+    this.dialog = null;
+    this.dialogObjects = [];
+    this.dialogButtons = [];
+    this.notice = null;
     this.lastSource = null;
     this.starting = false;
   }
@@ -161,11 +204,24 @@ export class MenuScene extends Phaser.Scene {
       this.scale.off('leavefullscreen', onFullscreen);
       this.rows = [];
       this.controls = null;
+      this.dialog = null;
+      this.dialogObjects = [];
+      this.dialogButtons = [];
     });
+
+    // Sauvegarde illisible : on prévient une fois par lancement (rien n'est supprimé sans confirmation).
+    if (this.saveState.kind === 'corrupt' && !corruptNoticeShown) {
+      corruptNoticeShown = true;
+      this.openDialog('corrupt');
+    }
   }
 
   update(time: number): void {
     this.lastTime = time;
+    if (this.notice && time >= this.notice.until) {
+      this.notice = null;
+      this.refreshInfo();
+    }
     this.bg.update(time);
     this.title.setY(50 + Math.round(Math.sin(time / 700) * 3));
     if (this.starting) return;
@@ -197,6 +253,22 @@ export class MenuScene extends Phaser.Scene {
     }
   }
 
+  /** Lit la sauvegarde (lecture seule : ne modifie ni ne supprime jamais rien, même si elle est corrompue). */
+  private loadSaveState(): MenuSaveState {
+    try {
+      return menuSaveState(getSaveRepository().load(), getSaveContext());
+    } catch {
+      return { kind: 'unavailable' };
+    }
+  }
+
+  /** « Niveau X — Salle Y » de la sauvegarde valide (chaîne vide sinon). */
+  private resumeLabel(): string {
+    if (this.saveState.kind !== 'valid') return '';
+    const r = this.saveState.resume;
+    return t('save.resume', { level: r.level, room: r.room });
+  }
+
   /** Propage le nombre de joueurs à l'InputManager ; les appareils se choisissent à l'écran de sélection. */
   private applyInputSettings(): void {
     inputManager.attach();
@@ -218,7 +290,24 @@ export class MenuScene extends Phaser.Scene {
   private specs(): RowSpec[] {
     const c = this.choices;
     const specs: RowSpec[] = [];
-    specs.push({ id: 'play', kind: 'action', label: () => t('menu.play'), confirm: () => this.startGame() });
+    const layout = saveMenuLayout(this.saveState);
+    if (layout.showContinue) {
+      specs.push({
+        id: 'continue',
+        kind: 'action',
+        label: () => t('save.continue.detail', { resume: this.resumeLabel() }),
+        confirm: () => this.continueGame(),
+      });
+    }
+    if (layout.showCorruptRow) {
+      specs.push({ id: 'corrupt', kind: 'action', color: UI_THEME.bad, label: () => t('save.corrupt.row'), confirm: () => this.openDialog('corrupt') });
+    }
+    specs.push({
+      id: 'play',
+      kind: 'action',
+      label: () => t(layout.playLabelKey),
+      confirm: () => this.onNewGame(),
+    });
     specs.push({
       id: 'players',
       kind: 'choice',
@@ -281,6 +370,9 @@ export class MenuScene extends Phaser.Scene {
       confirm: toggleFs,
     });
     specs.push({ id: 'controls', kind: 'action', label: () => t('menu.controls'), confirm: () => this.openControls() });
+    if (layout.showErase) {
+      specs.push({ id: 'erase', kind: 'action', label: () => t('save.erase'), confirm: () => this.onErase() });
+    }
     return specs;
   }
 
@@ -341,12 +433,12 @@ export class MenuScene extends Phaser.Scene {
     const container = this.add.container(ROWS_X, y, children);
     zone.setInteractive({ useHandCursor: true });
     zone.on('pointerover', () => {
-      if (this.controls || this.starting) return;
+      if (this.controls || this.dialog || this.starting) return;
       this.selectedId = spec.id;
       this.applySelection();
     });
     zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.controls || this.starting) return;
+      if (this.controls || this.dialog || this.starting) return;
       this.lastSource = null;
       this.selectedId = spec.id;
       this.applySelection();
@@ -374,7 +466,12 @@ export class MenuScene extends Phaser.Scene {
 
   private refreshInfo(): void {
     const sel = this.selectedId;
-    if (sel.startsWith('diff')) {
+    if (this.notice) {
+      this.info.setText(this.notice.text);
+    } else if (sel === 'continue' && this.saveState.kind === 'valid') {
+      const names = this.saveState.save.players.map((p) => t(CHARACTERS[p.characterId].nameKey)).join(', ');
+      this.info.setText(t('save.continue.team', { names }));
+    } else if (sel.startsWith('diff')) {
       const i = Number(sel.slice(4));
       this.info.setText(t(`menu.difficulty.${this.choices.difficulties[i]}.desc`));
     } else {
@@ -399,11 +496,16 @@ export class MenuScene extends Phaser.Scene {
       this.closeControls();
       this.openControls();
     }
+    if (this.dialog) this.buildDialog();
   }
 
   // ───────────────────────────── Actions ─────────────────────────────
 
   private onAction(action: MenuAction): void {
+    if (this.dialog) {
+      this.applyDialogStep(stepSaveDialog(this.dialog, action));
+      return;
+    }
     if (this.controls) {
       if (action === 'back' || action === 'confirm') this.closeControls();
       return;
@@ -446,6 +548,140 @@ export class MenuScene extends Phaser.Scene {
     const session = sessionFromChoices(this.choices, this.lastCharacters, LEVELS.length);
     const data: CharacterSelectSceneData = { session };
     transitionTo(this, SCENE_KEYS.CharacterSelect, data);
+  }
+
+  /** « Nouvelle partie » : confirmation avant d'écraser une sauvegarde existante (valide ou illisible), sinon on lance. */
+  private onNewGame(): void {
+    if (newGameAction(this.saveState) === 'confirm') this.openDialog('confirmNewGame');
+    else this.startGame();
+  }
+
+  /**
+   * « Continuer » : équipe, niveau et salle de la sauvegarde. L'équipe est FIGÉE : on passe par la salle d'attente de
+   * CharacterSelectScene (mode `resume`, personnages verrouillés) où chaque joueur n'a plus qu'à appuyer sur un bouton pour
+   * rejoindre sa place — les appareils sont ainsi toujours attribués à de vrais périphériques présents.
+   * L'appareil qui a validé « Continuer » (clavier ou manette) réclame automatiquement la place 1.
+   */
+  private continueGame(): void {
+    if (this.starting || this.saveState.kind !== 'valid') return;
+    const session = sessionFromSave(this.saveState.save, getSaveContext());
+    if (!session) return;
+    this.starting = true;
+    inputManager.attach();
+    inputManager.clearAssignments();
+    inputManager.setPlayer1Gamepad(false);
+    inputManager.setPlayerCount(session.playerCount);
+    setMenuDevice(resumeAutoClaimDevice(this.lastSource));
+    const data: CharacterSelectSceneData = { session, resume: true };
+    transitionTo(this, SCENE_KEYS.CharacterSelect, data);
+  }
+
+  /** « Effacer la sauvegarde » (options) : toujours derrière une confirmation. */
+  private onErase(): void {
+    const kind = eraseAction(this.saveState);
+    if (kind) this.openDialog(kind);
+  }
+
+  /** Efface réellement la sauvegarde (appelé UNIQUEMENT après confirmation dans un dialogue). */
+  private eraseSave(): void {
+    const res = getSaveRepository().clear();
+    if (res.ok) {
+      this.saveState = { kind: 'none' };
+      this.selectedId = 'play';
+      this.notice = { text: t('save.erase.done'), until: this.lastTime + NOTICE_MS };
+    } else {
+      this.notice = { text: t('save.erase.failed'), until: this.lastTime + NOTICE_MS };
+    }
+    this.buildRows();
+  }
+
+  // ───────────────────────────── Dialogues de sauvegarde ─────────────────────────────
+
+  private openDialog(kind: SaveDialogKind): void {
+    this.dialog = openSaveDialog(kind);
+    this.buildDialog();
+  }
+
+  /** Applique le résultat d'une interaction : nouveau dialogue (ou fermeture) puis effet éventuel. */
+  private applyDialogStep(step: SaveDialogStep): void {
+    this.dialog = step.dialog;
+    if (this.dialog) {
+      this.buildDialog();
+    } else {
+      this.destroyDialog();
+      this.nav.reset();
+    }
+    if (step.effect === 'startNewGame') this.startGame();
+    else if (step.effect === 'eraseSave') this.eraseSave();
+  }
+
+  private destroyDialog(): void {
+    for (const o of this.dialogObjects) o.destroy();
+    this.dialogObjects = [];
+    this.dialogButtons = [];
+  }
+
+  /** (Re)dessine le dialogue ouvert : voile, panneau, titre, message, boutons (le premier = choix sûr, sélectionné d'abord). */
+  private buildDialog(): void {
+    this.destroyDialog();
+    const dialog = this.dialog;
+    if (!dialog) return;
+    const depth = 60;
+    const objects = this.dialogObjects;
+    const add = <T extends Phaser.GameObjects.GameObject & { setDepth(d: number): unknown }>(o: T): T => {
+      o.setDepth(depth);
+      objects.push(o);
+      return o;
+    };
+    const veil = add(this.add.graphics());
+    veil.fillStyle(0x000000, 0.72);
+    veil.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    const blocker = add(this.add.zone(0, 0, GAME_WIDTH, GAME_HEIGHT).setOrigin(0, 0));
+    blocker.setInteractive();
+
+    const pw = 800;
+    const ph = 300;
+    const px = (GAME_WIDTH - pw) / 2;
+    const py = (GAME_HEIGHT - ph) / 2;
+    add(createPanel(this, px, py, pw, ph, PANEL_STYLES.raised));
+    const texts = saveDialogTexts(dialog, this.saveState);
+    const reason = this.saveState.kind === 'corrupt' ? t(errorReasonKey(this.saveState.error)) : '';
+    add(createText(this, GAME_WIDTH / 2, py + 44, t(texts.titleKey), { size: 'lg', color: UI_THEME.accent, origin: [0.5, 0.5], align: 'center' }));
+    add(
+      createText(this, GAME_WIDTH / 2, py + 130, t(texts.messageKey, { resume: this.resumeLabel(), reason }), {
+        size: 'md',
+        color: UI_THEME.text,
+        origin: [0.5, 0.5],
+        align: 'center',
+        wrapWidth: pw - 80,
+      }),
+    );
+
+    const n = dialog.choices.length;
+    const bw = 300;
+    const gap = 24;
+    const total = n * bw + (n - 1) * gap;
+    const bx0 = (GAME_WIDTH - total) / 2;
+    this.dialogButtons = dialog.choices.map((choice, i) => {
+      const button = new UiButton(this, bx0 + i * (bw + gap), py + ph - 76, {
+        width: bw,
+        height: 44,
+        label: () => t(texts.choiceKeys[i]),
+        onHover: () => {
+          if (this.dialog && this.dialog.index !== i) {
+            this.dialog = { ...this.dialog, index: i };
+            this.dialogButtons.forEach((b, k) => b.setSelected(k === i));
+          }
+        },
+        onClick: () => {
+          if (this.dialog) this.applyDialogStep(chooseInDialog(this.dialog, choice));
+        },
+      });
+      button.setSelected(i === dialog.index);
+      button.container.setDepth(depth);
+      objects.push(button.container);
+      return button;
+    });
   }
 
   // ───────────────────────────── Panneau « Contrôles » ─────────────────────────────

@@ -18,6 +18,7 @@ export type { AtlasData, FrameRect } from './atlas';
 export { SPRITE_MANIFEST, manifestCovers } from './manifest';
 export type { SpriteManifestEntry } from './manifest';
 export * from './animations';
+export * from './enemyTiers';
 
 /** Noms de toutes les frames de l'atlas (contrat DESIGN.md §4 + extras listées dans EXTRA_FRAME_SPECS). */
 export const FRAME_NAMES: readonly string[] = Object.freeze([...requiredFrames(), ...EXTRA_FRAME_SPECS.map((s) => s.name)]);

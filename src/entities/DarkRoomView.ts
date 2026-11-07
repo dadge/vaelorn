@@ -12,6 +12,7 @@ import type Phaser from 'phaser';
 import { lightSources, type LightSource } from '../core/light';
 import type { GameState, RoomDef } from '../core/types';
 import { DarknessLayer } from '../render/darkness';
+import { lanternLightSources } from '../render/mechHud';
 import type { ViewRig } from '../render/camera';
 import { DEPTH_LABELS } from '../render/fx';
 
@@ -52,6 +53,8 @@ export class DarkRoomView {
         l.y = pos.y;
       }
     }
+    // lanternes des ponts de lumière : sources de lumière ajoutées côté RENDU seulement (src/core/light.ts inchangé)
+    for (const l of lanternLightSources(state, this.room, heroPos)) lights.push(l);
     layer.update(lights, timeMs);
   }
 

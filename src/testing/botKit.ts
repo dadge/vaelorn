@@ -36,6 +36,7 @@ import { CHARACTER_IDS } from '../core/characters';
 import { tileCenter } from '../core/geometry';
 import {
   createRoomMechanisms,
+  isMechanismSolved,
   isRequirementMet,
   requiredPushers,
   type PixelRect,
@@ -94,6 +95,7 @@ import { buildNavMap, isPassable, type NavMap } from './pathfinding';
 
 export * from './botTypes';
 export * from './botActions';
+export * from './novelBots';
 export { PathFollower, decideCombat, decideRevive, decideBackground, NUDGE } from './botBrain';
 export type { FollowGoal, FollowResult, CombatRequest, CombatDecision } from './botBrain';
 export * from './pathfinding';
@@ -368,6 +370,14 @@ function describeEvent(e: SimEvent): string | null {
       return `J${e.playerId + 1} ramasse la clé ${e.keyId}`;
     case 'doorOpened':
       return `porte ${e.doorId} ouverte`;
+    case 'statueRotated':
+      return `J${e.playerId + 1} fait pivoter la statue ${e.index} de ${e.mechanismId} → ${e.facing}`;
+    case 'hourglassFlipped':
+      return `J${e.playerId + 1} retourne le sablier ${e.mechanismId} (levier ${e.leverIndex})`;
+    case 'hourglassEmpty':
+      return `sablier ${e.mechanismId} VIDE`;
+    case 'gateClosed':
+      return `herse ${e.mechanismId} : ${e.closedCount} tuile(s) fermée(s)`;
     case 'runeProgress':
       return `runes ${e.mechanismId} : ${e.ok ? 'ok' : 'ERREUR'} (${e.progress})`;
     case 'objectiveCompleted':
@@ -560,12 +570,27 @@ export class BotRun {
     return def;
   }
 
-  /** Tuiles d'un mécanisme : celles de la porte, la tuile des autres (énigme de runes : tuile d'affichage). */
+  /**
+   * Tuiles d'un mécanisme : celles de la porte, la tuile des autres (énigme de runes : tuile d'affichage). Mécanismes inédits :
+   * statues jumelles = les 2 tuiles de statue ; sablier = tuiles des LEVIERS (le premier est `mechTile`) ; pont de lumière = tuiles
+   * du pont. Pour les socles des statues, la herse ou le halo, lire `mechDef(id)` (voir les primitives de `novelBots.ts`).
+   */
   mechTiles(id: string): TileXY[] {
     const def = this.mechDef(id);
-    if (def.type === 'door') return def.tiles.map((t) => [t[0], t[1]] as TileXY);
-    if (def.type === 'runePuzzle') return [[def.displayTile[0], def.displayTile[1]]];
-    return [[def.tile[0], def.tile[1]]];
+    switch (def.type) {
+      case 'door':
+        return def.tiles.map((t) => [t[0], t[1]] as TileXY);
+      case 'runePuzzle':
+        return [[def.displayTile[0], def.displayTile[1]]];
+      case 'statuePair':
+        return def.statues.map((s) => [s.tile[0], s.tile[1]] as TileXY);
+      case 'hourglass':
+        return def.levers.map((t) => [t[0], t[1]] as TileXY);
+      case 'lightBridge':
+        return def.tiles.map((t) => [t[0], t[1]] as TileXY);
+      default:
+        return [[def.tile[0], def.tile[1]]];
+    }
   }
 
   /** Tuile principale d'un mécanisme (première tuile d'une porte ; coin haut-gauche d'un bloc ou d'un réceptacle 2×2). */
@@ -585,10 +610,12 @@ export class BotRun {
     return { x: (t[0] + 0.5) * TILE, y: (t[1] + 0.5) * TILE };
   }
 
-  /** Un mécanisme est-il résolu (actif/ouvert/rempli, ou neutralisé par `minPlayers`) ? */
+  /**
+   * Un mécanisme est-il résolu (actif/ouvert/rempli, ou neutralisé par `minPlayers`) ? Même règle que le jeton d'exigence
+   * (`isMechanismSolved`) : sablier = sable restant > 0 ; pont de lumière = porteur vivant ; statues jumelles = résolues.
+   */
   mechSolved(id: string): boolean {
-    const st = this.mech(id);
-    return st.waived || st.active;
+    return isMechanismSolved(this.mech(id));
   }
 
   /** Exigence (jeton `Requirement` : id de mécanisme, 'clear', 'obj:<id>', 'zone:<id>') satisfaite maintenant ? */

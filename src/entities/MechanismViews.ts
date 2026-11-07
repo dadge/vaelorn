@@ -13,6 +13,13 @@ import type {
   BrazierDef,
   BrazierState,
   BlockState,
+  Dir,
+  HourglassDef,
+  HourglassState,
+  LightBridgeDef,
+  LightBridgeState,
+  StatuePairDef,
+  StatuePairState,
   DoorDef,
   DoorState,
   KeyDef,
@@ -32,7 +39,8 @@ import type {
   Vec2,
 } from '../core/types';
 import { ATLAS_KEY } from '../render/art';
-import { brazierFrame, doorFrame, emberFrame, keyFrame, leverFrame, plateFrame, runeFrame, socketFrame } from '../render/art/animations';
+import { bridgeFrame, brazierFrame, doorFrame, emberFrame, gateFrame, hourglassFrame, keyFrame, leverFrame, plateFrame, runeFrame, socketFrame, statueFrame } from '../render/art/animations';
+import { bridgeTileLit, gateClosedFlags, hourglassBlinkAlpha, hourglassStatus, sandJumped, statueTargetArrow, statuesSolved } from '../render/mechHud';
 import { FX_GLOW_KEY, makeWorldText } from '../render/fx';
 import { DEPTH, ySortDepth, type ViewContext } from './common';
 
@@ -44,6 +52,8 @@ export interface MechView {
   /** Centre (px monde) utilisé pour les FX et les étiquettes. */
   readonly center: Vec2;
   update(st: MechanismState, timeMs: number): void;
+  /** Centre (px monde) d'une partie du mécanisme (statue, tuile de herse ou de pont) pour les FX ciblés ; absent = `center`. */
+  partCenter?(index: number): Vec2 | null;
   destroy(): void;
 }
 
@@ -546,6 +556,322 @@ class BrazierView implements MechView {
   }
 }
 
+// ───────────────────────────── Statues jumelles (niveau 4) ─────────────────────────────
+
+/** Couleur de repérage des socles : le socle `i` fait pivoter l'AUTRE statue, qui porte un anneau de la même couleur. */
+const STAND_COLORS = [0x7af0ff, 0xffc24a] as const;
+/** Durée (ms) du flash de rotation d'une statue. */
+const STATUE_FLASH_MS = 380;
+
+interface StatuePart {
+  sprite: Img;
+  glow: Img;
+  arrow: Img;
+  ring: Phaser.GameObjects.Ellipse;
+  center: Vec2;
+  lastFacing: Dir | null;
+  flashUntilMs: number;
+  lastFrame: string;
+}
+
+/**
+ * Deux statues solides orientées selon `facings[i]` (yeux + pointe de flèche sur la poitrine), socles `standTile` marqués
+ * (disque gravé + anneau coloré, rappelé sur la statue qu'il fait pivoter), flèche dorée flottante vers `targetDir` tant que la
+ * statue ne la regarde pas, flash/rebond à chaque rotation, lueur verte une fois résolu. LIT StatuePairState.
+ */
+class StatuePairView implements MechView {
+  readonly id: string;
+  readonly center: Vec2;
+  private readonly bag: Phaser.GameObjects.GameObject[] = [];
+  private readonly parts: StatuePart[] = [];
+  private readonly stands: { pad: Img; ring: Phaser.GameObjects.Ellipse }[] = [];
+  private readonly def: StatuePairDef;
+
+  constructor(ctx: ViewContext, def: StatuePairDef) {
+    this.id = def.id;
+    this.def = def;
+    const c0 = tileCenter(def.statues[0].tile);
+    const c1 = tileCenter(def.statues[1].tile);
+    this.center = { x: (c0.x + c1.x) / 2, y: (c0.y + c1.y) / 2 };
+    for (const i of [0, 1] as const) {
+      const c = i === 0 ? c0 : c1;
+      const foot = ySortDepth(c.y + 6);
+      const ring = ctx.scene.add.ellipse(c.x, c.y + 6, 19, 9, STAND_COLORS[1 - i], 0.18);
+      ring.setStrokeStyle(1, STAND_COLORS[1 - i], 0.9).setDepth(DEPTH.flat + 0.1);
+      ctx.rig.registerWorld(ring);
+      this.bag.push(ring);
+      const glow = mkImage(ctx, this.bag, c.x, c.y - 2, undefined, FX_GLOW_KEY);
+      glow.setBlendMode(1).setTint(0x7dffb0).setScale(1.5).setAlpha(0).setDepth(foot - 0.5).setVisible(false);
+      const sprite = mkImage(ctx, this.bag, c.x, c.y, statueFrame(def.statues[i].facing, false));
+      sprite.setDepth(foot);
+      const arrow = mkImage(ctx, this.bag, c.x, c.y, 'fx_marker');
+      arrow.setTint(0xffd24a).setDepth(foot + 2);
+      this.parts.push({ sprite, glow, arrow, ring, center: c, lastFacing: null, flashUntilMs: 0, lastFrame: '' });
+      // socle d'activation
+      const sc = tileCenter(def.statues[i].standTile);
+      const pad = mkImage(ctx, this.bag, sc.x, sc.y, 'statuepair_stand');
+      pad.setDepth(DEPTH.flat);
+      const padRing = ctx.scene.add.ellipse(sc.x, sc.y + 1, 18, 11, STAND_COLORS[i], 0.16);
+      padRing.setStrokeStyle(1, STAND_COLORS[i], 0.95).setDepth(DEPTH.flat + 0.1);
+      ctx.rig.registerWorld(padRing);
+      this.bag.push(padRing);
+      this.stands.push({ pad, ring: padRing });
+    }
+  }
+
+  update(st: MechanismState, timeMs: number): void {
+    if (st.type !== 'statuePair') return;
+    const s: StatuePairState = st;
+    const solved = statuesSolved(s);
+    for (const i of [0, 1] as const) {
+      const part = this.parts[i];
+      const facing = s.facings[i];
+      if (part.lastFacing !== null && part.lastFacing !== facing) part.flashUntilMs = timeMs + STATUE_FLASH_MS;
+      part.lastFacing = facing;
+      const f = statueFrame(facing, solved);
+      if (f !== part.lastFrame) {
+        part.sprite.setFrame(f);
+        part.lastFrame = f;
+      }
+      const k = timeMs < part.flashUntilMs ? (part.flashUntilMs - timeMs) / STATUE_FLASH_MS : 0;
+      if (k > 0.55) part.sprite.setTintFill(0xffffff);
+      else part.sprite.clearTint();
+      part.sprite.setScale(1 + 0.16 * k);
+      part.glow.setVisible(solved && !s.waived);
+      if (solved && !s.waived) part.glow.setAlpha(0.28 + 0.12 * Math.sin(timeMs / 260 + i));
+      const a = statueTargetArrow(this.def, s, i, timeMs);
+      part.arrow.setVisible(a.visible);
+      if (a.visible) {
+        part.arrow.setPosition(part.center.x + a.dx, part.center.y + a.dy).setRotation(a.rotation).setAlpha(a.alpha);
+      }
+      part.ring.setVisible(!s.waived);
+      part.ring.setFillStyle(part.ring.fillColor, solved ? 0.06 : 0.14 + 0.08 * (0.5 + 0.5 * Math.sin(timeMs / 300 + i)));
+      const stand = this.stands[i];
+      stand.pad.setAlpha(s.waived ? 0.4 : 1);
+      stand.ring.setVisible(!s.waived);
+      stand.ring.setFillStyle(stand.ring.fillColor, solved ? 0.06 : 0.12 + 0.1 * (0.5 + 0.5 * Math.sin(timeMs / 300 + i * 1.7)));
+    }
+  }
+
+  /** Centre de la statue d'indice `i` (FX de rotation). */
+  partCenter(i: number): Vec2 | null {
+    return this.parts[i]?.center ?? null;
+  }
+
+  destroy(): void {
+    destroyAll(this.bag);
+    this.parts.length = 0;
+    this.stands.length = 0;
+  }
+}
+
+// ───────────────────────────── Sablier partagé (niveau 5) ─────────────────────────────
+
+/** Durée (ms) de la rotation du sablier retourné. */
+const HOURGLASS_FLIP_MS = 520;
+/** Durée (ms) pendant laquelle le levier utilisé reste affiché « actionné ». */
+const HOURGLASS_LEVER_MS = 650;
+/** Durée (ms) du flash d'une tuile de herse qui se ferme. */
+const GATE_FLASH_MS = 320;
+
+/**
+ * Sablier affiché sur `displayTile` (frame selon le sable restant, clignotement rouge quand il est presque vide, rotation au
+ * retournement), leviers marqués (anneau ambre + marqueur flottant, levier « actionné » un instant après le retournement),
+ * herse dessinée tuile par tuile (barreaux pour les `closedCount` premières tuiles, relevée sinon), contour rouge clignotant sur
+ * la prochaine tuile à se fermer. LIT HourglassState.
+ */
+class HourglassView implements MechView {
+  readonly id: string;
+  readonly center: Vec2;
+  private readonly bag: Phaser.GameObjects.GameObject[] = [];
+  private readonly sprite: Img;
+  private readonly glow: Img;
+  private readonly levers: { sprite: Img; marker: Img; ring: Phaser.GameObjects.Ellipse; center: Vec2; lastFrame: string }[] = [];
+  private readonly gate: { sprite: Img; outline: Phaser.GameObjects.Rectangle; center: Vec2; closed: boolean | null; flashUntilMs: number }[] = [];
+  private readonly def: HourglassDef;
+  private readonly playerCount: number;
+  private lastSand = -1;
+  private flipStartMs = -1e9;
+  private leverUntilMs = 0;
+  private lastFrame = '';
+
+  constructor(ctx: ViewContext, def: HourglassDef) {
+    this.id = def.id;
+    this.def = def;
+    this.playerCount = ctx.playerCount;
+    this.center = tileCenter(def.displayTile);
+    this.glow = mkImage(ctx, this.bag, this.center.x, this.center.y, undefined, FX_GLOW_KEY);
+    this.glow.setBlendMode(1).setTint(0xffc24a).setScale(1.4).setAlpha(0.18).setDepth(DEPTH.decal - 1);
+    this.sprite = mkImage(ctx, this.bag, this.center.x, this.center.y - 1, hourglassFrame(1));
+    this.sprite.setDepth(ySortDepth(this.center.y + 6));
+    for (const t of def.levers) {
+      const c = tileCenter(t);
+      const ring = ctx.scene.add.ellipse(c.x, c.y + 5, 17, 8, 0xffc24a, 0.2);
+      ring.setStrokeStyle(1, 0xffc24a, 1).setDepth(DEPTH.flat + 0.1);
+      ctx.rig.registerWorld(ring);
+      this.bag.push(ring);
+      const sprite = mkImage(ctx, this.bag, c.x, c.y, leverFrame(false));
+      sprite.setDepth(ySortDepth(c.y + 6));
+      const marker = mkImage(ctx, this.bag, c.x, c.y - 13, 'fx_marker');
+      marker.setTint(0xffc24a).setDepth(ySortDepth(c.y) + 200);
+      this.levers.push({ sprite, marker, ring, center: c, lastFrame: '' });
+    }
+    for (const t of def.gate) {
+      const c = tileCenter(t);
+      const sprite = mkImage(ctx, this.bag, c.x, c.y, gateFrame(false));
+      sprite.setDepth(DEPTH.flat);
+      const outline = ctx.scene.add.rectangle(c.x, c.y, TILE - 1, TILE - 1, 0xff3a3a, 0);
+      outline.setStrokeStyle(1, 0x7dffb0, 0.3).setDepth(DEPTH.flat + 0.2);
+      ctx.rig.registerWorld(outline);
+      this.bag.push(outline);
+      this.gate.push({ sprite, outline, center: c, closed: null, flashUntilMs: 0 });
+    }
+  }
+
+  update(st: MechanismState, timeMs: number): void {
+    if (st.type !== 'hourglass') return;
+    const s: HourglassState = st;
+    const status = hourglassStatus(this.def, s, this.playerCount);
+    // retournement : le sable vient d'augmenter d'un coup
+    if (this.lastSand >= 0 && sandJumped(this.lastSand, s.sandMs)) {
+      this.flipStartMs = timeMs;
+      this.leverUntilMs = timeMs + HOURGLASS_LEVER_MS;
+    }
+    this.lastSand = s.sandMs;
+
+    const f = hourglassFrame(status.ratio);
+    if (f !== this.lastFrame) {
+      this.sprite.setFrame(f);
+      this.lastFrame = f;
+    }
+    const flipK = Math.max(0, Math.min(1, (timeMs - this.flipStartMs) / HOURGLASS_FLIP_MS));
+    const flipping = flipK > 0 && flipK < 1;
+    const eased = 1 - Math.pow(1 - flipK, 3);
+    this.sprite.setRotation(flipping ? Math.PI * 2 * eased : 0);
+    this.sprite.setScale(flipping ? 1 + 0.25 * Math.sin(flipK * Math.PI) : 1);
+    this.sprite.setAlpha(s.waived ? 0.5 : 1);
+    const blink = s.waived ? 1 : hourglassBlinkAlpha(status.level, timeMs);
+    if (status.level === 'ok' || s.waived) this.sprite.clearTint();
+    else this.sprite.setTint(blink > 0.65 ? 0xffffff : 0xff6a5a);
+    this.glow.setTint(status.level === 'ok' ? 0xffc24a : 0xff4a3a);
+    this.glow.setAlpha(s.waived ? 0 : 0.14 + 0.1 * (status.level === 'ok' ? 0.5 + 0.5 * Math.sin(timeMs / 400) : 1 - blink) + (flipping ? 0.3 * (1 - flipK) : 0));
+
+    // leviers
+    for (let i = 0; i < this.levers.length; i++) {
+      const lv = this.levers[i];
+      const on = timeMs < this.leverUntilMs && s.lastLever === i;
+      const lf = leverFrame(on);
+      if (lf !== lv.lastFrame) {
+        lv.sprite.setFrame(lf);
+        lv.lastFrame = lf;
+      }
+      lv.marker.setVisible(!s.waived);
+      lv.marker.setY(lv.center.y - 13 + bob(timeMs, i, 1.5));
+      lv.ring.setVisible(!s.waived);
+      lv.ring.setFillStyle(lv.ring.fillColor, 0.14 + 0.1 * (0.5 + 0.5 * Math.sin(timeMs / 300 + i)));
+    }
+
+    // herse
+    const flags = gateClosedFlags(s.waived ? 0 : s.closedCount, this.gate.length);
+    for (let i = 0; i < this.gate.length; i++) {
+      const g = this.gate[i];
+      const closed = flags[i];
+      if (g.closed !== null && closed && !g.closed) g.flashUntilMs = timeMs + GATE_FLASH_MS;
+      if (closed !== g.closed) {
+        g.closed = closed;
+        g.sprite.setFrame(gateFrame(closed));
+        g.sprite.setDepth(closed ? ySortDepth(g.center.y + TILE / 2 - 1) : DEPTH.flat);
+      }
+      const k = timeMs < g.flashUntilMs ? (g.flashUntilMs - timeMs) / GATE_FLASH_MS : 0;
+      if (k > 0.5) g.sprite.setTintFill(0xffffff);
+      else g.sprite.clearTint();
+      // contour : vert discret (passable), rouge clignotant sur la prochaine tuile à fermer quand le sable est vide
+      const next = !s.waived && status.level === 'empty' && i === status.closed;
+      const warn = !s.waived && status.level === 'low' && !closed;
+      g.outline.setVisible(!s.waived && !closed);
+      if (next) g.outline.setStrokeStyle(2, 0xff3a3a, 0.45 + 0.5 * blink);
+      else if (warn) g.outline.setStrokeStyle(1, 0xff9a3a, 0.25 + 0.5 * (1 - blink));
+      else g.outline.setStrokeStyle(1, 0x7dffb0, 0.28);
+    }
+  }
+
+  /** Centre de la tuile de herse d'indice `i` (FX de fermeture). */
+  partCenter(i: number): Vec2 | null {
+    return this.gate[i]?.center ?? null;
+  }
+
+  destroy(): void {
+    destroyAll(this.bag);
+    this.levers.length = 0;
+    this.gate.length = 0;
+  }
+}
+
+// ───────────────────────────── Pont de lumière (niveau 6) ─────────────────────────────
+
+/** Durée (ms) du flash d'une planche qui s'allume. */
+const BRIDGE_FLASH_MS = 300;
+
+/**
+ * Tuiles du pont dessinées PAR-DESSUS le sol '.' : planches de lumière dorées quand `lit[i]`, abîme étoilé aux planches
+ * fantômes sinon (le sol réel sous-jacent est praticable dans la grille : c'est la simulation qui décide, ici on ne fait que
+ * montrer). Flash à l'allumage, lueur dorée pulsée sur les planches éclairées. LIT LightBridgeState.
+ */
+class LightBridgeView implements MechView {
+  readonly id: string;
+  readonly center: Vec2;
+  private readonly bag: Phaser.GameObjects.GameObject[] = [];
+  private readonly tiles: { img: Img; glow: Img; lit: boolean | null; flashUntilMs: number }[] = [];
+
+  constructor(ctx: ViewContext, def: LightBridgeDef) {
+    this.id = def.id;
+    let sx = 0;
+    let sy = 0;
+    for (const t of def.tiles) {
+      const c = tileCenter(t);
+      sx += c.x;
+      sy += c.y;
+      const img = mkImage(ctx, this.bag, c.x, c.y, bridgeFrame(false));
+      img.setDepth(DEPTH.floor + 1);
+      const glow = mkImage(ctx, this.bag, c.x, c.y, undefined, FX_GLOW_KEY);
+      glow.setBlendMode(1).setTint(0xffd86a).setScale(0.8).setAlpha(0).setDepth(DEPTH.floor + 1.5).setVisible(false);
+      this.tiles.push({ img, glow, lit: null, flashUntilMs: 0 });
+    }
+    const n = Math.max(1, def.tiles.length);
+    this.center = { x: sx / n, y: sy / n };
+  }
+
+  update(st: MechanismState, timeMs: number): void {
+    if (st.type !== 'lightBridge') return;
+    const s: LightBridgeState = st;
+    for (let i = 0; i < this.tiles.length; i++) {
+      const t = this.tiles[i];
+      const lit = bridgeTileLit(s, i);
+      if (lit !== t.lit) {
+        if (t.lit === false && lit) t.flashUntilMs = timeMs + BRIDGE_FLASH_MS;
+        t.lit = lit;
+        t.img.setFrame(bridgeFrame(lit));
+        t.glow.setVisible(lit);
+      }
+      const k = timeMs < t.flashUntilMs ? (t.flashUntilMs - timeMs) / BRIDGE_FLASH_MS : 0;
+      if (k > 0.5) t.img.setTintFill(0xffffff);
+      else t.img.clearTint();
+      if (lit) t.glow.setAlpha(0.16 + 0.08 * Math.sin(timeMs / 220 + i * 0.7) + 0.35 * k);
+    }
+  }
+
+  /** Centre de la tuile de pont d'indice `i`. */
+  partCenter(i: number): Vec2 | null {
+    const t = this.tiles[i];
+    return t ? { x: t.img.x, y: t.img.y } : null;
+  }
+
+  destroy(): void {
+    destroyAll(this.bag);
+    this.tiles.length = 0;
+  }
+}
+
 // ───────────────────────────── Fabrique ─────────────────────────────
 
 /** Retrouve le slot propriétaire de la clé qui ouvre une porte (couleur du verrou), ou undefined. */
@@ -574,6 +900,12 @@ export function createMechView(ctx: ViewContext, room: RoomDef, def: MechanismDe
       return new RuneView(ctx, def);
     case 'brazier':
       return new BrazierView(ctx, def);
+    case 'statuePair':
+      return new StatuePairView(ctx, def);
+    case 'hourglass':
+      return new HourglassView(ctx, def);
+    case 'lightBridge':
+      return new LightBridgeView(ctx, def);
     default:
       return null;
   }

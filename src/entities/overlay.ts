@@ -5,9 +5,10 @@
  */
 import type Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../core/constants';
-import type { EnemyState, GamePhase, LevelDef, RoomDef } from '../core/types';
+import type { GamePhase, LevelDef, RoomDef } from '../core/types';
 import { t } from '../i18n/i18n';
-import { HUD_DEPTH, bossBarRatio, fadeAlpha, hudRect, hudText, setTextIfChanged } from '../render/hud';
+import { HUD_DEPTH, fadeAlpha, hudRect, hudText, setTextIfChanged } from '../render/hud';
+import { MAX_BOSS_BARS, bossBarColor, bossBarFrameColor, type BossBarEntry } from '../render/bossBars';
 import type { ViewContext } from './common';
 
 type Text = Phaser.GameObjects.Text;
@@ -123,7 +124,75 @@ export interface OverlayUpdate {
   /** Temps réel (ms) depuis la dernière entrée de salle (fondu d'ouverture). */
   sinceEnterMs: number;
   exitOpen: boolean;
-  boss: EnemyState | null;
+  /** Boss puis demi-boss vivants de la salle (barres de PV), au plus MAX_BOSS_BARS. */
+  bosses: readonly BossBarEntry[];
+}
+
+/** Largeur (px) d'une barre de PV de boss / de demi-boss. */
+const BOSS_BAR_W = 560;
+const MINI_BAR_W = 400;
+/** Écart vertical (px) entre deux barres empilées. */
+const BOSS_BAR_STEP = 46;
+
+/** Une barre de PV de boss ou de demi-boss : cadre, remplissage, nom (clé i18n de l'EnemyDef). */
+class BossBarSlot {
+  private readonly bg: Rect;
+  private readonly fill: Rect;
+  private readonly name: Text;
+  private nameKey = '';
+  private tier = '';
+  private shown = false;
+
+  constructor(
+    ctx: ViewContext,
+    private readonly cx: number,
+    private readonly by: number,
+  ) {
+    this.bg = hudRect(ctx, cx, by, BOSS_BAR_W + 8, 20, 0x0b0912, 0.88, HUD_DEPTH.banner);
+    this.bg.setStrokeStyle(2, 0xff6a6a, 0.9).setVisible(false);
+    this.fill = hudRect(ctx, cx - BOSS_BAR_W / 2, by, BOSS_BAR_W, 12, 0xe0304f, 1, HUD_DEPTH.banner + 1);
+    this.fill.setOrigin(0, 0.5).setVisible(false);
+    this.name = hudText(ctx, cx, by - 14, '', { size: 16, originX: 0.5, originY: 1, color: 0xffd0d0, depth: HUD_DEPTH.banner + 2 });
+    this.name.setVisible(false);
+  }
+
+  hide(): void {
+    if (!this.shown) return;
+    this.shown = false;
+    this.bg.setVisible(false);
+    this.fill.setVisible(false);
+    this.name.setVisible(false);
+  }
+
+  show(e: BossBarEntry): void {
+    this.shown = true;
+    const w = e.tier === 'boss' ? BOSS_BAR_W : MINI_BAR_W;
+    if (e.tier !== this.tier) {
+      this.tier = e.tier;
+      this.bg.setSize(w + 8, e.tier === 'boss' ? 20 : 16).setStrokeStyle(2, bossBarFrameColor(e.tier), 0.9);
+      this.fill.setPosition(this.cx - w / 2, this.by);
+      this.name.setColor(e.tier === 'boss' ? '#ffd0d0' : '#ffe2b0').setFontSize(e.tier === 'boss' ? 16 : 14);
+    }
+    this.bg.setVisible(true);
+    this.fill.setVisible(true);
+    this.name.setVisible(true);
+    if (e.nameKey !== this.nameKey) {
+      this.nameKey = e.nameKey;
+      this.name.setText(t(e.nameKey));
+    }
+    this.fill.setSize(Math.max(1, w * e.ratio), e.tier === 'boss' ? 12 : 9);
+    this.fill.setFillStyle(bossBarColor(e.tier, e.phase), 1);
+  }
+
+  retranslate(): void {
+    if (this.nameKey) this.name.setText(t(this.nameKey));
+  }
+
+  destroy(): void {
+    this.bg.destroy();
+    this.fill.destroy();
+    this.name.destroy();
+  }
 }
 
 export class GameOverlay {
@@ -134,9 +203,7 @@ export class GameOverlay {
   private readonly exitBanner: BannerSlot;
   private readonly fade: Rect;
   private readonly flashRect: Rect;
-  private readonly bossBg: Rect;
-  private readonly bossFill: Rect;
-  private readonly bossName: Text;
+  private readonly bossBars: BossBarSlot[] = [];
   private extraFade = 0;
   private flashLeftMs = 0;
   private flashTotalMs = 1;
@@ -147,7 +214,6 @@ export class GameOverlay {
   private room: RoomDef | null = null;
   private roomIndex = 0;
   private roomTotal = 1;
-  private bossKind = '';
 
   constructor(ctx: ViewContext, private readonly level: LevelDef) {
     this.ctx = ctx;
@@ -160,15 +226,8 @@ export class GameOverlay {
     this.flashRect.setVisible(false);
     this.fade = hudRect(ctx, cx, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0, HUD_DEPTH.fade);
     this.fade.setVisible(false);
-    // barre de boss
-    const bw = 560;
-    const by = GAME_HEIGHT - 34;
-    this.bossBg = hudRect(ctx, cx, by, bw + 8, 20, 0x0b0912, 0.88, HUD_DEPTH.banner);
-    this.bossBg.setStrokeStyle(2, 0xff6a6a, 0.9).setVisible(false);
-    this.bossFill = hudRect(ctx, cx - bw / 2, by, bw, 12, 0xe0304f, 1, HUD_DEPTH.banner + 1);
-    this.bossFill.setOrigin(0, 0.5).setVisible(false);
-    this.bossName = hudText(ctx, cx, by - 14, '', { size: 16, originX: 0.5, originY: 1, color: 0xffd0d0, depth: HUD_DEPTH.banner + 2 });
-    this.bossName.setVisible(false);
+    // barres de PV des boss et demi-boss (empilées depuis le bas de l'écran)
+    for (let i = 0; i < MAX_BOSS_BARS; i++) this.bossBars.push(new BossBarSlot(ctx, cx, GAME_HEIGHT - 34 - i * BOSS_BAR_STEP));
   }
 
   /** Nouvelle salle : bandeau de nom + indice d'introduction (sauf redémarrage après défaite : bandeau court). */
@@ -204,7 +263,7 @@ export class GameOverlay {
       if (this.room.introHintKey) this.hintBanner.retext(t(this.room.introHintKey), '');
     }
     this.applyPhaseBanner(this.lastPhase, true);
-    if (this.bossKind) this.bossName.setText(t(`enemy.${this.bossKind}`));
+    for (const b of this.bossBars) b.retranslate();
   }
 
   private applyPhaseBanner(phase: GamePhase, retext = false): void {
@@ -256,20 +315,11 @@ export class GameOverlay {
       this.flashRect.setVisible(k > 0).setAlpha(this.flashAlpha * k);
     }
 
-    // boss
-    const boss = a.boss;
-    this.bossBg.setVisible(!!boss);
-    this.bossFill.setVisible(!!boss);
-    this.bossName.setVisible(!!boss);
-    if (boss) {
-      if (boss.kind !== this.bossKind) {
-        this.bossKind = boss.kind;
-        this.bossName.setText(t(`enemy.${boss.kind}`));
-      }
-      const r = bossBarRatio(boss);
-      this.bossFill.setSize(Math.max(1, 560 * r), 12);
-      // les phases de boss donnent une teinte plus vive
-      this.bossFill.setFillStyle(boss.phase >= 2 ? 0xff3050 : boss.phase === 1 ? 0xe0504f : 0xe0304f, 1);
+    // barres de boss / demi-boss
+    for (let i = 0; i < this.bossBars.length; i++) {
+      const e = a.bosses[i];
+      if (e) this.bossBars[i].show(e);
+      else this.bossBars[i].hide();
     }
   }
 
@@ -280,9 +330,8 @@ export class GameOverlay {
     this.bigBanner.destroy();
     this.fade.destroy();
     this.flashRect.destroy();
-    this.bossBg.destroy();
-    this.bossFill.destroy();
-    this.bossName.destroy();
+    for (const b of this.bossBars) b.destroy();
+    this.bossBars.length = 0;
     void this.ctx;
   }
 }

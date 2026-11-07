@@ -1,0 +1,14 @@
+{
+  "enemy.warden": "Frost Warden",
+  "enemy.warden.desc": "Mini-boss: heavy blows, a charge and a ground stomp. Enrages when half defeated.",
+  "enemy.frostqueen": "The Frost Queen",
+  "enemy.frostqueen.desc": "Boss: ice shards in fans and rings, gliding charges, teleportation and bats. Three phases.",
+  "enemy.pyromancer": "Ember Pyromancer",
+  "enemy.pyromancer.desc": "Mini-boss: keeps its distance, hurls fireballs and novas, and summons wisps.",
+  "enemy.forgelord": "Forge Lord",
+  "enemy.forgelord.desc": "Boss: hammer and shockwave, fireball barrages, summoned knights, final enrage. Three phases.",
+  "enemy.wraith": "Void Wraith",
+  "enemy.wraith.desc": "Flying mini-boss: vanishes and reappears, fires dark bolts.",
+  "enemy.voidlord": "Lord of the Void",
+  "enemy.voidlord.desc": "Final boss: teleportation, spirals, rings, danger zones and summons. Four phases."
+}

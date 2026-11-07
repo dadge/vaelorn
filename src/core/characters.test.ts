@@ -102,8 +102,8 @@ describe('characters', () => {
 });
 
 describe('enemies', () => {
-  it('9 types, clés i18n et ia conformes', () => {
-    expect(ENEMY_KINDS).toHaveLength(9);
+  it('15 types, clés i18n et ia conformes', () => {
+    expect(ENEMY_KINDS).toHaveLength(15);
     const expectedAi: Record<string, string> = {
       slime: 'wander-chase',
       bat: 'erratic-flyer',
@@ -114,6 +114,12 @@ describe('enemies', () => {
       knight: 'melee',
       golem: 'boss-golem',
       morvane: 'boss-morvane',
+      warden: 'miniboss-warden',
+      frostqueen: 'boss-frostqueen',
+      pyromancer: 'miniboss-pyromancer',
+      forgelord: 'boss-forgelord',
+      wraith: 'miniboss-wraith',
+      voidlord: 'boss-voidlord',
     };
     for (const k of ENEMY_KINDS) {
       const e = getEnemyDef(k);
@@ -148,6 +154,9 @@ describe('enemies', () => {
       expect(e.aggroRadius).toBeGreaterThan(0);
       if (e.isBoss) {
         expect([18, 20]).toContain(e.radius);
+      } else if (e.isMiniBoss) {
+        expect(e.radius).toBeGreaterThanOrEqual(9);
+        expect(e.radius).toBeLessThanOrEqual(14);
       } else {
         expect(e.radius).toBeGreaterThanOrEqual(5);
         expect(e.radius).toBeLessThanOrEqual(8);
@@ -156,6 +165,15 @@ describe('enemies', () => {
     expect(ENEMIES.golem.isBoss).toBe(true);
     expect(ENEMIES.morvane.isBoss).toBe(true);
     expect(ENEMIES.knight.isBoss).toBe(false);
+    // niveaux 4-6 : demi-boss = isMiniBoss (isBoss false), boss de fin = isBoss
+    for (const k of ['warden', 'pyromancer', 'wraith'] as const) {
+      expect(ENEMIES[k].isBoss, k).toBe(false);
+      expect(ENEMIES[k].isMiniBoss, k).toBe(true);
+    }
+    for (const k of ['frostqueen', 'forgelord', 'voidlord'] as const) {
+      expect(ENEMIES[k].isBoss, k).toBe(true);
+      expect(ENEMIES[k].isMiniBoss ?? false, k).toBe(false);
+    }
   });
 
   it('getEnemyDef lance sur type inconnu', () => {

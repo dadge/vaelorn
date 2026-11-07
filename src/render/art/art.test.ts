@@ -34,7 +34,7 @@ import {
 const HEROES: CharacterId[] = ['david', 'sandrine', 'romain', 'valentine', 'aelith', 'brokk', 'grok', 'mira'];
 const DIRS: Dir[] = ['down', 'up', 'left', 'right'];
 const ENEMIES: EnemyKind[] = ['slime', 'bat', 'skeleton', 'archer', 'spider', 'wisp', 'knight'];
-const THEMES: ZoneTheme[] = ['crypt', 'grove', 'citadel'];
+const THEMES: ZoneTheme[] = ['crypt', 'grove', 'citadel', 'frost', 'ember', 'void'];
 
 const atlas = buildAtlasData();
 
@@ -256,9 +256,13 @@ describe('héros : lisibilité et distinction', () => {
     for (const k of ENEMIES) {
       expect(diffCount(framePixels(`enemy_${k}_0`), framePixels(`enemy_${k}_1`)), k).toBeGreaterThan(2);
     }
-    for (const k of ['golem', 'morvane']) {
+    for (const k of ['golem', 'morvane', 'frostqueen', 'forgelord', 'voidlord']) {
       expect(diffCount(framePixels(`boss_${k}_0`), framePixels(`boss_${k}_1`)), k).toBeGreaterThan(10);
       expect(diffCount(framePixels(`boss_${k}_0`), framePixels(`boss_${k}_hurt`)), `${k} hurt`).toBeGreaterThan(100);
+    }
+    for (const k of ['warden', 'pyromancer', 'wraith']) {
+      expect(diffCount(framePixels(`miniboss_${k}_0`), framePixels(`miniboss_${k}_1`)), k).toBeGreaterThan(8);
+      expect(diffCount(framePixels(`miniboss_${k}_0`), framePixels(`miniboss_${k}_hurt`)), `${k} hurt`).toBeGreaterThan(60);
     }
   });
 

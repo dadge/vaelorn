@@ -373,7 +373,7 @@ describe('dialogues et enchaînement des niveaux', () => {
     expect(advanceLevel(s).levelIndex).toBe(3);
   });
 
-  it('parcours complet niveau 1 → 3 puis victoire', () => {
+  it('parcours complet de tous les niveaux (LEVELS.length) puis victoire', () => {
     let s = sessionOf(1);
     const trail: string[] = [];
     for (let guard = 0; guard < 20; guard++) {
@@ -386,7 +386,7 @@ describe('dialogues et enchaînement des niveaux', () => {
       }
       if (outro.to === 'dialogue') s = outro.session;
     }
-    expect(trail).toEqual(['intro1>game', 'intro2>game', 'intro3>game', 'result']);
+    expect(trail).toEqual([...LEVELS.map((_, i) => `intro${i + 1}>game`), 'result']);
   });
 
   it('portraitKindOf / speakerColor : orateurs connus et repli narrateur', () => {

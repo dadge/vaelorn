@@ -19,6 +19,12 @@ export const ENEMY_KINDS: readonly EnemyKind[] = [
   'knight',
   'golem',
   'morvane',
+  'warden',
+  'frostqueen',
+  'pyromancer',
+  'forgelord',
+  'wraith',
+  'voidlord',
 ];
 
 /** Définitions par type. */
@@ -142,7 +148,123 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
     aggroRadius: 500,
     isBoss: true,
   },
+
+  // ───────── Niveaux 4-6 : un demi-boss (isMiniBoss) et un boss de fin (isBoss) par niveau ─────────
+  // Demi-boss niveau 4 : gardien de givre. Mêlée lourde, charge, coup de sol ; rage à 50 % (2 phases). ≈ 3 × le chevalier.
+  warden: {
+    kind: 'warden',
+    nameKey: 'enemy.warden',
+    hp: 270,
+    damage: 16,
+    speed: 40,
+    radius: 12,
+    ai: 'miniboss-warden',
+    attackRange: 30,
+    attackCooldownMs: 1500,
+    aggroRadius: 220,
+    isBoss: false,
+    isMiniBoss: true,
+  },
+  // Boss final niveau 4 : la Reine du Givre (3 phases : éclats en éventail/anneau, glissade, téléportation, chauves-souris).
+  frostqueen: {
+    kind: 'frostqueen',
+    nameKey: 'enemy.frostqueen',
+    hp: 1600,
+    damage: 20,
+    speed: 44,
+    radius: 18,
+    ai: 'boss-frostqueen',
+    attackRange: 110,
+    attackCooldownMs: 1700,
+    aggroRadius: 500,
+    isBoss: true,
+  },
+  // Demi-boss niveau 5 : pyromancien. Garde ses distances, nova de feu, feux follets ; 2 phases.
+  pyromancer: {
+    kind: 'pyromancer',
+    nameKey: 'enemy.pyromancer',
+    hp: 320,
+    damage: 14,
+    speed: 36,
+    radius: 10,
+    ai: 'miniboss-pyromancer',
+    attackRange: 140,
+    attackCooldownMs: 1600,
+    aggroRadius: 240,
+    isBoss: false,
+    isMiniBoss: true,
+  },
+  // Boss final niveau 5 : seigneur de la forge (3 phases : marteau/onde de choc, rafales de boules de feu, enrage).
+  forgelord: {
+    kind: 'forgelord',
+    nameKey: 'enemy.forgelord',
+    hp: 1900,
+    damage: 24,
+    speed: 38,
+    radius: 20,
+    ai: 'boss-forgelord',
+    attackRange: 60,
+    attackCooldownMs: 1800,
+    aggroRadius: 500,
+    isBoss: true,
+  },
+  // Demi-boss niveau 6 : spectre (volant). Disparaît / réapparaît, tirs sombres ; 2 phases.
+  wraith: {
+    kind: 'wraith',
+    nameKey: 'enemy.wraith',
+    hp: 380,
+    damage: 16,
+    speed: 46,
+    radius: 10,
+    ai: 'miniboss-wraith',
+    attackRange: 120,
+    attackCooldownMs: 1500,
+    aggroRadius: 240,
+    isBoss: false,
+    isMiniBoss: true,
+  },
+  // Boss final niveau 6 : seigneur du Néant (4 phases : téléportation, spirales, anneaux, zones de danger, invocations).
+  voidlord: {
+    kind: 'voidlord',
+    nameKey: 'enemy.voidlord',
+    hp: 2000,
+    damage: 17,
+    speed: 42,
+    radius: 18,
+    ai: 'boss-voidlord',
+    attackRange: 120,
+    attackCooldownMs: 1600,
+    aggroRadius: 500,
+    isBoss: true,
+  },
 };
+
+/** Boss de fin de niveau (golem, morvane, frostqueen, forgelord, voidlord) : plafond de dégâts 20 %/2 s, barre de boss. */
+export const BOSS_KINDS: readonly EnemyKind[] = ENEMY_KINDS.filter((k) => ENEMIES[k].isBoss);
+/** Demi-boss des niveaux 4-6 (warden, pyromancer, wraith) : plafond de dégâts plus doux, sortie 'clear' bloquée tant qu'ils vivent. */
+export const MINI_BOSS_KINDS: readonly EnemyKind[] = ENEMY_KINDS.filter((k) => ENEMIES[k].isMiniBoss === true);
+/** Types d'ennemis volants : les fosses ne les bloquent pas (voir `collision.ts`). */
+export const FLYING_KINDS: readonly EnemyKind[] = ['bat', 'wisp', 'morvane', 'wraith', 'voidlord'];
+
+/** Vrai si `kind` est un boss de fin de niveau (`isBoss`). Faux pour un type inconnu. */
+export function isBossKind(kind: EnemyKind | string): boolean {
+  return ENEMIES[kind as EnemyKind]?.isBoss === true;
+}
+
+/** Vrai si `kind` est un demi-boss (`isMiniBoss`, niveaux 4-6). Faux pour un type inconnu. */
+export function isMiniBossKind(kind: EnemyKind | string): boolean {
+  return ENEMIES[kind as EnemyKind]?.isMiniBoss === true;
+}
+
+/** Vrai pour un boss OU un demi-boss (IA de boss : jamais étourdi ni repoussé, aggro illimité une fois engagé, phases). */
+export function isAnyBossKind(kind: EnemyKind | string): boolean {
+  return isBossKind(kind) || isMiniBossKind(kind);
+}
+
+/** Vrai si `kind` vole (les fosses ne le bloquent pas). */
+export function isFlyingKind(kind: EnemyKind | string): boolean {
+  return (FLYING_KINDS as readonly string[]).includes(kind);
+}
 
 /**
  * Définition d'un type d'ennemi. Lance une erreur si le type est inconnu (donnée de niveau invalide).

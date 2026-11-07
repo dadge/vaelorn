@@ -12,7 +12,9 @@ import { INTERACT_RANGE, PLAYER_COLORS, PLAYER_COLOR_NAMES, REVIVE_RANGE, ROOM_C
 import { CHARACTERS, specialFraction } from '../core/characters';
 import {
   areAllRequirementsMet,
+  hourglassLeverIndex,
   requiredPushers,
+  statueRotationTarget,
   type RequirementContext,
 } from '../core/mechanisms';
 import { isObjectiveDone, isZoneOccupied, objectivesForPlayer } from '../core/objectives';
@@ -35,7 +37,16 @@ import type {
 } from '../core/types';
 import { t } from '../i18n/i18n';
 import { ATLAS_KEY } from './art';
-import { heartFrame, torchIconFrame, uiKeyFrame } from './art/animations';
+import { heartFrame, hourglassFrame, lanternFrame, torchIconFrame, uiKeyFrame } from './art/animations';
+import {
+  activeHourglass,
+  hourglassBarColor,
+  hourglassBarWidth,
+  hourglassBlinkAlpha,
+  lanternBearers,
+  lanternHudInfo,
+  type HourglassLevel,
+} from './mechHud';
 import { edgeIndicator } from './camera';
 import { hex } from './palettes';
 import { mixColor as mixHex } from './specialFx';
@@ -246,7 +257,7 @@ export interface ContextPrompt {
   /** Couleur d'accent (joueur concerné), ou null. */
   color: number | null;
   /** Catégorie (tests, icône) : 'revive' | 'lever' | 'door' | 'key' | 'rune' | 'block' | 'exit' | 'brazier'. */
-  kind: 'revive' | 'lever' | 'door' | 'key' | 'rune' | 'block' | 'exit' | 'brazier';
+  kind: 'revive' | 'lever' | 'door' | 'key' | 'rune' | 'block' | 'exit' | 'brazier' | 'statue' | 'hourglass';
 }
 
 function slotParams(slot: number, n: number): { params: Record<string, string>; color: number } {
@@ -394,6 +405,20 @@ export function computeContextPrompt(state: GameState, level: LevelDef, room: Ro
           brazierBest = bp;
           brazierBestD = d;
         }
+        break;
+      }
+      case 'statuePair': {
+        // debout sur un socle : l'appui Action fait pivoter l'AUTRE statue (la simulation arbitre, on ne fait qu'annoncer)
+        if (st.type !== 'statuePair' || statueRotationTarget(def, st, p) === null) break;
+        consider(0, { key: 'hint.rotateStatue', color: null, kind: 'statue' });
+        break;
+      }
+      case 'hourglass': {
+        if (st.type !== 'hourglass') break;
+        const li = hourglassLeverIndex(def, p);
+        if (li < 0) break;
+        const lt = def.levers[li];
+        consider(Math.hypot(p.pos.x - (lt[0] + 0.5) * TILE, p.pos.y - (lt[1] + 0.5) * TILE), { key: 'hint.flipHourglass', color: null, kind: 'hourglass' });
         break;
       }
       default:
@@ -637,6 +662,27 @@ export class PlayerHud {
   private readonly spBarFill: Rect;
   private readonly spText: Text;
   private readonly spBarW: number;
+  // sablier partagé (niveau 5) et lanterne du pont de lumière (niveau 6) : bandeaux en haut à droite de la vue
+  private readonly puzBg: Rect;
+  private readonly hgIcon: Img;
+  private readonly hgBarBg: Rect;
+  private readonly hgBarFill: Rect;
+  private readonly hgText: Text;
+  private readonly lanBg: Rect;
+  private readonly lanIcon: Img;
+  private readonly lanText: Text;
+  private readonly hgBarW: number;
+  private readonly puzRight: number;
+  private readonly puzTop: number;
+  private hgShown = false;
+  private hgLevel: HourglassLevel = 'ok';
+  private hgRatio = 0;
+  private hgFrame = '';
+  private hgSig = '';
+  private hgW = -1;
+  private lanShown = false;
+  private lanSig = '';
+  private lanFrame = '';
   private spName = '';
   private spSig = '';
   private spHint = '';
@@ -779,6 +825,27 @@ export class PlayerHud {
     this.enemyBg.setStrokeStyle(2, 0xff5a4a, 0.8).setVisible(false);
     this.enemyText = hudText(ctx, vx + vw - m - 7, vy + m + 4, '', { size: this.fs - 1, originX: 1, color: 0xffb0a0 });
     this.enemyText.setVisible(false);
+
+    // bandeaux « sablier » et « lanterne » : sous le compteur d'ennemis, alignés à droite
+    this.puzRight = vx + vw - m;
+    this.puzTop = vy + m + 32;
+    this.hgBarW = Math.max(70, Math.min(120, Math.floor(vw * 0.18)));
+    this.puzBg = hudRect(ctx, this.puzRight + 4, this.puzTop - 4, 10, 10, 0x0b0912, 0.62);
+    this.puzBg.setOrigin(1, 0).setStrokeStyle(2, 0xe8b44a, 0.8).setVisible(false);
+    this.hgIcon = hudIcon(ctx, this.puzRight - 32, this.puzTop, hourglassFrame(1), 2);
+    const hgBarX = this.puzRight - 32 - 6 - this.hgBarW;
+    const hgBarY = this.puzTop + this.fs + 8;
+    this.hgBarBg = hudRect(ctx, hgBarX - 1, hgBarY - 1, this.hgBarW + 2, 10, 0x0b0912, 0.9);
+    this.hgBarBg.setOrigin(0, 0);
+    this.hgBarFill = hudRect(ctx, hgBarX, hgBarY, this.hgBarW, 8, hourglassBarColor('ok'), 1, HUD_DEPTH.content);
+    this.hgBarFill.setOrigin(0, 0);
+    this.hgText = hudText(ctx, this.puzRight - 32 - 6, this.puzTop + 2, '', { size: this.fs - 2, originX: 1, color: 0xffe08a });
+    for (const o of [this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText]) o.setVisible(false);
+    this.lanBg = hudRect(ctx, this.puzRight + 4, this.puzTop - 4, 10, 10, 0x0b0912, 0.62);
+    this.lanBg.setOrigin(1, 0).setStrokeStyle(2, 0xffd86a, 0.8).setVisible(false);
+    this.lanIcon = hudIcon(ctx, this.puzRight - 24, this.puzTop, lanternFrame(0), 3);
+    this.lanText = hudText(ctx, this.puzRight - 24 - 6, this.puzTop + 12, '', { size: this.fs - 2, originX: 1, originY: 0.5, color: 0xffe9a8, wrap: Math.floor(vw * 0.4), align: 'right' });
+    for (const o of [this.lanIcon, this.lanText]) o.setVisible(false);
   }
 
   /** Force la re-traduction des textes au prochain rafraîchissement (changement de langue). */
@@ -788,6 +855,8 @@ export class PlayerHud {
     const sp = CHARACTERS[p.characterId].special;
     this.spName = sp ? t(sp.nameKey) : '';
     this.spSig = '';
+    this.hgSig = '';
+    this.lanSig = '';
     this.objSig = '';
     this.promptSig = '';
     this.signSig = '';
@@ -826,6 +895,7 @@ export class PlayerHud {
     }
     this.updateArrows(state, a);
     this.updateSpecial(p, a);
+    this.blinkHourglass(a.timeMs);
     if (this.toastLeftMs > 0) {
       this.toastLeftMs -= a.dtMs;
       if (this.toastLeftMs <= 0) {
@@ -889,6 +959,7 @@ export class PlayerHud {
     const { level } = this.env;
     const down = p.status === 'down';
     this.refreshTorch(p, room);
+    this.refreshPuzzles(p, a);
 
     // PV
     const hpStr = `${t('hud.hp')} ${Math.max(0, Math.ceil(p.hp))}/${p.maxHp}`;
@@ -1026,6 +1097,87 @@ export class PlayerHud {
     }
   }
 
+  /** Sablier (temps de sable restant) et lanterne (porteur) : bandeaux de la vue, rafraîchis à ~16 Hz. */
+  private refreshPuzzles(p: PlayerState, a: PlayerHudUpdate): void {
+    const { state, room } = a;
+    const hg = activeHourglass(state, room);
+    const showHg = hg !== null && p.status === 'alive';
+    if (showHg !== this.hgShown) {
+      this.hgShown = showHg;
+      for (const o of [this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText]) o.setVisible(showHg);
+      this.hgSig = '';
+    }
+    let rowBottom = this.puzTop;
+    let any = false;
+    if (showHg && hg) {
+      any = true;
+      const s = hg.status;
+      this.hgRatio = s.ratio;
+      this.hgLevel = s.level;
+      const f = hourglassFrame(s.ratio);
+      if (f !== this.hgFrame) {
+        this.hgFrame = f;
+        this.hgIcon.setFrame(f);
+      }
+      const sig = s.level === 'empty' ? 'e' : `s${s.seconds}`;
+      if (sig !== this.hgSig) {
+        this.hgSig = sig;
+        this.hgText.setText(s.level === 'empty' ? t('hud.hourglass.empty') : t('hud.hourglass.sand', { seconds: s.seconds }));
+        this.hgBarFill.setFillStyle(hourglassBarColor(s.level), 1);
+        this.hgW = -1;
+        const w = Math.max(this.hgBarW + 38, this.hgText.width + 44);
+        this.puzBg.setSize(w + 8, 32 + 8);
+      }
+      const bw = hourglassBarWidth(s.ratio, this.hgBarW);
+      if (bw !== this.hgW) {
+        this.hgW = bw;
+        this.hgBarFill.setSize(Math.max(0.001, bw), 8);
+        this.hgBarFill.setVisible(bw > 0);
+      }
+      rowBottom = this.puzTop + 40;
+    }
+    this.puzBg.setVisible(any);
+
+    const info = lanternHudInfo(lanternBearers(state, room), p.id);
+    const showLan = info !== null && p.status === 'alive';
+    if (showLan !== this.lanShown) {
+      this.lanShown = showLan;
+      this.lanIcon.setVisible(showLan);
+      this.lanText.setVisible(showLan);
+      this.lanBg.setVisible(showLan);
+      this.lanSig = '';
+    }
+    if (showLan && info) {
+      const sig = `${info.isBearer ? 'b' : 'f'}${info.bearerId}`;
+      const y0 = any ? rowBottom + 6 : this.puzTop;
+      if (sig !== this.lanSig || this.lanIcon.y !== y0) {
+        this.lanSig = sig;
+        const bearer = state.players[info.bearerId];
+        const name = bearer ? t(CHARACTERS[bearer.characterId].nameKey) : '';
+        this.lanText.setText(info.isBearer ? t('hud.lantern.bearer') : t('hud.lantern.follow', { name }));
+        this.lanText.setColor(info.isBearer ? '#ffe9a8' : hex(PLAYER_COLORS[info.bearerId] ?? 0xffffff));
+        this.lanIcon.setY(y0);
+        this.lanText.setY(y0 + 12);
+        const w = this.lanText.width + 24 + 18;
+        this.lanBg.setPosition(this.puzRight + 4, y0 - 4).setSize(w, 32);
+      }
+      const lf = lanternFrame(a.timeMs);
+      if (lf !== this.lanFrame) {
+        this.lanFrame = lf;
+        this.lanIcon.setFrame(lf);
+      }
+    }
+  }
+
+  /** Clignotement du bandeau de sablier quand il est presque vide / vide (à chaque frame : seulement l'opacité). */
+  private blinkHourglass(timeMs: number): void {
+    if (!this.hgShown) return;
+    const al = hourglassBlinkAlpha(this.hgLevel, timeMs);
+    this.hgIcon.setAlpha(al);
+    this.hgBarFill.setAlpha(al);
+    this.hgText.setAlpha(this.hgLevel === 'ok' ? 1 : 0.6 + 0.4 * al);
+  }
+
   /** Jauge du spécial : remplissage, pulsation « PRÊT », flash au retour de la charge, texte (clé i18n). */
   private updateSpecial(p: PlayerState, a: PlayerHudUpdate): void {
     const st = specialStatus(p);
@@ -1110,6 +1262,7 @@ export class PlayerHud {
       this.frameGfx, this.name, this.hp, ...this.hearts, ...this.keyIcons, this.objHeader, ...this.objIcons, ...this.objTexts, this.objBg,
       this.promptBg, this.promptText, this.signBg, this.signText, this.downOverlay, this.downIcon, this.downTitle, this.downSub,
       this.barBg, this.barFill, this.toastBg, this.toastText, ...this.arrows, ...this.enemyArrows, this.enemyBg, this.enemyText, this.torchIcon, this.torchBarBg, this.torchBarFill, this.spIcon, this.spBarBg, this.spBarFill, this.spText,
+      this.puzBg, this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText, this.lanBg, this.lanIcon, this.lanText,
     ];
     for (const o of all) o.destroy();
     this.hearts.length = 0;

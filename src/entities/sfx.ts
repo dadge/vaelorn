@@ -5,6 +5,7 @@
  * `sfxForEvent` est pur (testé) : il associe un SimEvent à un nom de son.
  */
 import type { SimEvent, SpecialKind } from '../core/types';
+import { spriteTier } from '../render/art/enemyTiers';
 
 export type SfxName =
   | 'attack'
@@ -37,7 +38,13 @@ export type SfxName =
   | 'brazierLit'
   | 'torchRefuel'
   | 'torchLow'
-  | 'torchOut';
+  | 'torchOut'
+  // mécanismes des niveaux 4-6 et demi-boss
+  | 'statueRotated'
+  | 'hourglassFlipped'
+  | 'hourglassEmpty'
+  | 'gateClosed'
+  | 'minibossPhase';
 
 interface SfxSpec {
   /** Fréquence de départ / d'arrivée (Hz). */
@@ -84,6 +91,12 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   torchRefuel: { f0: 420, f1: 840, durMs: 200, type: 'triangle', vol: 0.06, then: { f0: 630, f1: 1260, delayMs: 100 } },
   torchLow: { f0: 520, f1: 330, durMs: 180, type: 'triangle', vol: 0.06, then: { f0: 520, f1: 330, delayMs: 220 } },
   torchOut: { f0: 300, f1: 70, durMs: 420, type: 'sawtooth', vol: 0.07 },
+  // statues jumelles, sablier partagé, herse, demi-boss
+  statueRotated: { f0: 150, f1: 90, durMs: 260, type: 'square', vol: 0.06, then: { f0: 210, f1: 340, delayMs: 200 } },
+  hourglassFlipped: { f0: 520, f1: 260, durMs: 200, type: 'triangle', vol: 0.06, then: { f0: 300, f1: 640, delayMs: 140 } },
+  hourglassEmpty: { f0: 340, f1: 110, durMs: 420, type: 'sawtooth', vol: 0.07, then: { f0: 340, f1: 110, delayMs: 260 } },
+  gateClosed: { f0: 110, f1: 48, durMs: 240, type: 'square', vol: 0.08 },
+  minibossPhase: { f0: 150, f1: 70, durMs: 380, type: 'sawtooth', vol: 0.07 },
 };
 
 /** Son d'une attaque spéciale selon sa famille. Pur. */
@@ -140,7 +153,16 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
     case 'levelCompleted':
       return 'complete';
     case 'bossPhase':
-      return 'boss';
+      // boss de fin (48×48) : grondement long ; demi-boss (32×32) : plus court
+      return spriteTier(e.kind) === 'mini' ? 'minibossPhase' : 'boss';
+    case 'statueRotated':
+      return 'statueRotated';
+    case 'hourglassFlipped':
+      return 'hourglassFlipped';
+    case 'hourglassEmpty':
+      return 'hourglassEmpty';
+    case 'gateClosed':
+      return 'gateClosed';
     case 'teamWipe':
       return 'wipe';
     case 'enemySpawned':

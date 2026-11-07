@@ -1,0 +1,18 @@
+{
+  "dev.label.bridge": "Pont de lumière",
+  "dev.label.hourglass": "Sablier",
+  "dev.label.statues": "Statue jumelle",
+  "dev.level.name": "Salle de test (dev)",
+  "dev.objective": "Objectif de test",
+  "dev.room.bosses": "Test : demi-boss et boss",
+  "dev.room.bridge": "Test : pont de lumière",
+  "dev.room.hourglass": "Test : sablier partagé",
+  "dev.room.statues": "Test : statues jumelles",
+  "hint.flipHourglass": "Appuie sur Action pour retourner le sablier",
+  "hint.rotateStatue": "Appuie sur Action pour faire pivoter l'autre statue",
+  "hud.hourglass.empty": "Sablier vide !",
+  "hud.hourglass.emptyToast": "Le sable est écoulé : la herse se referme !",
+  "hud.hourglass.sand": "Sablier : {seconds} s",
+  "hud.lantern.bearer": "Tu portes la lanterne : guide les autres",
+  "hud.lantern.follow": "Reste dans la lumière de {name}"
+}

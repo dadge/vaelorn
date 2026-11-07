@@ -592,6 +592,17 @@ export function portraitKindOf(speakerId: string): PortraitKind {
 
 /** Couleur (0xRRGGBB) du nom d'un orateur dans la boîte de dialogue. */
 export function speakerColor(speakerId: string): number {
+  // Boss des niveaux 4 à 6 : couleur propre au nom, portrait de narrateur (pas de portrait dédié pour l'instant).
+  switch (speakerId) {
+    case 'frostqueen':
+      return 0x8fd8ff;
+    case 'forgelord':
+      return 0xff9a3c;
+    case 'voidlord':
+      return 0xb07cff;
+    default:
+      break;
+  }
   switch (portraitKindOf(speakerId)) {
     case 'aldric':
       return 0xffd36b;
@@ -703,6 +714,9 @@ export function replaySession(session: GameSession, outcome: 'victory' | 'defeat
     stats: emptyStats(session.playerCount),
   };
   delete next.startRoomIndex;
+  // Victoire : nouvelle partie complète, aucun niveau terminé ; défaite : on retente le niveau, la progression est conservée.
+  if (outcome === 'victory') delete next.completedLevelIds;
+  else if (session.completedLevelIds) next.completedLevelIds = session.completedLevelIds.slice();
   return next;
 }
 

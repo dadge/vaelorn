@@ -176,17 +176,21 @@ Palettes (`src/render/palettes.ts`) : une palette cohérente par thème de donjo
 ## 7. Scénario et progression
 
 Royaume de **Vaelorn**. Le **Cristal de l'Aube**, source de sa lumière, s'est brisé : l'ancien seigneur déchu **Morvane** a dispersé
-ses fragments dans trois donjons. Quatre héros partent les récupérer.
+ses fragments dans les profondeurs du royaume. Quatre héros partent les récupérer, à travers six niveaux.
 
 | Niveau | Id | Thème | Nom FR | Contenu |
 |---|---|---|---|---|
 | 1 | `level1` | crypt | Les Cryptes Oubliées | Tutoriel : déplacement, attaque, relevage, 1ʳᵉ porte à plaques coopératives, clés personnelles simples. Sortie scellée à la fin (pas de boss). ~5–6 salles, 5–7 min. |
 | 2 | `level2` | grove | Le Bosquet Putride | Mécanismes séparés simultanés (leviers à fenêtre, runes à vision partagée), premier boss : **Gorgrim**, golem de racines. ~6–7 salles, 6–8 min. |
-| 3 | `level3` | citadel | La Citadelle de Morvane | Plus long (~8–9 salles, 8–10 min) : combine tout (plaques, leviers, clés, blocs 2 joueurs, runes), boss final **Morvane** (3 phases). |
+| 3 | `level3` | citadel | La Citadelle de Morvane | Plus long (~8–9 salles, 8–10 min) : combine tout (plaques, leviers, clés, blocs 2 joueurs, runes), boss **Morvane** (3 phases). |
+| 4 | `level4` | frost | Les Cavernes de Givre | Statue jumelle, salle sombre, deux demi-boss (gardien de givre), boss **reine du givre** (voir §10). |
+| 5 | `level5` | ember | Les Forges Ardentes | Sablier partagé, bloc 2×2, salle sombre, deux demi-boss pyromanciens, boss **seigneur de la forge** (voir §10). |
+| 6 | `level6` | void | Les Abysses du Néant | **Dernier niveau** (9 salles, ~9–10 min) : pont de lumière (porteur de lanterne par slot, repris par le joueur vivant le plus proche s'il tombe), salles sombres, embuscades de rive d'arrivée, deux demi-boss spectres, boss final **Seigneur du Néant** (voir §10). |
 
 Personnages secondaires (proposés, documentés au README) : **Maître Aldric** (archiviste du roi, donne la mission), **Lyssa** (esprit du cristal,
-voix dans les fragments), **Gorgrim** (golem gardien corrompu), **Morvane**. Fin : Morvane vaincu, le Cristal est reconstitué mais Lyssa révèle
-qu'une ombre plus ancienne dort sous Vaelorn (ouverture vers une suite). Chaque niveau : intro (3–5 répliques) et conclusion (2–4 répliques) qui relie à la suite.
+voix dans les fragments), **Gorgrim** (golem gardien corrompu), **Morvane**, **le Seigneur du Néant**. Fin : Morvane vaincu, Lyssa révèle
+qu'une ombre plus ancienne dort sous Vaelorn ; au niveau 6 les héros la vainquent (le Seigneur du Néant), le Cristal rayonne enfin sans ombre et le jeu
+se termine (plus d'« à suivre »). Chaque niveau : intro (3–5 répliques) et conclusion (2–4 répliques) qui relie à la suite.
 
 Familles (personnages jouables inspirés de proches, stylisés heroic fantasy) :
 **David** — guerrier (fort, très résistant). **Sandrine** — magicienne (très offensive, fragile). **Romain** — éclaireur (rapide, moyen).
@@ -206,6 +210,16 @@ Chaque mécanisme porte une indication « qui doit faire quoi » (couleur du slo
 Les scènes se passent un objet `GameSession` (voir `src/render/session.ts`) via `scene.start(key, data)` :
 `{ playerCount, players: PlayerSetup[], levelIndex, language }` — sérialisable.
 
+### Sauvegarde et reprise (ajout)
+
+Sauvegarde de progression : `src/core/save.ts` (format `SaveGame`, validation, migrations v0 → v1 → v2, mises à jour « salle atteinte » /
+« niveau terminé »), `src/core/saveRepository.ts` (`SaveRepository` + `LocalStorageSaveRepository` / `MemorySaveRepository`),
+`src/core/autoSave.ts` (`AutoSaver` : branché sur les `SimEvent` `roomEntered` start|next et `levelCompleted`, jamais sur `restart`),
+`src/render/saveMenuLogic.ts` (règles du menu et des dialogues, testables), `src/render/saveStore.ts` (dépôt par défaut = localStorage).
+`SimConfig.startRoomIndex` (optionnel) fait démarrer la simulation dans une salle donnée. `Menu` → « Continuer » → `CharacterSelect`
+en mode `resume` (équipe verrouillée, seuls les appareils sont attribués) → `Game` (ou `Dialogue` d'intro si reprise en salle 0).
+`GameSession.completedLevelIds` porte les niveaux terminés d'un niveau à l'autre. Détails et choix : README « Sauvegarde de la progression ».
+
 ## 9. Déviations
 
 - **Salles de boss sans mécanisme** : les deux salles de boss (niveau 2 « arene », niveau 3 « throne »/« arena » selon le cas) n'ont pas de
@@ -220,3 +234,37 @@ Les scènes se passent un objet `GameSession` (voir `src/render/session.ts`) via
 - **i18n** : les « parts » temporaires ont été fusionnées dans `fr.json`/`en.json` (`npm run i18n:merge`) ; le mécanisme de parts reste
   disponible (fusion automatique sous Vite/Vitest via `import.meta.glob`).
 - **Entrées** : voir §5 (réclamation d'emplacement, plus d'option « J1 = manette »).
+
+## 10. Demi-boss et boss des niveaux 4-6
+
+Six ennemis à IA de boss (`src/core/bosses.ts` = moteur, `src/core/bossData.ts` = données : attaques, séquences par phase, profils).
+Un **demi-boss** (`EnemyDef.isMiniBoss`, `isBoss = false`) est à vaincre dans sa salle (la sortie `'clear'` reste fermée tant qu'il vit,
+sbires invoqués compris) ; un **boss de fin** (`isBoss`) a une barre de boss. Helpers pour le rendu et les niveaux (`enemies.ts`) :
+`isBossKind`, `isMiniBossKind`, `isAnyBossKind`, `isFlyingKind`, listes `BOSS_KINDS` / `MINI_BOSS_KINDS` / `FLYING_KINDS`.
+Clés i18n : `enemy.<kind>` (nom) et `enemy.<kind>.desc` (`src/i18n/parts/bosses.{fr,en}.json`).
+
+| Ennemi | Niv. | Rôle | PV | Dégâts | Phases (seuils) | Particularités |
+|---|---|---|---|---|---|---|
+| `warden` gardien de givre | 4 | demi-boss | 270 (≈ 3 × chevalier) | 16 | 2 (rage à 50 %) | mêlée : coup lourd (zone 24 px à 18 px devant), coup de sol (zone 46 px ; + 10 éclats en rage), charge télégraphée ≥ 900 ms ; rage = ×1,35 vitesse, coup lourd enchaîné |
+| `frostqueen` reine du givre | 4 | boss de fin | 1600 | 20 | 3 (70 / 40 %) | éventail de 5 (9 en phase 3) éclats, blizzard = anneau avec 2 brèches, invoque chauves-souris/squelettes (≤ 4), téléportation dès la phase 2, glissade avec trace d'éclats en phase 3 |
+| `pyromancer` pyromancien | 5 | demi-boss | 320 | 14 | 2 (50 %) | garde ses distances (85-140 px), boules de feu en éventail (3, puis 5), nova télégraphée (zone 46 px + 12/16 orbes) lancée aussi en « panique » si on le colle, se replie en se téléportant après la nova, invoque ≤ 2 feux follets |
+| `forgelord` seigneur de la forge | 5 | boss de fin | 1900 | 24 | 3 (70 / 35 %) | marteau (zone 36 px à 30 px devant) + onde de choc (14/16/20 orbes), rafale balayée de 6/8/10 boules de feu, invoque ≤ 2 chevaliers (phases 1-2 seulement), phase 3 « enrage » : ×1,45 vitesse, marteaux enchaînés, charge |
+| `wraith` spectre | 6 | demi-boss, **volant** | 380 | 16 | 2 (50 %) | éventail de traits sombres (3, puis 5), anneau d'orbes en rage, disparaît/réapparaît (téléportation de 560 ms, destination connue) après chaque attaque |
+| `voidlord` seigneur du Néant | 6 | boss de fin, **volant** | 2000 | 17 | 4 (75 / 50 / 25 %) | traits sombres, anneaux (18-24), spirales (2 puis 3 bras), **zones de danger** (2-3 cercles posés sous les joueurs, verrouillés puis persistants 1,4 s), invoque ≤ 3 chauves-souris/feux follets (phases 2-3), charge, téléportation après chaque attaque |
+
+Règles communes (équité, 1 à 4 joueurs) :
+- toute attaque est précédée d'un télégraphe (`windup`) d'au moins 600 ms ; fenêtres de récupération ×1,2 à 1 joueur, ×1,1 à 2 ; phase suivante = rugissement d'1 s sans attaque ;
+- jamais étourdis ni repoussés (`stunEnemy`/`knockEnemy` : simple retard d'attaque ≤ 400 ms) ; aggro illimité une fois engagés ;
+- invocations : plafond de sbires **vivants** par boss (les sbires invoqués portent `data.summoner` = id du boss ; seuls ceux-là comptent) ; la salle est limitée à `MAX_ALIVE_ENEMIES` ;
+- la difficulté (1-3) n'est lue nulle part dans l'IA : le nombre d'ennemis, les attaques et les invocations sont identiques, seuls PV (÷ 0,7 / 1 / 1,4 sur les dégâts infligés) et dégâts reçus (× 0,6 / 1 / 1,5) changent ;
+- **plafond de dégâts glissant** (`combat.damageEnemy`, état dans `enemy.data.dmgWinStartMs/dmgWinTaken`, fenêtre 2 s) : 20 % des PV max pour un boss de fin (`BOSS_DAMAGE_CAP_FRACTION`), 35 % pour un demi-boss (`MINIBOSS_DAMAGE_CAP_FRACTION`) ;
+- une salle de demi-boss compte comme salle de boss : après un redémarrage, les spéciaux repartent à demi-recharge.
+
+Équilibrage vérifié par `src/core/miniBosses.test.ts` (4 joueurs de difficulté 2, toutes les équipes possibles de 4 personnages, boss immobile et
+tous les joueurs à portée) : en n'enchaînant que les spéciaux, le pire cas est ≈ 17 s pour un demi-boss (cible ≥ 12 s) et ≈ 36 s / 48 s / 52 s pour la reine
+du givre / le seigneur de la forge / le seigneur du Néant (cible ≥ 35 s) ; en frappant sans arrêt avec attaques normales + spéciaux, le plafond impose ≥ 4 s
+(demi-boss) et ≥ 9 s (boss). Un joueur seul de difficulté 3 vient à bout de chacun (< 45 s / < 150 s d'attaque continue idéale).
+
+Données `enemy.data` utiles au rendu (en plus de celles de `ai.ts`) : `special` (`ENEMY_SPECIALS`, ajouts : SHOCKWAVE 16, FIREBALL 17, NOVA 18, DARKBOLT 19,
+VOIDZONE 20, BLIZZARD 21, SLIDE 22), `telegraphRadius/Dist/Length/Spread`, `teleportToX/Y`, et pour VOIDZONE `zoneCount`, `zoneX0..2`, `zoneY0..2`,
+`zoneRadius`. Projectiles utilisés : `shard` (glace), `orb` (feu / néant), `bolt` (traits sombres).

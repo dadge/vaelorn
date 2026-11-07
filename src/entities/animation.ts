@@ -3,7 +3,9 @@
  * Les vues Phaser (PlayerView, EnemyView…) s'en servent pour rester de simples « lecteurs » de GameState.
  */
 import type { Dir, EnemyState, PlayerState } from '../core/types';
-import { enemyFrame, heroFrame, bossFrame, reviveFrame, stepOf } from '../render/art/animations';
+import { enemyFrame, heroFrame, bossFrame, reviveFrame, stepOf, type BossKind } from '../render/art/animations';
+import { isAnyBossKind, isBossKind as coreIsBossKind } from '../core/enemies';
+import { enemySpriteInfo } from '../render/art/enemyTiers';
 
 /** Durée (ms) d'une frame de marche d'un héros. */
 export const WALK_FRAME_MS = 140;
@@ -143,25 +145,30 @@ export function createEnemyVisual(): EnemyVisual {
   return { frame: '', flipX: false, tintFill: -1, tint: COLOR_WHITE, alpha: 1, offsetX: 0, offsetY: 0, windup: false };
 }
 
-/** Vrai si le type d'ennemi est un boss (sprite 48×48, jamais retourné). */
+/** Vrai si le type d'ennemi est un boss de fin de niveau (sprite 48×48, jamais retourné). */
 export function isBossKind(kind: string): boolean {
-  return kind === 'golem' || kind === 'morvane';
+  return coreIsBossKind(kind);
+}
+
+/** Vrai si le type d'ennemi a un grand sprite (demi-boss 32×32 ou boss 48×48) : pas de flipX, frame « hurt » au lieu du flash blanc. */
+export function isBigKind(kind: string): boolean {
+  return isAnyBossKind(kind);
 }
 
 /**
  * Calcule l'aspect d'un ennemi (modes d'IA : 'idle','chase','windup','attack','recover','stunned','teleport').
  *  - windup  : clignote blanc/rouge + léger tremblement (télégraphe) ;
- *  - hit     : silhouette blanche (ou frame `boss_<kind>_hurt` pour les boss) ;
+ *  - hit     : silhouette blanche (ou frame `boss_<kind>_hurt` / `miniboss_<kind>_hurt` pour les boss et demi-boss) ;
  *  - stunned : teinte bleutée, ballant ;
  *  - teleport: quasi transparent ;
  *  - attack  : élan vers le haut d'un pixel.
  * `out` est rempli et retourné (aucune allocation).
  */
 export function computeEnemyVisual(e: EnemyState, timeMs: number, out: EnemyVisual): EnemyVisual {
-  const boss = isBossKind(e.kind);
+  const big = isAnyBossKind(e.kind);
   const hurt = e.hitFlashMs > 0;
-  out.frame = boss && hurt ? bossFrame(e.kind as 'golem' | 'morvane', 0, true) : enemyFrame(e.kind, enemyStep(timeMs, e.id));
-  out.flipX = !boss && e.facing === 'left';
+  out.frame = big && hurt ? bossFrame(e.kind as BossKind, 0, true) : enemyFrame(e.kind, enemyStep(timeMs, e.id));
+  out.flipX = !big && e.facing === 'left';
   out.tintFill = -1;
   out.tint = COLOR_WHITE;
   out.alpha = 1;
@@ -192,6 +199,6 @@ export function computeEnemyVisual(e: EnemyState, timeMs: number, out: EnemyVisu
       break;
   }
   // le flash de dégâts l'emporte sur la teinte de mode (les boss utilisent leur frame « hurt » à la place)
-  if (hurt && !boss) out.tintFill = COLOR_WHITE;
+  if (hurt && !big) out.tintFill = COLOR_WHITE;
   return out;
 }

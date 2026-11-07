@@ -5,6 +5,7 @@ import {
   makeTestLayout,
   makeTestLevel,
   makeTestRoom,
+  validateBossStructure,
   validateLevel,
 } from './levelValidation';
 import type { LevelDef, MechanismDef, RoomDef } from './types';
@@ -409,5 +410,239 @@ describe('validateLevel — atteignabilité (BFS, n = 1..4)', () => {
   it('apparition d\'ennemi conditionnée par un mécanisme inatteignable', () => {
     const errors = mutated((l) => wallOff(roomA(l), 4, 4));
     expectError(errors, /ennemi skeleton en \[12,9\] : apparition conditionnée par "pa" non satisfiable/);
+  });
+});
+
+// ───────────────────────────── Mécanismes inédits (statues, sablier, pont de lumière) ─────────────────────────────
+
+describe('validateLevel — statues jumelles, sablier, pont de lumière', () => {
+  const STATUE: MechanismDef = {
+    id: 'sp',
+    type: 'statuePair',
+    statues: [
+      { tile: [4, 3], standTile: [4, 5], facing: 'up' },
+      { tile: [12, 3], standTile: [12, 5], facing: 'left' },
+    ],
+    targetDir: 'down',
+  };
+  const HOURGLASS: MechanismDef = {
+    id: 'hg',
+    type: 'hourglass',
+    levers: [[5, 8], [11, 8]],
+    gate: [[8, 8], [8, 9]],
+    periodMs: 4000,
+    displayTile: [8, 7],
+  };
+  const BRIDGE: MechanismDef = { id: 'br', type: 'lightBridge', tiles: [[6, 6], [7, 6]], lanternSlot: 0, radiusTiles: 3 };
+  const STATUES_OK = [
+    { tile: [4, 3], standTile: [4, 5], facing: 'up' },
+    { tile: [12, 3], standTile: [12, 5], facing: 'left' },
+  ];
+
+  /** Niveau d'une seule salle (finale) avec les mécanismes donnés ; les 4 objectifs visent le premier mécanisme. */
+  function novel(mechanisms: MechanismDef[], room: Partial<RoomDef> = {}): LevelDef {
+    const r = makeTestRoom({
+      id: 'n',
+      layout: makeTestLayout(16, 12),
+      mechanisms,
+      exit: { rect: { x: 13, y: 8, w: 2, h: 2 }, requires: [], final: true },
+      ...room,
+    });
+    return makeTestLevel({
+      rooms: [r],
+      objectives: [0, 1, 2, 3].map((slot) => ({
+        id: `o${slot}`,
+        slot,
+        roomId: 'n',
+        kind: 'mechanism' as const,
+        labelKey: `objective.test.o${slot}`,
+        mechanismId: mechanisms[0]?.id ?? 'none',
+      })),
+    });
+  }
+  const withMech = (m: MechanismDef, patch: Record<string, unknown>): MechanismDef => ({ ...m, ...patch }) as MechanismDef;
+  const errorsOf = (m: MechanismDef, patch: Record<string, unknown>): string[] => validateLevel(novel([withMech(m, patch)]));
+
+  it('une salle valide avec les trois mécanismes (et sablier dans exit.requires) est acceptée ; ils comptent comme coopératifs', () => {
+    const exit = { rect: { x: 13, y: 8, w: 2, h: 2 }, requires: ['sp', 'hg'], final: true };
+    expect(validateLevel(novel([STATUE, HOURGLASS, BRIDGE], { exit }))).toEqual([]);
+    for (const m of [STATUE, HOURGLASS, BRIDGE]) expect(validateLevel(novel([m]))).toEqual([]);
+  });
+
+  it('statuePair : tuiles hors grille / sur un mur, tuiles confondues, orientation invalide, déjà résolue', () => {
+    expectError(errorsOf(STATUE, { statues: [{ tile: [-1, 3], standTile: [4, 5], facing: 'up' }, STATUES_OK[1]] }), /statues\[0\]\.tile est hors de la grille/);
+    expectError(errorsOf(STATUE, { statues: [{ tile: [4, 3], standTile: [0, 5], facing: 'up' }, STATUES_OK[1]] }), /statues\[0\]\.standTile est sur un mur/);
+    expectError(errorsOf(STATUE, { statues: [{ tile: [4, 3], standTile: [4, 3], facing: 'up' }, STATUES_OK[1]] }), /confondue avec statues\[0\]\.tile/);
+    expectError(errorsOf(STATUE, { statues: [{ tile: [4, 3], standTile: [12, 5], facing: 'up' }, STATUES_OK[1]] }), /standTile \[12,5\] est confondue/);
+    expectError(errorsOf(STATUE, { targetDir: 'north' }), /targetDir invalide/);
+    expectError(errorsOf(STATUE, { statues: [{ tile: [4, 3], standTile: [4, 5], facing: 'sideways' }, STATUES_OK[1]] }), /facing invalide/);
+    expectError(
+      errorsOf(STATUE, { statues: [{ tile: [4, 3], standTile: [4, 5], facing: 'down' }, { tile: [12, 3], standTile: [12, 5], facing: 'down' }] }),
+      /déjà résolue au départ/,
+    );
+    expectError(errorsOf(STATUE, { statues: [STATUES_OK[0]] }), /exactement 2 statues/);
+  });
+
+  it('statuePair : la statue est solide (pas de spawn/ennemi dessus), les socles doivent être atteignables', () => {
+    expectError(validateLevel(novel([STATUE], { playerSpawns: [[4, 3], [3, 2], [2, 3], [3, 3]] })), /playerSpawns\[0\] \[4,3\] recouvre la statue "sp"/);
+    expectError(validateLevel(novel([STATUE], { enemies: [{ kind: 'slime', tile: [12, 3] }] })), /ennemi\[0\] \(slime\) \[12,3\] recouvre la statue "sp"/);
+    // socle emmuré : un anneau de murs autour du socle (4,5)
+    const l = novel([STATUE]);
+    for (const [x, y] of [[3, 4], [4, 4], [5, 4], [3, 5], [5, 5], [3, 6], [4, 6], [5, 6]]) setGlyph(l.rooms[0], x, y, '#');
+    expectError(validateLevel(l), /statuePair "sp" inatteignable depuis les spawns/);
+  });
+
+  it('statuePair : un socle sur une porte est refusé', () => {
+    const door: MechanismDef = { id: 'd', type: 'door', tiles: [[4, 5]], requires: ['sp'] };
+    expectError(validateLevel(novel([STATUE, door])), /socle 0 de "sp" \[4,5\] recouvre la porte "d"/);
+  });
+
+  it('hourglass : leviers (≥ 2), herse (≥ 1), périodes > 0, tuiles de sol distinctes', () => {
+    expectError(errorsOf(HOURGLASS, { levers: [[5, 8]] }), /levers doit contenir au moins 2 tuile/);
+    expectError(errorsOf(HOURGLASS, { gate: [] }), /gate doit contenir au moins 1 tuile/);
+    expectError(errorsOf(HOURGLASS, { periodMs: 0 }), /periodMs doit être un nombre > 0/);
+    expectError(errorsOf(HOURGLASS, { periodMs: -5 }), /periodMs doit être un nombre > 0/);
+    expectError(errorsOf(HOURGLASS, { closeStepMs: 0 }), /closeStepMs doit être un nombre > 0/);
+    expectError(errorsOf(HOURGLASS, { levers: [[5, 8], [5, 8]] }), /levers\[1\] \[5,8\] est confondue avec levers\[0\]/);
+    expectError(errorsOf(HOURGLASS, { gate: [[8, 8], [5, 8]] }), /gate\[1\] \[5,8\] est confondue avec levers\[0\]/);
+    expectError(errorsOf(HOURGLASS, { levers: [[0, 8], [11, 8]] }), /levers\[0\] est sur un mur/);
+    expectError(errorsOf(HOURGLASS, { gate: [[8, 99]] }), /gate\[0\] est hors de la grille/);
+    expectError(errorsOf(HOURGLASS, { displayTile: [0, 0] }), /displayTile est sur un mur/);
+  });
+
+  it('hourglass : herse fermée au départ (pas de spawn/ennemi/levier dessus) ; une porte ne peut pas exiger un sablier', () => {
+    expectError(validateLevel(novel([HOURGLASS], { playerSpawns: [[8, 8], [3, 2], [2, 3], [3, 3]] })), /playerSpawns\[0\] \[8,8\] recouvre la herse "hg"/);
+    expectError(validateLevel(novel([HOURGLASS], { enemies: [{ kind: 'slime', tile: [8, 9] }] })), /recouvre la herse "hg"/);
+    expectError(validateLevel(novel([HOURGLASS, { id: 'lv', type: 'lever', tile: [8, 9] }])), /levier "lv" \[8,9\] recouvre la herse/);
+    const door: MechanismDef = { id: 'd', type: 'door', tiles: [[13, 4]], requires: ['hg'] };
+    expectError(validateLevel(novel([HOURGLASS, door])), /porte "d" requires "hg" : un sablier ne peut pas ouvrir une porte/);
+    // l'exigence de sortie, elle, est acceptée
+    expect(validateLevel(novel([HOURGLASS], { exit: { rect: { x: 13, y: 8, w: 2, h: 2 }, requires: ['hg'], final: true } }))).toEqual([]);
+  });
+
+  it('hourglass : un levier emmuré est détecté', () => {
+    const l = novel([HOURGLASS]);
+    for (const [x, y] of [[10, 7], [11, 7], [12, 7], [10, 8], [12, 8], [10, 9], [11, 9], [12, 9]]) setGlyph(l.rooms[0], x, y, '#');
+    expectError(validateLevel(l), /hourglass "hg" inatteignable depuis les spawns/);
+  });
+
+  it('lightBridge : tuiles, lanternSlot entier 0..3, rayon > 0, pas de spawn dessus', () => {
+    expectError(errorsOf(BRIDGE, { tiles: [] }), /tiles doit contenir au moins 1 tuile/);
+    expectError(errorsOf(BRIDGE, { tiles: [[6, 6], [6, 6]] }), /tiles\[1\] \[6,6\] dupliquée/);
+    expectError(errorsOf(BRIDGE, { tiles: [[0, 6]] }), /tiles\[0\] est sur un mur/);
+    expectError(errorsOf(BRIDGE, { lanternSlot: 4 }), /lanternSlot doit être un entier 0..3/);
+    expectError(errorsOf(BRIDGE, { lanternSlot: 1.5 }), /lanternSlot doit être un entier 0..3/);
+    expectError(errorsOf(BRIDGE, { radiusTiles: 0 }), /radiusTiles doit être un nombre > 0/);
+    expectError(errorsOf(BRIDGE, { radiusTiles: -1 }), /radiusTiles doit être un nombre > 0/);
+    expectError(validateLevel(novel([BRIDGE], { playerSpawns: [[6, 6], [3, 2], [2, 3], [3, 3]] })), /playerSpawns\[0\] \[6,6\] recouvre le pont de lumière "br"/);
+    expectError(validateLevel(novel([BRIDGE], { enemies: [{ kind: 'bat', tile: [7, 6] }] })), /recouvre le pont de lumière "br"/);
+  });
+
+  it('requires vers ces mécanismes : id existant exigé, vérifié comme les autres', () => {
+    const door: MechanismDef = { id: 'd', type: 'door', tiles: [[13, 4]], requires: ['sp', 'br'] };
+    expect(validateLevel(novel([STATUE, BRIDGE, door]))).toEqual([]);
+    const bad: MechanismDef = { id: 'd', type: 'door', tiles: [[13, 4]], requires: ['spx'] };
+    expectError(validateLevel(novel([STATUE, bad])), /porte "d" requires "spx" : mécanisme inexistant/);
+    expectError(validateLevel(novel([STATUE], { exit: { rect: { x: 13, y: 8, w: 2, h: 2 }, requires: ['hgx'], final: true } })), /exit\.requires "hgx" : mécanisme inexistant/);
+    expectError(validateLevel(novel([STATUE], { enemies: [{ kind: 'slime', tile: [9, 9], when: 'brx' }] })), /when "brx" : mécanisme inexistant/);
+  });
+
+  it('un mécanisme inédit seul (minPlayers 2) ne suffit pas comme mécanisme coopératif à 1 joueur', () => {
+    expectError(errorsOf(STATUE, { minPlayers: 2 }), /aucun mécanisme coopératif/);
+  });
+
+  it('salle de boss pure : une arène de demi-boss (warden, pyromancer, wraith) est aussi admise', () => {
+    for (const kind of ['warden', 'pyromancer', 'wraith'] as const) {
+      const l = novel([], { enemies: [{ kind, tile: [8, 5] }] });
+      expect(validateLevel(l).filter((e) => /mécanisme coopératif/.test(e))).toEqual([]);
+    }
+  });
+
+  it('salle de boss pure : tous les boss de fin (frostqueen, forgelord, voidlord) sont admis', () => {
+    for (const kind of ['frostqueen', 'forgelord', 'voidlord'] as const) {
+      const l = novel([], { enemies: [{ kind, tile: [8, 5] }] });
+      expect(validateLevel(l).filter((e) => /mécanisme coopératif/.test(e))).toEqual([]);
+    }
+  });
+});
+
+// ───────────────────────────── Structure demi-boss / boss ─────────────────────────────
+
+describe('validateBossStructure', () => {
+  const EXIT_CLEAR = { rect: { x: 13, y: 8, w: 2, h: 2 }, requires: ['clear'] };
+
+  function bossLevel(mid: Partial<RoomDef> = {}, last: Partial<RoomDef> = {}): LevelDef {
+    const a = makeTestRoom({ id: 'a', mechanisms: [], enemies: [{ kind: 'slime', tile: [4, 4] }], exit: { rect: { x: 10, y: 5, w: 2, h: 2 }, requires: [] } });
+    const m = makeTestRoom({ id: 'm', layout: makeTestLayout(16, 12), enemies: [{ kind: 'warden', tile: [8, 5] }], exit: EXIT_CLEAR, ...mid });
+    const f = makeTestRoom({
+      id: 'f',
+      enemies: [{ kind: 'frostqueen', tile: [8, 5] }],
+      exit: { rect: { x: 9, y: 5, w: 2, h: 2 }, requires: ['clear'], final: true },
+      ...last,
+    });
+    return makeTestLevel({ rooms: [a, m, f] });
+  }
+
+  it('conforme : un demi-boss dans une salle dont la sortie exige clear + un boss dans la salle finale', () => {
+    expect(validateBossStructure(bossLevel(), { minMiniBosses: 1 })).toEqual([]);
+    expect(validateBossStructure(bossLevel(), { minMiniBosses: 0 })).toEqual([]);
+  });
+
+  it('pas assez de demi-boss', () => {
+    expectError(validateBossStructure(bossLevel(), { minMiniBosses: 2 }), /2 demi-boss exigé\(s\) mais trouvé\(s\) 1 à n=1, 1 à n=2/);
+  });
+
+  it('un demi-boss qui n\'apparaît qu\'à partir de 2 joueurs ne compte pas à 1 joueur', () => {
+    const l = bossLevel({ enemies: [{ kind: 'warden', tile: [8, 5], minPlayers: 2 }] });
+    expectError(validateBossStructure(l, { minMiniBosses: 1 }), /1 demi-boss exigé\(s\) mais trouvé\(s\) 0 à n=1/);
+  });
+
+  it('la sortie de la salle du demi-boss doit exiger clear', () => {
+    const l = bossLevel({ exit: { rect: { x: 13, y: 8, w: 2, h: 2 }, requires: [] } });
+    expectError(validateBossStructure(l, { minMiniBosses: 1 }), /salle "m" : contient un demi-boss \(warden\) mais sa sortie n'exige pas 'clear'/);
+  });
+
+  it('clear exigé indirectement par une porte (transitif) est accepté', () => {
+    const l = bossLevel({
+      mechanisms: [
+        { id: 'p1', type: 'plate', tile: [3, 3] },
+        { id: 'd1', type: 'door', tiles: [[12, 3]], requires: ['clear'] },
+        { id: 'd2', type: 'door', tiles: [[12, 4]], requires: ['d1', 'p1'] },
+      ],
+      exit: { rect: { x: 13, y: 8, w: 2, h: 2 }, requires: ['d2'] },
+    });
+    expect(validateBossStructure(l, { minMiniBosses: 1 })).toEqual([]);
+  });
+
+  it('une porte dépendant de clear qui barre l\'accès à la sortie est acceptée ; sinon refusée', () => {
+    // mur vertical x=11 sauf (11,5) = porte « clear » ; sortie à droite
+    const walled = makeTestLayout(16, 12).map((row, y) => (y >= 1 && y <= 10 ? row.slice(0, 11) + '#' + row.slice(12) : row));
+    const layoutOpen = walled.map((row, y) => (y === 5 ? row.slice(0, 11) + '.' + row.slice(12) : row));
+    const door: MechanismDef = { id: 'd1', type: 'door', tiles: [[11, 5]], requires: ['clear'] };
+    const noExitReq = { rect: { x: 13, y: 8, w: 2, h: 2 }, requires: [] };
+    expect(validateBossStructure(bossLevel({ layout: layoutOpen, mechanisms: [door], exit: noExitReq }), { minMiniBosses: 1 })).toEqual([]);
+    // la porte ne barre rien : un second passage libre existe
+    const layoutTwo = layoutOpen.map((row, y) => (y === 8 ? row.slice(0, 11) + '.' + row.slice(12) : row));
+    const bad = bossLevel({ layout: layoutTwo, mechanisms: [door], exit: noExitReq });
+    expectError(validateBossStructure(bad, { minMiniBosses: 1 }), /sa sortie n'exige pas 'clear'/);
+  });
+
+  it('la salle finale doit contenir un boss présent à chaque nombre de joueurs', () => {
+    expectError(validateBossStructure(bossLevel({}, { enemies: [{ kind: 'slime', tile: [8, 5] }] }), { minMiniBosses: 1 }), /salle finale "f" : aucun boss/);
+    expectError(
+      validateBossStructure(bossLevel({}, { enemies: [{ kind: 'frostqueen', tile: [8, 5], minPlayers: 3 }] }), { minMiniBosses: 1 }),
+      /salle finale "f" : aucun boss \(isBoss\) présent \(n=1,2\)/,
+    );
+  });
+
+  it('options invalides ou niveau sans salle', () => {
+    expectError(validateBossStructure(bossLevel(), { minMiniBosses: -1 }), /minMiniBosses doit être un entier >= 0/);
+    expectError(validateBossStructure(bossLevel(), { minMiniBosses: 1.5 }), /minMiniBosses doit être un entier >= 0/);
+    const empty = { ...bossLevel(), rooms: [] };
+    expectError(validateBossStructure(empty, { minMiniBosses: 1 }), /aucune salle/);
+  });
+
+  it('les boss déjà connus (golem, morvane) comptent comme boss de salle finale', () => {
+    expect(validateBossStructure(bossLevel({}, { enemies: [{ kind: 'morvane', tile: [8, 5] }] }), { minMiniBosses: 1 })).toEqual([]);
   });
 });

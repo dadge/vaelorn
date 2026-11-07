@@ -231,7 +231,15 @@ export class RoomView {
         const k = room.mechanisms.find((m): m is KeyDef => m.type === 'key' && m.id === def.keyId);
         if (k) color = slotColor(k.ownerSlot, playerCount);
       }
-      const big = def.type === 'block' || def.type === 'socket' || def.type === 'door';
+      else if (def.type === 'statuePair') color = 0x7af0ff;
+      else if (def.type === 'hourglass') color = 0xffc24a;
+      else if (def.type === 'lightBridge') color = 0xffe27a;
+      if (def.type === 'statuePair') {
+        // une étiquette près de chaque statue (le centre du mécanisme est entre les deux, hors de portée)
+        for (const st of def.statues) this.addLabel(def.labelKey, color, null, { x: (st.tile[0] + 0.5) * TILE, y: (st.tile[1] + 0.5) * TILE }, 20, LABEL_RADIUS);
+        continue;
+      }
+      const big = def.type === 'block' || def.type === 'socket' || def.type === 'door' || def.type === 'lightBridge';
       this.addLabel(def.labelKey, color, view, { x: 0, y: 0 }, big ? 26 : 16, big ? LABEL_RADIUS + 16 : LABEL_RADIUS);
     }
     // étiquette de sortie
@@ -258,6 +266,13 @@ export class RoomView {
   centerOfMechanism(id: string): Vec2 | null {
     const v = this.mechViews.find((m) => m.id === id);
     return v ? v.center : null;
+  }
+
+  /** Centre de la partie `index` d'un mécanisme composite (statue, tuile de herse ou de pont), à défaut son centre ; null si inconnu. */
+  mechanismPartCenter(id: string, index: number): Vec2 | null {
+    const v = this.mechViews.find((m) => m.id === id);
+    if (!v) return null;
+    return v.partCenter?.(index) ?? v.center;
   }
 
   /** Centre du piédestal `index` de l'énigme `id` (pour les FX), ou null. */
