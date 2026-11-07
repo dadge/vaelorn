@@ -8,6 +8,7 @@
  *  - animations.ts : helpers purs de noms de frames (heroFrame, enemyFrame, tileFrame…).
  */
 import type Phaser from 'phaser';
+import { textureFilterMode } from '../smoothing';
 import { packAtlas, type AtlasData, type FrameRect } from './atlas';
 import { ATLAS_KEY, EXTRA_FRAME_SPECS, requiredFrameSpecs, requiredFrames } from './contract';
 import { buildAllFrames } from './frames';
@@ -57,6 +58,6 @@ export function buildAtlas(scene: Phaser.Scene): void {
   const texture = textures.addCanvas(ATLAS_KEY, canvas);
   if (!texture) throw new Error('buildAtlas: addCanvas a échoué');
   for (const [name, r] of Object.entries(data.frames)) texture.add(name, 0, r.x, r.y, r.w, r.h);
-  // Phaser.Textures.FilterMode.NEAREST === 1 (import de type seulement : pas de Phaser au chargement du module)
-  texture.setFilter(1 as Phaser.Textures.FilterMode);
+  // Filtrage : doux (LINEAR = 0) par défaut, NEAREST (1) avec ?smooth=0 (import de type seulement : pas de Phaser au chargement du module)
+  texture.setFilter(textureFilterMode() as Phaser.Textures.FilterMode);
 }

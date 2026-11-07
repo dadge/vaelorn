@@ -42,6 +42,8 @@
 
 ## Technique
 
+- [ ] **Rendu adouci** (par défaut, `?smooth=0` pour les pixels francs) : à juger sur la vraie télé ; si c'est trop flou, ajouter un réglage dans le menu, ou redessiner les sprites en plus haute résolution (`docs/SPRITES.md`).
+
 - [ ] Reprise automatique d'une manette qui change d'indice navigateur à la reconnexion.
 - [ ] Manettes non « standard » : mappage de repli fourni mais peu testé.
 - [ ] Les appuis de manette plus courts qu'une frame ne sont pas rattrapés dans les menus.

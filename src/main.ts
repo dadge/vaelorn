@@ -19,6 +19,7 @@ import { onLanguageChange, setLanguage, t } from './i18n/i18n';
 import { inputManager } from './input';
 import { LEVELS } from './levels';
 import { parseQuickParams, setQuickParams } from './render/menuLogic';
+import { isSmoothRendering } from './render/smoothing';
 import { BootScene } from './scenes/BootScene';
 import { CharacterSelectScene } from './scenes/CharacterSelectScene';
 import { DialogueScene } from './scenes/DialogueScene';
@@ -48,15 +49,19 @@ function start(): void {
   syncTitle();
   onLanguageChange(syncTitle);
 
+  const smooth = isSmoothRendering();
+  // Mode pixel : le canvas est agrandi sans lissage (règle CSS `html.pixel canvas` dans index.html).
+  if (!smooth) document.documentElement.classList.add('pixel');
   const config: Phaser.Types.Core.GameConfig = {
     type: Phaser.AUTO,
     parent: 'game',
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
     backgroundColor: '#0b0a14',
-    pixelArt: true,
-    roundPixels: true,
-    antialias: false,
+    // Rendu doux par défaut (?smooth=0 pour retrouver les pixels francs) : voir render/smoothing.ts.
+    pixelArt: !smooth,
+    roundPixels: !smooth,
+    antialias: smooth,
     disableContextMenu: true,
     scale: {
       mode: Phaser.Scale.FIT,

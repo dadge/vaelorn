@@ -16,6 +16,7 @@
  * et testée dans darkness.test.ts (paliers du pinceau, scintillement, `lightAt`, échelle de texture).
  */
 import type Phaser from 'phaser';
+import { textureFilterMode } from './smoothing';
 import type { LightKind, LightSource } from '../core/light';
 import { DARK_COLORS } from './palettes';
 
@@ -237,8 +238,7 @@ function acquireBrush(textures: Phaser.Textures.TextureManager, radius: number):
     if (tex && ctx) {
       ctx.putImageData(new ImageData(new Uint8ClampedArray(data), size, size), 0, 0);
       tex.refresh();
-      // Phaser.Textures.FilterMode.NEAREST === 1
-      tex.setFilter(1 as Phaser.Textures.FilterMode);
+      tex.setFilter(textureFilterMode() as Phaser.Textures.FilterMode);
     }
   }
   refs.set(key, n + 1);
@@ -309,8 +309,7 @@ export class DarknessLayer {
     this.scale = this.computeScale();
     const rt = scene.add.renderTexture(0, 0, Math.ceil(this.widthPx * this.scale), Math.ceil(this.heightPx * this.scale));
     rt.setOrigin(0, 0).setDepth(opts.depth ?? 500).setScale(1 / this.scale);
-    // Phaser.Textures.FilterMode.NEAREST === 1 : pixels nets même agrandis
-    rt.texture.setFilter(1 as Phaser.Textures.FilterMode);
+    rt.texture.setFilter(textureFilterMode() as Phaser.Textures.FilterMode);
     this.rt = rt;
     scene.events.once('shutdown', this.onShutdown);
   }

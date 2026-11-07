@@ -23,7 +23,7 @@ Puis ouvrir <http://localhost:5173>. Autres commandes :
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run i18n:merge` | Fusionne d'éventuels fichiers `src/i18n/parts/*.json` dans `fr.json`/`en.json` |
 
-Paramètres d'URL de développement : `?quick=1&players=2&level=2&chars=david,sandrine&diff=1,2&lang=fr&room=3` (saute les menus), `&pads=1` (tous les joueurs sur manettes 0..N-1), `&kb=<n>` (le joueur n au clavier), `&dark=1` (force toutes les salles sombres, pour tester les torches), `&nosave=1` (la partie n'écrit pas la sauvegarde : voir [Sauvegarde de la progression](#sauvegarde-de-la-progression) ; le mode `quick` et `dark` ne sauvegardent jamais non plus).
+Paramètres d'URL de développement : `?quick=1&players=2&level=2&chars=david,sandrine&diff=1,2&lang=fr&room=3` (saute les menus), `&pads=1` (tous les joueurs sur manettes 0..N-1), `&kb=<n>` (le joueur n au clavier), `&dark=1` (force toutes les salles sombres, pour tester les torches), `&smooth=0|1` (rendu : `1` = adouci, par défaut ; `0` = pixels francs ; le choix est mémorisé dans `localStorage['vaelorn.smooth']`), `&nosave=1` (la partie n'écrit pas la sauvegarde : voir [Sauvegarde de la progression](#sauvegarde-de-la-progression) ; le mode `quick` et `dark` ne sauvegardent jamais non plus).
 
 ### Déployer
 
