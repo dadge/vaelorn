@@ -390,7 +390,7 @@ export class PauseMenu {
     const cx = GAME_WIDTH / 2;
     const cy = GAME_HEIGHT / 2;
     this.dim = hudRect(ctx, cx, cy, GAME_WIDTH, GAME_HEIGHT, 0x05040a, 0.66, HUD_DEPTH.pause);
-    this.panel = hudRect(ctx, cx, cy, 520, 340, 0x1c1530, 0.97, HUD_DEPTH.pause + 1);
+    this.panel = hudRect(ctx, cx, cy, 520, 372, 0x1c1530, 0.97, HUD_DEPTH.pause + 1); // 372 : la ligne de commandes (spécial, appeler) peut occuper 4 lignes
     this.panel.setStrokeStyle(3, 0xf0e2b0, 1);
     this.title = hudText(ctx, cx, cy - 140, '', { size: 38, originX: 0.5, color: 0xf0e2b0, depth: HUD_DEPTH.pause + 2 });
     PAUSE_ITEMS.forEach((_, i) => {
@@ -460,7 +460,8 @@ export class PauseMenu {
   retranslate(): void {
     setTextIfChanged(this.title, t('hud.pause'));
     this.hint.setText(this.confirmingQuit ? t('game.pause.quit.confirm') : t('game.pause.hint'));
-    this.controls.setText(`${t('controls.keyboard')} : ${t('controls.keyboard.move')} - ${t('controls.keyboard.action')} - ${t('controls.keyboard.pause')}\n${t('controls.gamepad')} : ${t('controls.gamepad.move')} - ${t('controls.gamepad.action')} - ${t('controls.gamepad.pause')}`);
+    // rappel des commandes : déplacement, action, spécial et appeler (boutons dédiés), pause
+    this.controls.setText(`${t('controls.keyboard')} : ${t('controls.keyboard.move')} - ${t('controls.keyboard.action')} - ${t('call.pause.keyboard')} - ${t('controls.keyboard.pause')}\n${t('controls.gamepad')} : ${t('controls.gamepad.move')} - ${t('controls.gamepad.action')} - ${t('call.pause.gamepad')} - ${t('controls.gamepad.pause')}`);
     this.refreshItems();
   }
 

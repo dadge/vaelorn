@@ -32,7 +32,7 @@ export type Difficulty = 1 | 2 | 3;
 // ───────────────────────────── Entrées (abstraites) ─────────────────────────────
 
 /** Noms des actions de jeu (couche d'abstraction, remappables, branchables sur tactile/réseau). */
-export type ActionName = 'move' | 'attack' | 'interact' | 'revive' | 'special';
+export type ActionName = 'move' | 'attack' | 'interact' | 'revive' | 'special' | 'call';
 
 /**
  * État des entrées d'UN joueur pour UN pas de simulation. Valeurs « tenues » (held) :
@@ -47,6 +47,8 @@ export interface ActionFrame {
   revive: boolean;
   /** Attaque spéciale (bouton dédié ; absent = false). Front montant détecté par la simulation. */
   special?: boolean;
+  /** Appel (bouton dédié ; absent = false) : signal vers l'équipe, voir `CALL_*` (constants.ts). Front montant détecté par la simulation. */
+  call?: boolean;
 }
 
 export const EMPTY_ACTION_FRAME: Readonly<ActionFrame> = Object.freeze({
@@ -290,7 +292,7 @@ export interface PlayerState {
   /** Nombre de fois à terre dans le niveau (stat). */
   downCount: number;
   /** Mémoire des entrées du pas précédent (détection de fronts montants). */
-  prev: { attack: boolean; interact: boolean; revive: boolean; special?: boolean };
+  prev: { attack: boolean; interact: boolean; revive: boolean; special?: boolean; call?: boolean };
   /** Dernier mouvement effectif (pour animation de marche) : true si le joueur s'est déplacé ce pas. */
   moving: boolean;
   /** Temps de recharge restant de l'attaque spéciale (ms) ; 0 = prête. */
@@ -302,6 +304,13 @@ export interface PlayerState {
    * se recharge au contact d'un brasero allumé (interaction). Détermine le rayon de lumière.
    */
   torchMs: number;
+  /**
+   * Temps restant (ms) du signal d'appel de ce joueur (0 = aucun appel en cours ; `CALL_DURATION_MS` à l'appui).
+   * Le joueur est immobilisé tant que `callMs > CALL_DURATION_MS - CALL_FREEZE_MS`. Remis à 0 s'il tombe à terre et à chaque (re)démarrage de salle.
+   */
+  callMs: number;
+  /** Délai de récupération restant (ms) avant de pouvoir rappeler (`CALL_COOLDOWN_MS` à l'appui, décompté depuis l'appui). */
+  callCooldownMs: number;
 }
 
 // ───────────────────────────── Données de niveau ─────────────────────────────
@@ -781,7 +790,8 @@ export type SimEvent =
   | { type: 'statueRotated'; mechanismId: string; index: 0 | 1; facing: Dir; playerId: PlayerId }
   | { type: 'hourglassFlipped'; mechanismId: string; leverIndex: number; playerId: PlayerId }
   | { type: 'hourglassEmpty'; mechanismId: string }
-  | { type: 'gateClosed'; mechanismId: string; closedCount: number };
+  | { type: 'gateClosed'; mechanismId: string; closedCount: number }
+  | { type: 'callStarted'; playerId: PlayerId };
 
 // ───────────────────────────── Simulation (interface publique) ─────────────────────────────
 

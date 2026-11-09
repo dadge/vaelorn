@@ -51,6 +51,15 @@ export const LIGHT_LOW_TILES = 3.5;
 export const LIGHT_EMPTY_TILES = 1.75;
 export const BRAZIER_LIGHT_TILES = 5;
 
+// ───────────────────────────── Appel (signal sonore à l'équipe) ─────────────────────────────
+
+/** Durée (ms) d'immobilisation de l'appelant au début de l'appel : ni déplacement, ni attaque, ni spécial, ni interaction, ni relevage. */
+export const CALL_FREEZE_MS = 1000;
+/** Durée (ms) du signal d'appel depuis l'appui (la 1re seconde est celle de l'immobilisation). */
+export const CALL_DURATION_MS = 3000;
+/** Délai de récupération (ms) mesuré depuis l'APPUI : un nouvel appel n'est possible qu'une fois écoulé (donc 2 s de repos après la fin du signal). */
+export const CALL_COOLDOWN_MS = 5000;
+
 /** Résolution logique du canvas (Phaser.Scale.FIT l'adapte à la fenêtre). */
 export const GAME_WIDTH = 1280;
 export const GAME_HEIGHT = 720;

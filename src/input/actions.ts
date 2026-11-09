@@ -73,7 +73,7 @@ export interface MoveBinding {
 
 /**
  * Configuration complète des entrées. JSON pur (sérialisable dans localStorage) et remappable.
- * Pour chaque `ActionName` ('move' | 'attack' | 'interact' | 'revive' | 'special') : les entrées clavier ET manette.
+ * Pour chaque `ActionName` ('move' | 'attack' | 'interact' | 'revive' | 'special' | 'call') : les entrées clavier ET manette.
  */
 export interface Bindings {
   version: 1;
@@ -83,6 +83,11 @@ export interface Bindings {
   revive: ButtonBinding;
   /** Attaque spéciale (bouton DÉDIÉ : ni Espace ni A ne la déclenchent). Clavier F / X, manette Y / RB / RT. */
   special: ButtonBinding;
+  /**
+   * Appel (bouton DÉDIÉ : signal vers l'équipe, le joueur s'immobilise 1 s ; ni Espace ni A ne le déclenchent).
+   * Clavier C ; manette LB / LT.
+   */
+  call: ButtonBinding;
   /** Navigation de menu : confirmer / retour (les directions réutilisent `move`). */
   menu: { confirm: ButtonBinding; back: ButtonBinding };
   /** Zone morte radiale du stick, 0..0.95 (défaut 0.25). */
@@ -98,8 +103,8 @@ export type DeepPartial<T> = T extends readonly unknown[]
 export type BindingsOverrides = DeepPartial<Bindings>;
 
 /** Clés de `Bindings` qui sont des actions « bouton » (par opposition à `move`). */
-export type ButtonActionName = 'attack' | 'interact' | 'revive' | 'special';
-export const BUTTON_ACTIONS: readonly ButtonActionName[] = ['attack', 'interact', 'revive', 'special'];
+export type ButtonActionName = 'attack' | 'interact' | 'revive' | 'special' | 'call';
+export const BUTTON_ACTIONS: readonly ButtonActionName[] = ['attack', 'interact', 'revive', 'special', 'call'];
 
 /** Code d'erreur de validation (diagnostic technique, jamais affiché tel quel). */
 export type BindingsErrorCode = 'missing' | 'type' | 'empty' | 'range' | 'conflict';

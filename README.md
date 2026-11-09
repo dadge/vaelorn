@@ -66,9 +66,24 @@ Chaque joueur **rejoint** sa place à l'écran de sélection en appuyant sur **A
 | Attaque seule | — (Espace fait l'action contextuelle) | **X** |
 | Interagir / relever seulement | — | **B** |
 | **Attaque spéciale** (rechargeable) | **F** ou **X** | **Y**, **RB** ou **RT** |
+| **Appeler** (signal vers les alliés) | **C** | **LB** ou **LT** |
 | Pause | Échap | Start |
 
-Les menus se pilotent aux mêmes entrées (flèches/croix, Entrée/A, Échap/B). Les boutons sont remappables côté code (`src/input/defaultBindings.ts`, persistance `localStorage`).
+Les menus se pilotent aux mêmes entrées (flèches/croix, Entrée/A, Échap/B). Les boutons sont remappables côté code (`src/input/defaultBindings.ts`, persistance `localStorage`). Le rappel des commandes (dont le spécial et l'appel) est affiché dans le menu **Contrôles** et dans le menu **pause**.
+
+### Appeler (appel)
+
+Un bouton dédié (**C** au clavier, **LB** ou **LT** à la manette) fait « appeler » à l'équipe : les autres joueurs voient dans quelle direction tu te trouves, sans que tu aies à te montrer.
+
+- **Déroulé** : à l'appui, le héros est **immobilisé 1 s** (`CALL_FREEZE_MS` : ni déplacement, ni attaque, ni spécial, ni interaction, ni relevage ; il peut encore subir des dégâts, sa torche continue de s'user). Le **signal dure 3 s depuis l'appui** (`CALL_DURATION_MS`, la 1re seconde étant celle de l'immobilisation : il peut donc repartir après 1 s, le signal continue 2 s de plus).
+- **Délai de récupération** : 5 s **depuis l'appui** (`CALL_COOLDOWN_MS`), donc 2 s de repos après la fin du signal. Ce délai évite le spam.
+- **Appel impossible** si le joueur est à terre, s'il a déjà un appel en cours, si le délai n'est pas écoulé, si la partie n'est pas en phase de jeu (salle terminée, défaite…), ou **pendant un relevage** : le relevage est prioritaire, un appui d'appel alors que le joueur relève est ignoré (il faut réappuyer une fois le relevage fini). À l'inverse, un joueur immobilisé par son appel ne peut pas commencer à relever avant la fin de la 1re seconde. L'appui d'appel **prime** sur une attaque, un spécial ou une interaction demandés au même pas (ils ne sont pas rejoués à la fin de l'immobilisation : il faut relâcher puis réappuyer). Un spécial **déjà lancé** va jusqu'au bout : les coups différés de la Danse des lames de Mira continuent de frapper pendant l'immobilisation (seuls les nouveaux déclenchements sont bloqués).
+- **Annulation / remise à zéro** : l'appel s'arrête si l'appelant tombe à terre (le délai de récupération continue de courir). Appel et délai sont remis à zéro au début de chaque salle et après une défaite collective.
+- **Ce que voient les autres joueurs** (l'appelant n'a pas d'indicateur de bord de son propre appel) :
+  - appelant **hors de leur vue** : au bord de leur vue, dans sa direction (coins compris), un **point collé au bord** (côté de l'appelant) et **3 arcs concentriques de 90°** (rayons ≈ 10 / 18 / 26 px × échelle du HUD) qui partent de ce point **vers l'intérieur de l'écran, vers celui qui entend l'appel** (comme l'icône « signal »). Ils s'allument **chacun à leur tour du plus petit au plus grand**, en boucle (cycle 900 ms, 300 ms par arc), comme une onde sonore, à la **couleur du joueur appelant**. Même placement que les flèches vers les alliés à terre et les ennemis restants (qui ne changent pas) ; si deux indicateurs tomberaient au même endroit (moins de la largeur du grand arc le long du bord, ≈ 43 px × échelle), celui de l'appel glisse le long du bord. Le signal s'estompe sur ses 150 dernières ms. Les arcs sont dessinés **sous** les textes du HUD (nom, PV, objectif) : ils peuvent passer derrière un texte vers un coin de la vue, jamais devant ;
+  - appelant **visible dans leur vue** : pas d'indicateur de bord, mais des **anneaux concentriques** qui s'étendent autour de lui dans le monde (vus par tous les joueurs dont la vue le contient, l'appelant compris). Ces anneaux se voient aussi dans une salle sombre.
+- **Son** : l'événement de simulation `callStarted` déclenche un son placeholder (`src/entities/sfx.ts`).
+- **Choix et limites** : rien ne change dans la difficulté, les ennemis, les niveaux ni le format de sauvegarde (la sauvegarde ne contient aucun état de simulation) ; l'appel n'attire ni n'éloigne les ennemis ; en solo il fonctionne (aucun indicateur n'est alors visible, mais les anneaux du monde le sont) ; le dessin (point au bord + arcs vers l'intérieur) et les durées ressenties sont à valider en jeu (voir `TODO.md`). Le cœur ne contient rien de spécifique au clavier ou à la manette : un futur bouton tactile n'aura qu'à fournir `call: true` dans son `ActionFrame`.
 
 ## Règles du jeu
 
@@ -166,7 +181,7 @@ Les tuiles d'un pont au-dessus de l'abîme ne sont **praticables que dans le hal
 src/core/      LOGIQUE PURE (aucune dépendance à Phaser/DOM, ni Math.random/Date) — déterministe, état JSON sérialisable
   types.ts       tous les contrats (GameState, LevelDef, MechanismDef, SimEvent, …)
   simulation.ts  GameSimulation : step(dt, inputs) → événements ; serialize()/restore()
-  players.ts     PV, relevage, mort d'équipe, torche ; balance.ts : formules d'équilibrage
+  players.ts     PV, relevage, mort d'équipe, torche, appel (immobilisation, signal, délai) ; balance.ts : formules d'équilibrage
   save.ts        sauvegarde : format versionné, validation, migrations, reprise (voir « Sauvegarde de la progression »)
   saveRepository.ts  SaveRepository (load/save/clear) + LocalStorage/Memory ; autoSave.ts : écriture au début de salle / fin de niveau
   mechanisms.ts  plaques, leviers, clés, portes, blocs, runes, braseros ; objectives.ts ; levelValidation.ts
@@ -176,7 +191,7 @@ src/input/     couche d'abstraction des entrées : ActionFrame par joueur (clavi
 src/pwa/       enregistrement du service worker (PWA) ; scripts/pwa-build.mjs (sw.js au build), make-icons.mjs (icônes)
 src/net/       interface NetAdapter (prévue, sans implémentation réseau)
 src/i18n/      fr.json, en.json, i18n.ts (clés plates, aucune chaîne en dur dans le code)
-src/render/    atlas de sprites runtime (art/), palettes, splitscreen, caméras, HUD, obscurité, effets
+src/render/    atlas de sprites runtime (art/), palettes, splitscreen, caméras, HUD, obscurité, effets, indicateur d'appel (callIndicator.ts pur, callHud.ts dessin)
 src/entities/  vues Phaser (joueurs, ennemis, mécanismes, salle) — lecture seule de GameState
 src/scenes/    Boot, Menu, CharacterSelect, Dialogue, Game, Result
 src/testing/   bots de test qui jouent la simulation (déterministes)
@@ -229,12 +244,12 @@ Tous les sprites sont des **placeholders** générés par code (`src/render/art/
 ## Portage futur (Android)
 
 **Prêt** : logique de jeu totalement séparée du rendu et des entrées (`src/core`) ; entrées abstraites en `ActionFrame` (un `TouchSource` se branche comme les autres sources) ; build statique à chemins relatifs (`base: './'`), compatible Capacitor ; aucune dépendance à des API de bureau côté `core`.
-**Reste à faire** : contrôles tactiles (stick virtuel + boutons action/spécial) ; packaging Capacitor (Android Studio, icônes, écran de démarrage) ; orientation paysage verrouillée ; adaptation aux tailles d'écran et densités (le canvas est en 1280×720 avec `Phaser.Scale.FIT`) ; HUD et splitscreen pensés pour un petit écran (probablement 1–2 joueurs sur téléphone, plus sur tablette/TV) ; test de performances sur appareils modestes ; manettes Bluetooth via la Gamepad API du WebView.
+**Reste à faire** : contrôles tactiles (stick virtuel + boutons action/spécial/appeler) ; packaging Capacitor (Android Studio, icônes, écran de démarrage) ; orientation paysage verrouillée ; adaptation aux tailles d'écran et densités (le canvas est en 1280×720 avec `Phaser.Scale.FIT`) ; HUD et splitscreen pensés pour un petit écran (probablement 1–2 joueurs sur téléphone, plus sur tablette/TV) ; test de performances sur appareils modestes ; manettes Bluetooth via la Gamepad API du WebView.
 
 ## Multijoueur en ligne futur
 
 - **L'état de jeu est sérialisable** : `GameState` est du JSON pur (aucune classe, `Map` ni fonction), `GameSimulation.serialize()/restore()` fonctionne, la simulation est déterministe (PRNG dans l'état, pas d'horloge) et avance par pas fixe.
-- **À envoyer au serveur / aux pairs** : uniquement les `ActionFrame` de chaque joueur par tick (déplacement, attaque, interaction, relevage, spécial) ; en retour, soit les entrées des autres joueurs (lockstep), soit des instantanés/diffs de `GameState` (hôte autoritaire). `src/net/NetAdapter.ts` et `RemoteInputSource` posent l'interface.
+- **À envoyer au serveur / aux pairs** : uniquement les `ActionFrame` de chaque joueur par tick (déplacement, attaque, interaction, relevage, spécial, appel) ; en retour, soit les entrées des autres joueurs (lockstep), soit des instantanés/diffs de `GameState` (hôte autoritaire). `src/net/NetAdapter.ts` et `RemoteInputSource` posent l'interface.
 - **À décider** : modèle (lockstep déterministe vs serveur autoritaire avec prédiction/réconciliation), transport (WebRTC pair-à-pair vs WebSocket + relais), appariement (salons, codes de partie), gestion de la latence et des déconnexions/reconnexions en cours de partie, versionnage du protocole et des niveaux, triche, découpage splitscreen local + joueurs distants.
 
 ## Choix et déviations documentés

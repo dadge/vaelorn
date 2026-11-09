@@ -20,7 +20,8 @@
 - [ ] Salles sombres supplémentaires et variantes du système de torches (ennemis sensibles à la lumière, braseros à entretenir…).
 - [ ] Le jeton d'exigence `enter:<zone>` est maintenant évalué et décrit par le HUD (`src/render/roomGoals.ts`, « Rejoindre la zone »), mais pas par les bots (`src/testing/botKit.ts`) : à brancher si un niveau s'en sert pour une porte ou une sortie.
 - [ ] Le brasero est solide et bloque aussi les projectiles (limitation du moteur : une seule liste de solides).
-- [ ] Texte d'aide du menu pause en jeu (`src/entities/overlay.ts`) : n'indique pas encore le bouton spécial.
+- [x] Texte d'aide du menu pause en jeu (`src/entities/overlay.ts`) : indique maintenant les boutons spécial et appeler (à vérifier à la main : la ligne de commandes tient-elle dans le cadre en français et en anglais ?).
+- [ ] **Appeler (à vérifier à la main, voir README « Appeler »)** : (1) lisibilité du point + des 3 arcs au bord de la vue à 4 joueurs (vues 640×360, rayons 10/18/26 px × zoom/2) et à 2 joueurs (×1,5), en coin de vue, avec 2 appelants en même temps, et quand une flèche d'allié à terre ou d'ennemi est au même endroit (l'indicateur d'appel glisse le long du bord) ; (2) durées ressenties : immobilisation 1 s, signal 3 s, délai 5 s depuis l'appui (`CALL_*` dans `src/core/constants.ts`) ; (3) **dessin** : point collé au bord + 3 arcs de 90° qui partent vers l'intérieur de l'écran, du plus petit au plus grand (demandé par David, d'après une icône « signal ») : à valider en jeu (épaisseur, taille, couleur); (4) cadence (cycle 900 ms, 300 ms par arc, fondu de queue 100 ms) et visibilité des anneaux d'onde du monde (taille, opacité, en salle sombre) ; (5) pendant un relevage l'appel est ignoré, et un appelant immobilisé ne peut pas relever pendant 1 s : cela surprend-il ? ; (6) **son réel** à ajouter (aujourd'hui deux bips synthétisés, `sfx.ts`) ; (7) bouton **C** (clavier) et **LB / LT** (manette) : confort selon les dispositions AZERTY/QWERTY et les manettes ; futurs contrôles tactiles : ajouter un bouton « appeler » qui fournit `call: true` ; (8) un spécial/une attaque/une interaction pressés au MÊME pas que l'appui d'appel sont perdus (l'appel prime, `prev` consommé) et les coups différés de la Danse des lames de Mira continuent pendant l'immobilisation : acceptable ou faut-il refuser l'appel pendant un spécial en cours ? ; (9) les arcs passent sous les textes du HUD (nom, PV, objectif, bandeaux) : vérifier qu'ils restent lisibles vers les coins, et ajouter une zone d'exclusion si besoin ; (10) une ancienne sauvegarde de touches personnalisées qui utilise C/LB/LT pour une direction est rejetée en bloc (repli sur les défauts) : à traiter avec l'écran de remappage.
 
 - [ ] **Niveau 6 en solo à la difficulté 2** : le seigneur du Néant a été rééquilibré (2000 PV, dégâts 17) et les bots le battent maintenant en solo difficulté 2 (David, Mira, Aelith) ; Brokk (très lent) n'y arrive toujours pas avec ces bots. À confirmer à la main, solo et difficulté 3.
 - [ ] Boss final en solo (niveau 3) : pic de difficulté ; équilibrer selon le nombre de joueurs si besoin (les spéciaux sont plafonnés à 20 % des PV du boss par fenêtre de 2 s).
@@ -76,7 +77,7 @@
 
 ## Portage Android (voir README, « Portage futur »)
 
-- [ ] Contrôles tactiles (`TouchSource` : stick virtuel + boutons action/spécial) branchés sur `InputManager.registerSource`.
+- [ ] Contrôles tactiles (`TouchSource` : stick virtuel + boutons action/spécial/appeler ; `appeler` fournit `call: true`) branchés sur `InputManager.registerSource`.
 - [ ] Packaging Capacitor, icônes, écran de démarrage, orientation paysage.
 - [ ] Adaptation aux tailles d'écran / HUD pour petit écran ; tests de performance sur appareils modestes.
 

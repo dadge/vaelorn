@@ -1,0 +1,7 @@
+{
+  "call.controls.gamepad": "LB or LT button",
+  "call.controls.keyboard": "C",
+  "call.controls.label": "Call (allies see where you are calling from)",
+  "call.pause.gamepad": "Y / RB / RT: special - LB / LT: call",
+  "call.pause.keyboard": "F: special - C: call"
+}

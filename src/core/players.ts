@@ -14,7 +14,7 @@
  * passer `reviveHeld = true` pour un joueur dont le bouton d'action est tenu ET qui a un allié à terre à portée
  * (ou simplement `frame.revive` ; `updateRevive` vérifie lui-même la portée).
  */
-import { TORCH_LOW_FRACTION, TORCH_MAX_MS } from './constants';
+import { CALL_COOLDOWN_MS, CALL_DURATION_MS, CALL_FREEZE_MS, TORCH_LOW_FRACTION, TORCH_MAX_MS } from './constants';
 import { PLAYER_INVULN_MS, REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW } from './constants';
 import { damageToPlayer, maxHpFor, REVIVE_INVULN_MS } from './balance';
 import { getCharacter } from './characters';
@@ -48,10 +48,12 @@ export function createPlayerState(setup: PlayerSetup, spawnPx: Vec2): PlayerStat
     keys: [],
     kills: 0,
     downCount: 0,
-    prev: { attack: false, interact: false, revive: false, special: false },
+    prev: { attack: false, interact: false, revive: false, special: false, call: false },
     specialCooldownMs: 0,
     specialAnimMs: 0,
     torchMs: TORCH_MAX_MS,
+    callMs: 0,
+    callCooldownMs: 0,
     moving: false,
   };
 }
@@ -83,6 +85,7 @@ export function applyDamageToPlayer(p: PlayerState, rawDamage: number): { applie
     p.invulnMs = 0;
     p.attackAnimMs = 0;
     p.specialAnimMs = 0;
+    p.callMs = 0; // l'appel est annulé quand l'appelant tombe (le délai de récupération continue de courir)
     p.moving = false;
     p.revivingId = null;
     p.reviverId = null;
@@ -263,7 +266,7 @@ export interface ResetPlayersOptions {
  * Réinitialise les joueurs pour (re)démarrer une salle : position (`spawnsPx[i % spawnsPx.length]`, i = index du joueur
  * dans le tableau), PV pleins, `status:'alive'`, timers (invuln, cooldown, anim) à 0, liens de relevage effacés,
  * `moving=false`, `keys=[]` (les clés sont propres à une salle), spécial PRÊT (`specialCooldownMs = specialAnimMs = 0`),
- * torche REMPLIE (`torchMs = TORCH_MAX_MS`).
+ * torche REMPLIE (`torchMs = TORCH_MAX_MS`), appel remis à zéro (`callMs = callCooldownMs = 0`).
  *
  * CONSERVÉS : `downCount` (stat de niveau), `kills` (sauf `opts.resetKills`), `facing`/`attackDir`, `prev` (pas de faux front
  * montant si un bouton est tenu pendant le chargement). MUTE les joueurs.
@@ -286,6 +289,8 @@ export function resetPlayersForRoom(players: PlayerState[], spawnsPx: readonly V
     p.specialCooldownMs = 0;
     p.specialAnimMs = 0;
     p.torchMs = TORCH_MAX_MS;
+    p.callMs = 0;
+    p.callCooldownMs = 0;
     p.revivingId = null;
     p.reviverId = null;
     p.reviveProgressMs = 0;
@@ -297,7 +302,7 @@ export function resetPlayersForRoom(players: PlayerState[], spawnsPx: readonly V
 
 /**
  * Décrémente les timers d'un joueur de `dtMs` (planchers à 0) : `invulnMs`, `attackCooldownMs`, `attackAnimMs`,
- * `specialCooldownMs` (recharge du spécial) et `specialAnimMs`.
+ * `specialCooldownMs` (recharge du spécial), `specialAnimMs`, `callMs` (signal d'appel) et `callCooldownMs` (délai de récupération de l'appel).
  * S'applique aussi aux joueurs à terre. MUTE `p`.
  */
 export function stepPlayerTimers(p: PlayerState, dtMs: number): void {
@@ -306,6 +311,54 @@ export function stepPlayerTimers(p: PlayerState, dtMs: number): void {
   p.attackAnimMs = Math.max(0, p.attackAnimMs - dtMs);
   p.specialCooldownMs = Math.max(0, (Number.isFinite(p.specialCooldownMs) ? p.specialCooldownMs : 0) - dtMs);
   p.specialAnimMs = Math.max(0, (Number.isFinite(p.specialAnimMs) ? p.specialAnimMs : 0) - dtMs);
+  p.callMs = stepCallTimer(p.callMs, dtMs);
+  p.callCooldownMs = stepCallTimer(p.callCooldownMs, dtMs);
+}
+
+// ───────────────────────────── Appel ─────────────────────────────
+
+/**
+ * Tolérance (ms) sur les minuteurs d'appel : le pas fixe vaut 1000/60 ms, et soustraire 60 fois ce pas à 3000 laisse un reste
+ * de l'ordre de 1e-12 qui ferait durer l'immobilisation ou le signal un pas de trop. Un minuteur sous ce seuil vaut 0.
+ */
+export const CALL_EPSILON_MS = 1e-6;
+
+/** Décrémente un minuteur d'appel (absent / non fini → 0 ; plancher 0 ; reste sous `CALL_EPSILON_MS` ramené à 0). */
+function stepCallTimer(valueMs: number | undefined, dtMs: number): number {
+  const v = typeof valueMs === 'number' && Number.isFinite(valueMs) ? valueMs : 0;
+  const next = v - dtMs;
+  return next > CALL_EPSILON_MS ? next : 0;
+}
+
+/** Le signal d'appel de ce joueur est-il en cours ? (joueur vivant et `callMs > 0`). */
+export function isCalling(p: Pick<PlayerState, 'status' | 'callMs'>): boolean {
+  return p.status === 'alive' && p.callMs > CALL_EPSILON_MS;
+}
+
+/**
+ * Le joueur est-il IMMOBILISÉ par son appel ? Vrai pendant la 1re `CALL_FREEZE_MS` du signal, soit tant que
+ * `callMs > CALL_DURATION_MS - CALL_FREEZE_MS`. Il ne se déplace pas, n'attaque pas, n'utilise pas son spécial, n'interagit pas et
+ * ne relève personne (il peut encore subir des dégâts).
+ */
+export function isCallFrozen(p: Pick<PlayerState, 'status' | 'callMs'>): boolean {
+  return p.status === 'alive' && p.callMs > CALL_DURATION_MS - CALL_FREEZE_MS + CALL_EPSILON_MS;
+}
+
+/** Peut-on lancer un appel ? Joueur vivant, aucun appel en cours, délai de récupération écoulé (la phase 'playing' est vérifiée par la simulation). */
+export function canStartCall(p: Pick<PlayerState, 'status' | 'callMs' | 'callCooldownMs'>): boolean {
+  const cd = typeof p.callCooldownMs === 'number' && Number.isFinite(p.callCooldownMs) ? p.callCooldownMs : 0;
+  return p.status === 'alive' && !(p.callMs > CALL_EPSILON_MS) && cd <= CALL_EPSILON_MS;
+}
+
+/** Lance l'appel : `callMs = CALL_DURATION_MS`, `callCooldownMs = CALL_COOLDOWN_MS`. MUTE `p`. */
+export function startCall(p: PlayerState): void {
+  p.callMs = CALL_DURATION_MS;
+  p.callCooldownMs = CALL_COOLDOWN_MS;
+}
+
+/** Annule le signal d'appel en cours (le délai de récupération n'est pas modifié). MUTE `p`. */
+export function cancelCall(p: PlayerState): void {
+  p.callMs = 0;
 }
 
 /**

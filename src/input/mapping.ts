@@ -88,12 +88,12 @@ export function padHasActivity(snapshot: GamepadSnapshot): boolean {
 
 /** Nouvelle frame vide (jamais l'objet gelé `EMPTY_ACTION_FRAME`, que l'appelant pourrait vouloir muter). */
 export function emptyFrame(): ActionFrame {
-  return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false };
+  return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false };
 }
 
 /** true si la frame contient une entrée (déplacement ou bouton). */
 export function frameHasActivity(f: ActionFrame): boolean {
-  return f.moveX !== 0 || f.moveY !== 0 || f.attack || f.interact || f.revive || f.special === true;
+  return f.moveX !== 0 || f.moveY !== 0 || f.attack || f.interact || f.revive || f.special === true || f.call === true;
 }
 
 function anyKey(pressed: ReadonlySet<string>, codes: readonly string[]): boolean {
@@ -132,6 +132,7 @@ export function keysToFrame(pressedKeyCodes: ReadonlySet<string>, bindings: Bind
     interact: anyKey(pressedKeyCodes, bindings.interact.keys),
     revive: anyKey(pressedKeyCodes, bindings.revive.keys),
     special: anyKey(pressedKeyCodes, bindings.special.keys),
+    call: anyKey(pressedKeyCodes, bindings.call.keys),
   };
 }
 
@@ -164,7 +165,7 @@ function clampDeadzone(dz: number): number {
  *   l'amplitude est re-mappée de [deadzone, STICK_SATURATION] vers [0, 1] (mouvement progressif, sans à-coup).
  *   La simulation peut donc recevoir une amplitude analogique (0..1) ; la direction reste exacte.
  * - Boutons : voir `bindings.attack/interact/revive/special.pad` (A = les trois, X = attaque, B = interact + revive,
- *   Y / RB / RT = attaque spéciale UNIQUEMENT : A ne la déclenche jamais).
+ *   Y / RB / RT = attaque spéciale UNIQUEMENT : A ne la déclenche jamais ; LB / LT = appel UNIQUEMENT).
  * - Manette non standard (`snapshot.mapping` ≠ 'standard') : mappage de repli (axes 0/1, croix sur l'axe 9, boutons 0/1/2 = A/B/X).
  */
 export function gamepadToFrame(snapshot: GamepadSnapshot, bindings: Bindings, deadzone?: number): ActionFrame {
@@ -200,6 +201,7 @@ export function gamepadToFrame(snapshot: GamepadSnapshot, bindings: Bindings, de
     interact: anyPadButton(snapshot, bindings.interact.pad),
     revive: anyPadButton(snapshot, bindings.revive.pad),
     special: anyPadButton(snapshot, bindings.special.pad),
+    call: anyPadButton(snapshot, bindings.call.pad),
   };
 }
 
@@ -325,6 +327,7 @@ export function mergeBindings(defaults: Bindings, overrides?: BindingsOverrides 
     interact: mergeButton(defaults.interact, o.interact),
     revive: mergeButton(defaults.revive, o.revive),
     special: mergeButton(defaults.special, o.special),
+    call: mergeButton(defaults.call, o.call),
     menu: {
       confirm: mergeButton(defaults.menu.confirm, omenu.confirm),
       back: mergeButton(defaults.menu.back, omenu.back),

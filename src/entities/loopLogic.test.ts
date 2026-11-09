@@ -89,6 +89,13 @@ describe('mergeTickInputs', () => {
     expect(mergeTickInputs({ 0: frame({ special: true }) }, { 0: frame() })[0]?.special).toBe(true);
   });
 
+  it('le bouton « appeler » est fusionné en OU (appui court conservé)', () => {
+    expect(mergeTickInputs({ 0: frame({ call: true }) }, { 0: frame({ call: false }) })[0]?.call).toBe(true);
+    expect(mergeTickInputs({ 0: frame({ call: false }) }, { 0: frame({ call: true }) })[0]?.call).toBe(true);
+    expect(mergeTickInputs({ 0: frame() }, { 0: frame() })[0]?.call).toBe(false);
+    expect(mergeTickInputs({ 0: frame({ call: true }) }, { 0: frame() })[0]?.call).toBe(true);
+  });
+
   it('combine chaque bouton indépendamment et chaque joueur séparément', () => {
     const merged = mergeTickInputs(
       { 0: frame({ interact: true }), 1: frame({ revive: true }) },
@@ -101,7 +108,7 @@ describe('mergeTickInputs', () => {
 });
 
 /** Rejoue la boucle de GameScene.update (fusion `latched` + planSteps + détection de front montant de la simulation). */
-function simulateLoop(hz: number, button: 'attack' | 'interact' | 'revive' | 'special', pressFrame: number, pressFrames: number, jitter = 0): number {
+function simulateLoop(hz: number, button: 'attack' | 'interact' | 'revive' | 'special' | 'call', pressFrame: number, pressFrames: number, jitter = 0): number {
   let latched: TickInputs | null = null;
   let acc = 0;
   let prev = false;
@@ -126,7 +133,7 @@ function simulateLoop(hz: number, button: 'attack' | 'interact' | 'revive' | 'sp
 }
 
 describe('boucle simulée : un appui court est détecté une fois à 60/120/144/240 Hz', () => {
-  const buttons = ['attack', 'interact', 'revive', 'special'] as const;
+  const buttons = ['attack', 'interact', 'revive', 'special', 'call'] as const;
   for (const hz of [60, 75, 120, 144, 165, 240]) {
     for (const button of buttons) {
       it(`${button} à ${hz} Hz (un seul relevé à true)`, () => {

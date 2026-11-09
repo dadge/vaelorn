@@ -629,7 +629,9 @@ export class InputManager implements MenuDeviceProvider {
 
   /**
    * Charge les bindings sauvegardés (localStorage, try/catch). Les valeurs sont fusionnées sur les défauts
-   * puis validées ; un contenu absent, illisible ou invalide est ignoré. Retourne true si des bindings ont été appliqués.
+   * puis validées ; un contenu absent, illisible ou invalide est ignoré (repli COMPLET sur les défauts, sans remappage partiel :
+   * une ancienne sauvegarde qui affecte déjà la touche/le bouton par défaut de `call` à une direction entre en conflit).
+   * Retourne true si des bindings ont été appliqués.
    */
   loadBindings(): boolean {
     try {

@@ -1,7 +1,8 @@
 /**
  * HUD par joueur, dessiné DANS SA VUE (caméra d'interface plein écran, éléments positionnés dans le rectangle du joueur) :
  * cœurs, nom en couleur, objectifs personnels, clés, indicateur « à terre », invites contextuelles, bulles de panneaux,
- * flèches vers les alliés à terre hors de vue, notifications — et panneau d'équipe (3 joueurs).
+ * flèches vers les alliés à terre hors de vue, demi-cercles d'appel au bord de la vue (voir `callHud.ts`), notifications — et
+ * panneau d'équipe (3 joueurs).
  *
  * La partie PURE (formatage des cœurs et pourcentages, description des objectifs, invite contextuelle, sortie ouverte,
  * fondu, rapport de relevage…) est testée sans Phaser ; Phaser n'est utilisé que par TYPE.
@@ -39,6 +40,7 @@ import {
   type HourglassLevel,
 } from './mechHud';
 import { edgeIndicator } from './camera';
+import { CallEdgeHud } from './callHud';
 import { hex } from './palettes';
 import {
   MAX_GOAL_LINES,
@@ -572,6 +574,9 @@ export class PlayerHud {
   private readonly toastText: Text;
   private readonly arrows: Img[] = [];
   private readonly enemyArrows: Img[] = [];
+  /** Demi-cercles d'appel au bord de la vue (appelants hors champ) ; centres des flèches de bord = points à éviter. */
+  private readonly callHud: CallEdgeHud;
+  private readonly edgeAnchors: Vec2[] = Array.from({ length: 3 + ENEMY_ARROW_MAX }, () => ({ x: 0, y: 0 }));
   // bloc « Objectif de la salle » (haut à droite) : fond, en-tête, lignes cochables (icône + texte)
   private readonly goalBg: Rect;
   private readonly goalHeader: Text;
@@ -763,6 +768,9 @@ export class PlayerHud {
       a.setOrigin(0.5, 0.5).setTint(0xff5a4a).setVisible(false);
       this.enemyArrows.push(a);
     }
+    // demi-cercles d'appel (ondes sonores des alliés qui appellent, hors de la vue). Profondeur SOUS les textes du HUD
+    // (nom, PV, jauges, objectif) : ils ne doivent pas les recouvrir quand l'appelant est vers un coin ; les fonds (bg = 10) restent dessous.
+    this.callHud = new CallEdgeHud(ctx, this.vp, HUD_DEPTH.content - 0.5, this.edgeAnchors.length);
     // bloc « Objectif de la salle » (haut à droite de la vue) : fusionne l'ancien compteur d'ennemis restants
     this.goalRight = vx + vw - m - 6;
     this.goalTop = vy + m;
@@ -880,6 +888,7 @@ export class PlayerHud {
       this.refresh(p, a);
     }
     this.updateArrows(state, a);
+    this.updateCallHud(state, a);
     this.updateSpecial(p, a);
     this.blinkHourglass(a.timeMs);
     if (this.toastLeftMs > 0) {
@@ -1325,7 +1334,27 @@ export class PlayerHud {
     for (; k < this.enemyArrows.length; k++) this.enemyArrows[k].setVisible(false);
   }
 
+  /** Indicateurs d'appel de bord : s'écartent des flèches (alliés à terre, derniers ennemis) déjà placées ce frame. */
+  private updateCallHud(state: GameState, a: PlayerHudUpdate): void {
+    let n = this.collectEdgeAnchors(this.arrows, 0);
+    n = this.collectEdgeAnchors(this.enemyArrows, n);
+    this.callHud.update(state, this.playerId, a.camCenter, this.edgeAnchors, n);
+  }
+
+  /** Ajoute (repère de la vue) les centres des flèches visibles de `list` à `edgeAnchors` à partir de l'indice `n` ; retourne le nouveau compte. */
+  private collectEdgeAnchors(list: readonly Img[], n: number): number {
+    for (let i = 0; i < list.length && n < this.edgeAnchors.length; i++) {
+      const arrow = list[i];
+      if (!arrow.visible) continue;
+      this.edgeAnchors[n].x = arrow.x - this.vp.x;
+      this.edgeAnchors[n].y = arrow.y - this.vp.y;
+      n++;
+    }
+    return n;
+  }
+
   destroy(): void {
+    this.callHud.destroy();
     const all: Phaser.GameObjects.GameObject[] = [
       this.frameGfx, this.name, this.hp, ...this.hearts, ...this.keyIcons, this.objHeader, ...this.objIcons, ...this.objTexts, this.objBg,
       this.promptBg, this.promptText, this.signBg, this.signText, this.downOverlay, this.downIcon, this.downTitle, this.downSub,

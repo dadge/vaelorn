@@ -103,12 +103,13 @@ describe('keysToFrame', () => {
       interact: true,
       revive: true,
       special: false,
+      call: false,
     });
   });
 
   it('disposition WASD + E', () => {
     const f = keysToFrame(keys('KeyW', 'KeyE'), b);
-    expect(f).toEqual({ moveX: 0, moveY: -1, attack: true, interact: true, revive: true, special: false });
+    expect(f).toEqual({ moveX: 0, moveY: -1, attack: true, interact: true, revive: true, special: false, call: false });
     expect(keysToFrame(keys('KeyD'), b).moveX).toBe(1);
   });
 
@@ -907,6 +908,17 @@ describe('InputManager : bindings', () => {
     expect(t.mgr.loadBindings()).toBe(false);
     expect(t.mgr.saveBindings()).toBe(false);
     expect(makeManager({ storage: null }).mgr.saveBindings()).toBe(false);
+  });
+
+  it("loadBindings : une sauvegarde antérieure à « appeler » qui utilise déjà C (ou LB) pour une direction entre en conflit avec le défaut de `call` : repli complet sur les défauts (documenté, pas de remappage partiel)", () => {
+    const old = JSON.stringify({ move: { keys: { up: ['KeyC'] } } });
+    const m = makeManager({ storage: memoryStorage(old) });
+    expect(m.mgr.loadBindings()).toBe(false);
+    expect(m.mgr.getBindings()).toEqual(DEFAULT_BINDINGS);
+    // la même sauvegarde SANS conflit avec `call` reste chargée, et `call` prend ses valeurs par défaut
+    const ok = makeManager({ storage: memoryStorage(JSON.stringify({ attack: { keys: ['KeyJ'] } })) });
+    expect(ok.mgr.loadBindings()).toBe(true);
+    expect(ok.mgr.getBindings().call).toEqual(DEFAULT_BINDINGS.call);
   });
 
   it('autoLoad : charge au premier attach()/poll()', () => {

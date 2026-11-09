@@ -48,6 +48,8 @@ function makePlayer(id: PlayerId, x = 20, y = 20): PlayerState {
     specialCooldownMs: 0,
     specialAnimMs: 0,
     torchMs: TORCH_MAX_MS,
+    callMs: 0,
+    callCooldownMs: 0,
     moving: false,
   };
 }

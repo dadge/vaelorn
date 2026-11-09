@@ -35,6 +35,7 @@ export type SfxName =
   | 'specialSmash'
   | 'specialBlades'
   | 'specialReady'
+  | 'call'
   | 'brazierLit'
   | 'torchRefuel'
   | 'torchLow'
@@ -86,6 +87,8 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   specialSmash: { f0: 130, f1: 45, durMs: 360, type: 'square', vol: 0.09, then: { f0: 300, f1: 80, delayMs: 30 } },
   specialBlades: { f0: 1000, f1: 400, durMs: 90, type: 'triangle', vol: 0.05, then: { f0: 1250, f1: 500, delayMs: 110 } },
   specialReady: { f0: 880, f1: 1760, durMs: 140, type: 'sine', vol: 0.05 },
+  // appel : deux « pings » montants, comme une onde qui s'élargit (placeholder : un vrai son d'appel viendra avec les assets audio)
+  call: { f0: 420, f1: 700, durMs: 260, type: 'sine', vol: 0.07, then: { f0: 560, f1: 940, delayMs: 300 } },
   // torches et braseros (salles sombres)
   brazierLit: { f0: 120, f1: 320, durMs: 260, type: 'sawtooth', vol: 0.06, then: { f0: 520, f1: 780, delayMs: 110 } },
   torchRefuel: { f0: 420, f1: 840, durMs: 200, type: 'triangle', vol: 0.06, then: { f0: 630, f1: 1260, delayMs: 100 } },
@@ -171,6 +174,8 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
       return sfxForSpecial(e.kind);
     case 'specialReady':
       return 'specialReady';
+    case 'callStarted':
+      return 'call';
     case 'brazierLit':
       return 'brazierLit';
     case 'torchRefueled':

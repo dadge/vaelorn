@@ -7,7 +7,9 @@
  *
  * Manette (mapping « standard ») : stick gauche + croix = déplacement ; A (0) = action contextuelle
  * (attack + interact + revive) ; X (2) = attaque seule ; B (1) = interact + revive ; Y (3) / RB (5) / RT (7) =
- * ATTAQUE SPÉCIALE (bouton dédié). Clavier : F ou X = spécial. Dead-zone 0.25.
+ * ATTAQUE SPÉCIALE (bouton dédié). Clavier : F ou X = spécial. LB (4) / LT (6) = APPEL (bouton dédié) ; clavier : C. Dead-zone 0.25.
+ * Un seul clavier existe (un seul joueur à la fois, dispositions flèches ET WASD en parallèle) : « C » ne figure dans aucune
+ * autre action ni direction, et Entrée / Échap / M (menus, pause, son) restent libres.
  */
 import type { Bindings } from './actions';
 
@@ -57,6 +59,8 @@ export function createDefaultBindings(): Bindings {
     revive: { keys: ['Space', 'KeyE'], pad: [PAD_BUTTON.A, PAD_BUTTON.B] },
     // Attaque spéciale : bouton dédié (clavier F / X ; manette Y / RB / RT). Espace et A ne la déclenchent PAS.
     special: { keys: ['KeyF', 'KeyX'], pad: [PAD_BUTTON.Y, PAD_BUTTON.RB, PAD_BUTTON.RT] },
+    // Appel : bouton dédié (clavier C ; manette LB / LT, les seuls boutons de façade encore libres). Aucune autre action n'utilise ces entrées.
+    call: { keys: ['KeyC'], pad: [PAD_BUTTON.LB, PAD_BUTTON.LT] },
     menu: {
       confirm: { keys: ['Enter', 'NumpadEnter', 'Space'], pad: [PAD_BUTTON.A] },
       back: { keys: ['Escape', 'Backspace'], pad: [PAD_BUTTON.B] },

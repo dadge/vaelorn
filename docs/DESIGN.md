@@ -148,6 +148,9 @@ Palettes (`src/render/palettes.ts`) : une palette cohérente par thème de donjo
   arbitre : relevage si un allié à terre est à portée > interaction si un mécanisme est à portée > attaque). Alternatives : `W/A/S/D` + `E`
   pour une seconde disposition (même joueur, aide au confort).
 - **Attaque spéciale** : action `special` (clavier `F` ou `X`, manette `Y`, `RB` ou `RT`) ; jamais mêlée à l'action contextuelle.
+- **Appel** : action `call` (clavier `C`, manette `LB` ou `LT`), champ optionnel `ActionFrame.call`, front montant détecté par la simulation (bouton dédié, jamais mêlé à l'action contextuelle).
+  Règles dans le cœur (`CALL_FREEZE_MS` 1 s d'immobilisation, `CALL_DURATION_MS` 3 s de signal, `CALL_COOLDOWN_MS` 5 s depuis l'appui ; `PlayerState.callMs` / `callCooldownMs` ;
+  événement `callStarted`) ; rendu pur dans `src/render/callIndicator.ts` (projection au bord via `edgeIndicator`, phases des 3 arcs, point au bord, anneaux du monde), dessin dans `callHud.ts`.
 - Manettes : stick gauche/croix = déplacement, `A` (bouton 0) = action contextuelle (attack+interact+revive), `X` (2) = attaque seule,
   `B` (1) = interact+revive, `Y` (3) = spécial. Dead-zone 0.25. Manettes non « standard » : mappage de repli signalé dans l'UI.
 - **Attribution par réclamation d'emplacement** (écran de sélection) : chaque emplacement 1..N est libre jusqu'à ce qu'un appareil le réclame

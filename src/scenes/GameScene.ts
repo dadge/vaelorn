@@ -31,8 +31,9 @@ import { t, onLanguageChange } from '../i18n/i18n';
 import { MenuNavigator, inputManager, listGamepads } from '../input';
 import { getLevelByIndex } from '../levels';
 import { ViewRig } from '../render/camera';
-import { FxManager, damageNumberColor, ensureFxTextures } from '../render/fx';
+import { DEPTH_LABELS, FxManager, damageNumberColor, ensureFxTextures } from '../render/fx';
 import { SpecialFx } from '../render/specialFx';
+import { CallWorldFx } from '../render/callHud';
 import { heroFrame } from '../render/art/animations';
 import { spriteTier } from '../render/art/enemyTiers';
 import { lanternBearers } from '../render/mechHud';
@@ -63,6 +64,8 @@ export class GameScene extends Phaser.Scene {
   private rig!: ViewRig;
   private fx!: FxManager;
   private specialFx!: SpecialFx;
+  /** Anneaux d'onde des appels (monde) : pur rendu des `callMs` de GameState. */
+  private callFx!: CallWorldFx;
   private ctx!: ViewContext;
 
   private roomView: RoomView | null = null;
@@ -123,6 +126,15 @@ export class GameScene extends Phaser.Scene {
     inputManager.reset();
     this.latched = null;
     this.accumulatorMs = 0;
+  };
+  /** Position d'affichage (sprite interpolé) d'un joueur pour les anneaux d'appel ; objet réutilisé (aucune allocation par frame). */
+  private readonly callScratch: Vec2 = { x: 0, y: 0 };
+  private readonly callPosOf = (id: number): Vec2 | null => {
+    const pv = this.playerViews[id];
+    if (!pv) return null;
+    this.callScratch.x = pv.x;
+    this.callScratch.y = pv.y;
+    return this.callScratch;
   };
   private readonly onShutdown = (): void => {
     this.cleanup();
@@ -214,6 +226,8 @@ export class GameScene extends Phaser.Scene {
     this.fx = new FxManager(this, this.rig, this.layout.zoom);
     this.specialFx = new SpecialFx(this, this.rig, this.fx);
     this.ctx = { scene: this, rig: this.rig, fx: this.fx, zoom: this.layout.zoom, playerCount };
+    // anneaux d'appel : au-dessus de l'obscurité des salles sombres (DEPTH_LABELS - 0.5) : un appel doit se voir dans le noir
+    this.callFx = new CallWorldFx(this.ctx, DEPTH_LABELS - 0.25);
     this.enemyViews = new EnemyViews(this.ctx);
     this.projViews = new ProjectileViews(this.ctx);
 
@@ -264,6 +278,7 @@ export class GameScene extends Phaser.Scene {
     this.projViews.clear();
     this.fx.clear();
     this.specialFx.clear();
+    this.callFx.clear();
     this.darkRoom?.destroy();
     this.darkRoom = null;
     this.roomView = new RoomView(this.ctx, this.level, this.sim.room);
@@ -375,6 +390,7 @@ export class GameScene extends Phaser.Scene {
 
     this.fx.update(dtMs);
     this.specialFx.update(dtMs);
+    this.callFx.update(s, this.callPosOf);
 
     const banners = this.overlay.activeBanners();
     for (let i = 0; i < this.huds.length; i++) {
@@ -494,6 +510,12 @@ export class GameScene extends Phaser.Scene {
           healText: t('specialhud.heal'),
         });
         this.playerViews[e.playerId]?.flashSpecial();
+        break;
+      }
+      case 'callStarted': {
+        // petit éclat de départ à l'appui ; les ondes (monde et bords de vue) sont dessinées à partir de GameState
+        const pos = this.playerPos(e.playerId, state);
+        fx.ring(pos.x, pos.y, PLAYER_COLORS[e.playerId] ?? 0xffffff, 20, 420);
         break;
       }
       case 'specialReady': {
@@ -833,6 +855,7 @@ export class GameScene extends Phaser.Scene {
     for (const pv of this.playerViews) pv.destroy();
     this.playerViews = [];
     this.specialFx?.destroy();
+    this.callFx?.destroy();
     this.fx?.destroy();
     this.rig?.destroy();
     this.sfx.destroy();

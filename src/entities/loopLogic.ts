@@ -58,6 +58,8 @@ function mergeFrame(a: ActionFrame | undefined, b: ActionFrame | undefined): Act
     // `special` est optionnel dans ActionFrame : il doit être fusionné comme les autres boutons, sinon le spécial est perdu
     // dès qu'une frame sans pas précède une frame fusionnée (écrans >= 120 Hz).
     special: a.special === true || b.special === true,
+    // idem pour `call` (optionnel) : un appui court sur « appeler » entre deux pas ne doit pas être perdu
+    call: a.call === true || b.call === true,
   };
 }
 

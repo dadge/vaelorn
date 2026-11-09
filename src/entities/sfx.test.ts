@@ -27,3 +27,17 @@ describe('sfx des attaques spéciales', () => {
     expect(sfxForEvent({ type: 'playerAttack', playerId: 0, pos: { x: 0, y: 0 }, dir: 'up' } as SimEvent)).toBe('attack');
   });
 });
+
+describe('sons : appel', () => {
+  it('callStarted produit le son « call » ; aucun son pour les événements voisins non concernés', () => {
+    expect(sfxForEvent({ type: 'callStarted', playerId: 2 })).toBe('call');
+    expect(sfxForEvent({ type: 'callStarted', playerId: 0 })).toBe('call');
+    expect(sfxForEvent({ type: 'specialReady', playerId: 0 })).toBe('specialReady');
+  });
+
+  it('le son « call » peut être joué sans audio disponible (Node) sans lever', () => {
+    const s = new Sfx();
+    expect(() => s.play('call')).not.toThrow();
+    s.destroy();
+  });
+});

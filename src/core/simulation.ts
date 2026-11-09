@@ -10,9 +10,15 @@
  *      les braseros (allumer / recharger, événements brazierLit / torchRefueled) sont gérés par `updateMechanisms` ;
  *      le jeton 'enter:<zoneId>' (embuscades) = joueur vivant dans la ZoneDef ; `lights()` expose les sources de lumière ;
  *  (b) arbitrage de l'action de chaque joueur : relevage (revive tenu + allié à terre à portée) > interaction (front montant
- *      sur un mécanisme interactif à portée) > attaque (tenu). Un sauveteur est immobile et n'attaque pas ;
+ *      sur un mécanisme interactif à portée) > attaque (tenu). Un sauveteur est immobile et n'attaque pas.
+ *      APPEL : un joueur IMMOBILISÉ par son appel (`isCallFrozen`) est exclu de tout l'arbitrage (ni relevage, ni interaction, ni
+ *      attaque, ni spécial). Sinon, un front montant de `ActionFrame.call` lance l'appel (`startCalls`, événement `callStarted`) si le
+ *      joueur est vivant, ne relève personne (relevage prioritaire : un appel pendant un relevage est ignoré), n'appelle pas déjà,
+ *      que son délai de récupération est écoulé et que la phase est 'playing' ; l'appui d'appel prime sur attaque/spécial/interaction
+ *      de ce même pas (l'immobilisation commence tout de suite ; ces appuis sont perdus, pas rejoués) ; seuls les NOUVEAUX
+ *      déclenchements sont bloqués : un spécial déjà lancé continue (coups différés de la Danse des lames en (d)) ;
  *  (c) mouvements des joueurs : vitesse × min(1, norme du stick), facing, collisions (grille + portes fermées + blocs) ;
- *      les joueurs à terre sont immobiles et ne bloquent personne ;
+ *      les joueurs à terre ou immobilisés par leur appel sont immobiles (et ne poussent pas de bloc) ; ceux à terre ne bloquent personne ;
  *  (d) attaques des joueurs (mêlée instantanée / projectiles) ; puis ATTAQUES SPÉCIALES : coups différés des spéciaux en cours
  *      (Danse des lames), puis déclenchement des spéciaux sur front montant de `ActionFrame.special` (joueur vivant, ne relevant
  *      pas, recharge écoulée) → événement `specialUsed` ; `specialReady` est émis en (a) quand la recharge atteint 0 ;
@@ -46,7 +52,11 @@
  *  - à l'arrivée dans une salle suivante ou après un redémarrage, les joueurs bénéficient de `ROOM_ENTER_INVULN_MS` d'invulnérabilité ;
  *    les joueurs vivants conservent leurs PV d'une salle à l'autre (seuls les joueurs à terre sont relevés à PV pleins) ;
  *  - après un redémarrage, `player.kills` est remis à zéro (voir `resetPlayersForRoom`) ;
- *  - le spécial démarre PRÊT ; tout chargement/redémarrage de salle le remet PRÊT (recharge à 0, sans événement `specialReady`).
+ *  - le spécial démarre PRÊT ; tout chargement/redémarrage de salle le remet PRÊT (recharge à 0, sans événement `specialReady`) ;
+ *  - appel : `callMs` (signal restant, ≤ CALL_DURATION_MS) et `callCooldownMs` (≤ CALL_COOLDOWN_MS, décompté depuis l'appui) décroissent
+ *    avec les autres timers (a). Immobile tant que `callMs > CALL_DURATION_MS - CALL_FREEZE_MS`. Annulé si l'appelant tombe à terre ;
+ *    tout (re)démarrage de salle (start / next / restart, donc défaite collective incluse) remet les deux à 0. Un joueur qui appelle reste
+ *    vulnérable, sa torche continue de s'user et il compte normalement pour les zones d'objectif et de sortie.
  */
 import {
   DOWNED_THREAT_RADIUS,
@@ -103,6 +113,10 @@ import {
   resetPlayersForRoom,
   reviveAllDowned,
   stepPlayerTimers,
+  isCallFrozen,
+  canStartCall,
+  startCall,
+  cancelCall,
   stepPlayerTorch,
   updateRevive,
 } from './players';
@@ -145,7 +159,7 @@ export const MAX_STEP_MS = 100;
 
 /** Frame d'entrées assainie : NaN → 0, axes bornés à [-1, 1] (±Infinity → ±1), booléens stricts. Frame absente = frame vide. */
 export function sanitizeFrame(f: ActionFrame | undefined): ActionFrame {
-  if (!f) return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false };
+  if (!f) return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false };
   const axis = (v: number): number => (Number.isNaN(v) ? 0 : Math.max(-1, Math.min(1, v)));
   return {
     moveX: axis(f.moveX),
@@ -154,6 +168,7 @@ export function sanitizeFrame(f: ActionFrame | undefined): ActionFrame {
     interact: f.interact === true,
     revive: f.revive === true,
     special: f.special === true,
+    call: f.call === true,
   };
 }
 
@@ -197,6 +212,8 @@ interface Arbitration {
   attacking: Set<PlayerId>;
   /** Joueurs dont le bouton de spécial vient d'être pressé (front montant) ce pas. */
   special: Set<PlayerId>;
+  /** Joueurs dont l'appel est lancé CE pas (front montant accepté : vivant, libre, délai écoulé). */
+  call: Set<PlayerId>;
 }
 
 /**
@@ -247,6 +264,12 @@ export class GameSimulation implements IGameSimulation {
       throw new Error(`Le snapshot (${parsed.levelId}) ne correspond pas au niveau ${level.id}`);
     }
     if (!level.rooms[parsed.roomIndex]) throw new Error('Snapshot : salle inconnue dans ce niveau');
+    // Compatibilité : un ancien snapshot n'a pas les champs d'appel (ajoutés après coup) → valeurs par défaut.
+    for (const p of parsed.players) {
+      if (typeof p.callMs !== 'number' || !Number.isFinite(p.callMs)) p.callMs = 0;
+      if (typeof p.callCooldownMs !== 'number' || !Number.isFinite(p.callCooldownMs)) p.callCooldownMs = 0;
+      if (p.prev && typeof p.prev.call !== 'boolean') p.prev.call = false;
+    }
     return new GameSimulation(parsed, level);
   }
 
@@ -336,6 +359,7 @@ export class GameSimulation implements IGameSimulation {
 
     // (b) arbitrage des actions
     const arb = this.arbitrate(frameOf);
+    this.startCalls(arb, events);
 
     // (c) mouvements
     this.movePlayers(frameOf, arb, dt);
@@ -369,7 +393,7 @@ export class GameSimulation implements IGameSimulation {
       const mechFrames: Partial<Record<PlayerId, ActionFrame>> = {};
       for (const p of players) {
         const f = frameOf(p);
-        mechFrames[p.id] = arb.reviving.has(p.id) ? { ...f, moveX: 0, moveY: 0 } : f;
+        mechFrames[p.id] = arb.reviving.has(p.id) || isCallFrozen(p) ? { ...f, moveX: 0, moveY: 0 } : f;
       }
       const req = this.requirementContext();
       events.push(
@@ -435,6 +459,8 @@ export class GameSimulation implements IGameSimulation {
       p.prev.interact = f.interact;
       p.prev.revive = f.revive;
       p.prev.special = f.special === true;
+      p.prev.call = f.call === true;
+      if (p.status !== 'alive') cancelCall(p); // garde-fou : un joueur à terre n'appelle pas (quelle que soit la cause de la chute)
     }
     return events;
   }
@@ -497,16 +523,23 @@ export class GameSimulation implements IGameSimulation {
    *    (touche d'action unique du clavier) ; uniquement en phase 'playing'.
    */
   private arbitrate(frameOf: (p: PlayerState) => ActionFrame): Arbitration {
-    const arb: Arbitration = { reviving: new Set(), interactPressed: {}, attacking: new Set(), special: new Set() };
+    const arb: Arbitration = { reviving: new Set(), interactPressed: {}, attacking: new Set(), special: new Set(), call: new Set() };
     const playing = this.state.phase === 'playing';
     for (const p of this.state.players) {
       if (p.status !== 'alive') continue;
       const f = frameOf(p);
+      // Immobilisé par son appel : ni relevage, ni interaction, ni attaque, ni spécial (le signal, lui, continue).
+      if (isCallFrozen(p)) continue;
       if (f.revive && (isRescuing(p) || this.downedAllyInReach(p))) {
         arb.reviving.add(p.id);
         continue;
       }
       if (!playing) continue;
+      // Appel : front montant, joueur libre (délai écoulé, pas d'appel en cours). Il prime sur le reste du pas (immobilisation immédiate).
+      if (f.call === true && p.prev.call !== true && canStartCall(p)) {
+        arb.call.add(p.id);
+        continue;
+      }
       if (f.special === true && p.prev.special !== true) arb.special.add(p.id);
       const pressed = f.interact && !p.prev.interact;
       if (pressed) arb.interactPressed[p.id] = true;
@@ -517,12 +550,21 @@ export class GameSimulation implements IGameSimulation {
     return arb;
   }
 
+  /** Lance les appels acceptés par l'arbitrage (`callMs`, `callCooldownMs`) et émet `callStarted`. */
+  private startCalls(arb: Arbitration, events: SimEvent[]): void {
+    for (const p of this.state.players) {
+      if (!arb.call.has(p.id)) continue;
+      startCall(p);
+      events.push({ type: 'callStarted', playerId: p.id });
+    }
+  }
+
   // ── (c) Mouvements ──
 
   private movePlayers(frameOf: (p: PlayerState) => ActionFrame, arb: Arbitration, dt: number): void {
     const solids = this.solidRects();
     for (const p of this.state.players) {
-      if (p.status !== 'alive' || arb.reviving.has(p.id)) {
+      if (p.status !== 'alive' || arb.reviving.has(p.id) || isCallFrozen(p)) {
         p.moving = false;
         continue;
       }
@@ -874,6 +916,8 @@ export class GameSimulation implements IGameSimulation {
       p.specialCooldownMs = reason === 'restart' && bossRoom ? Math.round(spCd / 2) : 0;
       p.specialAnimMs = 0;
       p.torchMs = TORCH_MAX_MS; // torche pleine à l'entrée de chaque salle (start / next / restart)
+      p.callMs = 0; // appel et délai remis à zéro à l'entrée de chaque salle (start / next / restart)
+      p.callCooldownMs = 0;
     }
     if (reason !== 'start') {
       for (const p of s.players) p.invulnMs = Math.max(p.invulnMs, ROOM_ENTER_INVULN_MS);

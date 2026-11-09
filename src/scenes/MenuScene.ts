@@ -718,6 +718,7 @@ export class MenuScene extends Phaser.Scene {
           [t('controls.move'), t('controls.keyboard.move')],
           [t('controls.action'), t('controls.keyboard.action')],
           [t('pad.controls.special'), t('pad.controls.keyboard.special')],
+          [t('call.controls.label'), t('call.controls.keyboard')],
           [t('controls.pause'), t('controls.keyboard.pause')],
         ],
       },
@@ -730,6 +731,7 @@ export class MenuScene extends Phaser.Scene {
           [t('controls.attack'), t('controls.gamepad.attack')],
           [t('controls.interact'), t('controls.gamepad.interact')],
           [t('pad.controls.special'), t('pad.controls.gamepad.special')],
+          [t('call.controls.label'), t('call.controls.gamepad')],
           [t('controls.pause'), t('controls.gamepad.pause')],
         ],
       },
@@ -740,10 +742,10 @@ export class MenuScene extends Phaser.Scene {
       for (const [label, value] of col.lines) {
         add(createText(this, col.x, y, label, { size: 'sm', color: UI_THEME.textDim, wrapWidth: colW }));
         add(createText(this, col.x + 12, y + 18, value, { size: 'sm', color: UI_THEME.text, wrapWidth: colW - 12 }));
-        y += 40;
+        y += 36; // 7 lignes (dont « Appeler ») pour la colonne manette
       }
     }
-    add(createText(this, GAME_WIDTH / 2, py + 366, t('hint.revive'), { size: 'sm', color: UI_THEME.accent, origin: [0.5, 0.5], align: 'center', wrapWidth: pw - 80 }));
+    add(createText(this, GAME_WIDTH / 2, py + 390, t('hint.revive'), { size: 'sm', color: UI_THEME.accent, origin: [0.5, 0.5], align: 'center', wrapWidth: pw - 80 }));
 
     const assignments = this.add.container(0, 0);
     add(assignments);
@@ -778,8 +780,8 @@ export class MenuScene extends Phaser.Scene {
       box.add(o);
       return o;
     };
-    add(createText(this, px + 30, py + 392, t('pad.controls.join'), { size: 'sm', color: UI_THEME.textDim, wrapWidth: pw - 60 }));
-    let y = py + 436;
+    add(createText(this, px + 30, py + 408, t('pad.controls.join'), { size: 'sm', color: UI_THEME.textDim, wrapWidth: pw - 60 }));
+    let y = py + 472;
     const pads = listGamepads();
     add(createText(this, px + 30, y - 22, t('pad.controls.pads'), { size: 'sm', color: UI_THEME.good }));
     if (pads.length === 0) {
