@@ -31,6 +31,7 @@ import {
   parseChoices,
   serializeChoices,
   sessionFromChoices,
+  sessionForTutorial,
   setMenuDevice,
   shortPadName,
   withDifficulty,
@@ -38,7 +39,8 @@ import {
   withStartLevel,
   type MenuChoices,
 } from '../render/menuLogic';
-import { SCENE_KEYS, type CharacterSelectSceneData, type MenuSceneData } from '../render/session';
+import { SCENE_KEYS, type CharacterSelectSceneData, type GameSceneData, type MenuSceneData } from '../render/session';
+import { initialDeviceFromMenuSource } from '../tutorial/deviceHints';
 import {
   chooseInDialog,
   eraseAction,
@@ -76,6 +78,10 @@ import {
 const ROWS_X = 450;
 const ROWS_W = 780;
 const ROW_H = 34; // 12 lignes au plus (4 joueurs + Continuer + Effacer la sauvegarde) doivent tenir au-dessus de la ligne d'aide
+/** Avec la ligne « Tutoriel » (13 lignes sélectionnables au plus), les lignes sont un peu plus basses. */
+const ROW_H_COMPACT = 31;
+/** Nombre de lignes sélectionnables au-delà duquel on passe à `ROW_H_COMPACT`. */
+const COMPACT_ROWS_FROM = 12;
 const ROW_GAP = 3;
 const ROWS_TOP = 152;
 const VALUE_CX = 575;
@@ -127,6 +133,7 @@ export class MenuScene extends Phaser.Scene {
   private hint!: Phaser.GameObjects.Text;
   private info!: Phaser.GameObjects.Text;
   private rows: RowView[] = [];
+  private rowH = ROW_H;
   private selectedId = 'play';
   private controls: {
     objects: Phaser.GameObjects.GameObject[];
@@ -308,6 +315,7 @@ export class MenuScene extends Phaser.Scene {
       label: () => t(layout.playLabelKey),
       confirm: () => this.onNewGame(),
     });
+    specs.push({ id: 'tutorial', kind: 'action', label: () => t('menu.tutorial'), confirm: () => this.startTutorial() });
     specs.push({
       id: 'players',
       kind: 'choice',
@@ -385,7 +393,10 @@ export class MenuScene extends Phaser.Scene {
     for (const r of this.rows) r.container.destroy();
     this.rows = [];
     let y = ROWS_TOP;
-    for (const spec of this.specs()) {
+    const specs = this.specs();
+    // 13 lignes sélectionnables au plus (avec « Tutoriel ») : lignes un peu plus basses pour tout tenir au-dessus de la ligne d'aide
+    this.rowH = specs.filter((x) => x.kind !== 'note').length > COMPACT_ROWS_FROM ? ROW_H_COMPACT : ROW_H;
+    for (const spec of specs) {
       const view = this.createRowView(spec, y);
       this.rows.push(view);
       y += view.height + ROW_GAP;
@@ -407,7 +418,7 @@ export class MenuScene extends Phaser.Scene {
       return { spec, container, normal: null, selected: null, label, value: null, height: h };
     }
     const w = ROWS_W;
-    const h = ROW_H;
+    const h = this.rowH;
     const normal = createPanel(this, 0, 0, w, h, PANEL_STYLES.default);
     const selected = createPanel(this, 0, 0, w, h, PANEL_STYLES.selected);
     const isAction = spec.kind === 'action';
@@ -471,6 +482,8 @@ export class MenuScene extends Phaser.Scene {
     } else if (sel === 'continue' && this.saveState.kind === 'valid') {
       const names = this.saveState.save.players.map((p) => t(CHARACTERS[p.characterId].nameKey)).join(', ');
       this.info.setText(t('save.continue.team', { names }));
+    } else if (sel === 'tutorial') {
+      this.info.setText(t('menu.tutorial.hint'));
     } else if (sel.startsWith('diff')) {
       const i = Number(sel.slice(4));
       this.info.setText(t(`menu.difficulty.${this.choices.difficulties[i]}.desc`));
@@ -548,6 +561,25 @@ export class MenuScene extends Phaser.Scene {
     const session = sessionFromChoices(this.choices, this.lastCharacters, LEVELS.length);
     const data: CharacterSelectSceneData = { session };
     transitionTo(this, SCENE_KEYS.CharacterSelect, data);
+  }
+
+  /**
+   * « Tutoriel » : lance le niveau-tutoriel (1 humain + partenaire scripté, `GameScene` + `session.tutorial`). NE lit ni n'écrit aucune
+   * sauvegarde, aucun choix du menu (`saveChoices` n'est pas appelé) et ne demande aucune confirmation : il n'écrase jamais rien.
+   * L'appareil qui a validé la ligne (clavier, manette, manette virtuelle tactile) sert aux libellés de boutons avant la première entrée.
+   */
+  private startTutorial(): void {
+    if (this.starting) return;
+    this.starting = true;
+    inputManager.attach();
+    inputManager.clearAssignments();
+    inputManager.setPlayer1Gamepad(false);
+    inputManager.setPlayerCount(1);
+    const padIndex = this.lastSource !== null && this.lastSource.startsWith('gamepad:') ? Number(this.lastSource.slice(8)) : -1;
+    const padName = listGamepads().find((p) => p.index === padIndex)?.id;
+    const session = sessionForTutorial(this.lastCharacters, initialDeviceFromMenuSource(this.lastSource, padName), this.choices.playerCount);
+    const data: GameSceneData = { session };
+    transitionTo(this, SCENE_KEYS.Game, data);
   }
 
   /** « Nouvelle partie » : confirmation avant d'écraser une sauvegarde existante (valide ou illisible), sinon on lance. */

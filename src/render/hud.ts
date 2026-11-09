@@ -58,6 +58,7 @@ import { mixColor as mixHex } from './specialFx';
 import { SEPARATOR_COLOR, type ScreenRect, type SplitLayout } from './splitscreen';
 import { showTorchHud, torchBarColor, torchBarWidth, torchBlinkAlpha, torchFraction, torchLevel, type TorchLevel } from './torchHud';
 import type { ViewContext } from '../entities/common';
+import type { HudRegionId } from '../tutorial/types';
 
 // ───────────────────────────── Partie pure ─────────────────────────────
 
@@ -812,6 +813,33 @@ export class PlayerHud {
     this.lanIcon = hudIcon(ctx, this.puzRight - 24, this.puzTop, lanternFrame(0), 3);
     this.lanText = hudText(ctx, this.puzRight - 24 - 6, this.puzTop + 12, '', { size: this.fs - 2, originX: 1, originY: 0.5, color: 0xffe9a8, wrap: Math.floor(vw * 0.4), align: 'right' });
     for (const o of [this.lanIcon, this.lanText]) o.setVisible(false);
+  }
+
+  /**
+   * Rectangles écran (lecture seule) des zones du HUD ACTUELLEMENT affichées : le tutoriel les encadre (« ici : tes objectifs »).
+   * Une zone dont le bloc est absent ou masqué (bloc d'objectifs sous un bandeau, jauge de torche hors salle sombre…) n'est PAS
+   * exposée : aucun cadre dans le vide. Ne modifie rien.
+   */
+  regions(): Partial<Record<HudRegionId, ScreenBounds>> {
+    const out: Partial<Record<HudRegionId, ScreenBounds>> = {};
+    const box = (x0: number, y0: number, x1: number, y1: number): ScreenBounds => ({ x0, y0, x1, y1 });
+    const centered = (r: Rect): ScreenBounds => box(r.x - r.width / 2, r.y - r.height / 2, r.x + r.width / 2, r.y + r.height / 2);
+    if (this.goalShown && !this.goalBlocked) out.roomGoals = box(this.goalBg.x, this.goalBg.y, this.goalBg.x + this.goalBg.width, this.goalBg.y + this.goalBg.height);
+    if (this.objBg.visible) out.personalGoal = box(this.objBg.x, this.objBg.y, this.objBg.x + this.objBg.width, this.objBg.y + this.objBg.height);
+    const h0 = this.hearts[0];
+    const hN = this.hearts[this.hearts.length - 1];
+    if (h0 && hN) out.hearts = box(h0.x - 3, h0.y - 3, hN.x + hN.displayWidth + 3, h0.y + h0.displayHeight + 3);
+    if (this.spBarBg.visible) {
+      const right = Math.max(this.spBarBg.x + this.spBarBg.width, this.spText.visible ? this.spText.x + this.spText.width : 0);
+      out.special = box(this.spIcon.x - 3, this.spBarBg.y - this.spBarBg.height / 2 - 2, right + 3, this.spBarBg.y + this.spBarBg.height / 2 + 2);
+    }
+    const k0 = this.keyIcons[0];
+    const kN = this.keyIcons[this.keyIcons.length - 1];
+    if (k0 && kN) out.keys = box(k0.x - 3, k0.y - 3, kN.x + kN.displayWidth + 3, k0.y + k0.displayHeight + 3);
+    if (this.torchShown) out.torch = box(this.torchIcon.x - 3, this.torchIcon.y - 3, this.torchBarBg.x + this.torchBarBg.width + 3, this.torchIcon.y + this.torchIcon.displayHeight + 3);
+    if (this.promptBg.visible) out.prompt = centered(this.promptBg);
+    if (this.signBg.visible) out.sign = centered(this.signBg);
+    return out;
   }
 
   /** Force la re-traduction des textes au prochain rafraîchissement (changement de langue). */

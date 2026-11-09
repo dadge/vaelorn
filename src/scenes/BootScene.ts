@@ -7,7 +7,7 @@ import { GAME_HEIGHT, GAME_WIDTH } from '../core/constants';
 import { getLanguage, setLanguage, t } from '../i18n/i18n';
 import { inputManager } from '../input';
 import { buildAtlas } from '../render/art';
-import { getQuickParams } from '../render/menuLogic';
+import { getQuickParams, sessionForTutorial } from '../render/menuLogic';
 import { DEV_QUICK_START_EVENT, SCENE_KEYS, type GameSceneData } from '../render/session';
 import { UI_THEME, beginScene, createText, transitionTo } from '../render/ui';
 
@@ -50,6 +50,18 @@ export class BootScene extends Phaser.Scene {
     }
 
     const quick = getQuickParams();
+    // `?tutorial=1[&room=N]` : lance directement le tutoriel (1 manette / clavier, aucune sauvegarde)
+    if (quick?.tutorial) {
+      inputManager.attach();
+      inputManager.clearAssignments();
+      inputManager.setPlayerCount(1);
+      inputManager.setPlayer1Gamepad(false);
+      const session = sessionForTutorial(quick.session.players.map((p) => p.characterId));
+      if (quick.session.startRoomIndex !== undefined) session.startRoomIndex = quick.session.startRoomIndex;
+      const data: GameSceneData = { session };
+      this.scene.start(SCENE_KEYS.Game, data);
+      return;
+    }
     if (quick?.quick) {
       inputManager.attach();
       inputManager.setPlayerCount(quick.session.playerCount);

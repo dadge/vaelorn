@@ -6,6 +6,10 @@
  * Écran partagé : une caméra Phaser par joueur (voir render/camera.ts + render/splitscreen.ts), une caméra d'interface
  * plein écran qui porte le HUD de chaque joueur DANS SA vue, le panneau d'équipe (3 joueurs), les bannières et la pause.
  *
+ * TUTORIEL (`session.tutorial`) : même scène, niveau-données `tutorialLevel`, 2 joueurs simulés (le joueur + un partenaire SCRIPTÉ piloté
+ * par `TutorialRuntime`) pour UNE seule vue ; aucune sauvegarde (pas d'`AutoSaver`), graine fixe. Tous les ajouts sont gardés par
+ * `if (this.tutorial)` : la campagne ne change pas d'un octet. Voir `src/tutorial/` (logique pure) et `render/tutorialHud.ts` (dessin).
+ *
  * Cycle de vie : à chaque événement `roomEntered`, la salle précédente est DÉTRUITE proprement (RoomView, pools
  * d'ennemis et de projectiles, FX) puis reconstruite. Au `shutdown`, tout est libéré (écouteurs, caméras, objets).
  */
@@ -30,6 +34,11 @@ import { effectivePauseOwner, pauseIntentAllowed, pauseOwnerForPad, resolvePause
 import { t, onLanguageChange } from '../i18n/i18n';
 import { MenuNavigator, VIRTUAL_PAD_INDEX, inputManager, listGamepads } from '../input';
 import { getLevelByIndex } from '../levels';
+import { TUTORIAL_SEED, tutorialLevel } from '../levels/tutorial';
+import { TutorialRuntime, tutorialPlayers } from '../entities/tutorialRuntime';
+import { TutorialHud } from '../render/tutorialHud';
+import { visibleRegionIds } from '../render/tutorialHudLogic';
+import type { ButtonName } from '../tutorial/types';
 import { ViewRig } from '../render/camera';
 import { DEPTH_LABELS, FxManager, damageNumberColor, ensureFxTextures } from '../render/fx';
 import { SpecialFx } from '../render/specialFx';
@@ -51,6 +60,13 @@ const CELEBRATION_MS = 3200;
 const LEAVE_FADE_MS = 320;
 /** Bouton « Start » des manettes (mapping standard). */
 const PAD_START_BUTTON = 9;
+/** Boutons « Select / Back » (saut du tutoriel) et « A » (confirmer la carte de fin) des manettes (mapping standard). */
+const PAD_SELECT_BUTTON = 8;
+const PAD_A_BUTTON = 0;
+/** Délai (ms) avant que Espace / Entrée / A confirment la carte de fin du tutoriel (le toucher ou le clic sur le bouton restent immédiats). */
+const TUTORIAL_END_CONFIRM_DELAY_MS = 1200;
+/** Période (ms de rendu) de relecture de l'appareil du tutoriel (libellés de boutons). */
+const TUTORIAL_DEVICE_REFRESH_MS = 250;
 
 let sessionCounter = 0;
 
@@ -110,9 +126,35 @@ export class GameScene extends Phaser.Scene {
   private leaving: { key: string; data?: object; elapsedMs: number } | null = null;
   private failed = false;
 
+  // ── Tutoriel (null hors tutoriel) ──
+  private tutorial: TutorialRuntime | null = null;
+  private tutorialHud: TutorialHud | null = null;
+  private tutorialEnded = false;
+  /** Instant (`time.now`) d'apparition de la carte de fin : les touches de confirmation sont ignorées juste après (un joueur qui martèle Espace ne la manque pas). */
+  private tutorialEndedAt = 0;
+  private tutorialLabels: Record<ButtonName, string> | null = null;
+  private tutorialDeviceAccumMs = TUTORIAL_DEVICE_REFRESH_MS;
+  private padEdgeDown: Record<number, boolean> = {};
+
   private offLanguage: (() => void) | null = null;
   private readonly onEscape = (): void => {
     if (!this.paused && !this.leaving) this.openPause('keyboard');
+  };
+  /** Entrée : saute l'étape du tutoriel (ou confirme la carte de fin). */
+  private readonly onEnter = (e?: KeyboardEvent): void => {
+    if (!this.tutorial || e?.repeat || this.paused || this.leaving) return;
+    if (this.tutorialEnded) {
+      if (this.tutorialEndConfirmReady()) this.leaveTo(SCENE_KEYS.Menu);
+    } else this.doTutorialSkip();
+  };
+  /** Espace : confirme la carte de fin du tutoriel (jamais pendant le jeu : c'est la touche d'action). */
+  private readonly onSpaceEnd = (e?: KeyboardEvent): void => {
+    if (!this.tutorial || e?.repeat || this.paused || this.leaving || !this.tutorialEnded || !this.tutorialEndConfirmReady()) return;
+    this.leaveTo(SCENE_KEYS.Menu);
+  };
+  /** Toute touche : le clavier est bien l'appareil utilisé (libellés de boutons du tutoriel). */
+  private readonly onAnyKey = (): void => {
+    this.tutorial?.noteKeyboard();
   };
   private readonly onMute = (): void => {
     this.sfx.setMuted(!this.sfx.isMuted);
@@ -175,53 +217,67 @@ export class GameScene extends Phaser.Scene {
     this.finishMs = 0;
     this.leaving = null;
     this.failed = false;
+    this.tutorial = null;
+    this.tutorialHud = null;
+    this.tutorialEnded = false;
+    this.tutorialEndedAt = 0;
+    this.tutorialLabels = null;
+    this.tutorialDeviceAccumMs = TUTORIAL_DEVICE_REFRESH_MS;
+    this.padEdgeDown = {};
     this.sfx = new Sfx();
   }
 
   create(): void {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown);
     // dev : `?dev=statues|hourglass|bridge|bosses` remplace le niveau par une salle de test (voir entities/devRooms.ts)
-    const devKind = devTestKind(typeof window !== 'undefined' ? window.location.search : '', import.meta.env.DEV);
-    const baseLevel = devKind ? buildDevTestLevel(devKind) : getLevelByIndex(this.session.levelIndex);
+    const tut = this.session.tutorial;
+    const devKind = tut ? null : devTestKind(typeof window !== 'undefined' ? window.location.search : '', import.meta.env.DEV);
+    const baseLevel = tut ? tutorialLevel : devKind ? buildDevTestLevel(devKind) : getLevelByIndex(this.session.levelIndex);
     if (!baseLevel || this.session.players.length === 0) {
       this.showFatalError();
       return;
     }
     // dev : `?dark=1` force toutes les salles sombres (clone du niveau ; brasero virtuel en mode DEV uniquement)
     const search = typeof window !== 'undefined' ? window.location.search : '';
-    const level = isDevDarkAllowed(search, import.meta.env.DEV) ? forceDarkLevel(baseLevel, import.meta.env.DEV) : baseLevel;
+    const level = !tut && isDevDarkAllowed(search, import.meta.env.DEV) ? forceDarkLevel(baseLevel, import.meta.env.DEV) : baseLevel;
     this.level = level;
-    const playerCount = Math.max(1, Math.min(4, this.session.players.length));
+    // Tutoriel : 2 joueurs simulés (le joueur + le partenaire scripté) mais UNE seule vue / UNE seule entrée humaine.
+    const setups = tut ? tutorialPlayers(this.session.players[0]) : this.session.players;
+    const playerCount = Math.max(1, Math.min(4, setups.length));
+    const viewCount = tut ? 1 : playerCount;
     this.kills = Array.from({ length: playerCount }, () => 0);
     this.downs = Array.from({ length: playerCount }, () => 0);
 
     // simulation (graine dérivée d'un compteur + horloge : la scène peut utiliser Date.now, pas le core)
     sessionCounter++;
-    const seed = (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
+    const seed = tut ? TUTORIAL_SEED : (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
     // Salle de départ : reprise d'une sauvegarde ou dev `?room=N` (honorée par la simulation, voir SimConfig.startRoomIndex).
-    const players = this.session.players.slice(0, playerCount);
+    const players = setups.slice(0, playerCount);
     this.sim = createSimulation({ levelId: level.id, players, seed, startRoomIndex: this.session.startRoomIndex }, level);
 
     // Sauvegarde automatique : désactivée en démarrage rapide, `?nosave=1` et paramètres de dev (la vraie sauvegarde n'est jamais écrasée).
-    this.autoSaver = new AutoSaver({
-      repository: getSaveRepository(),
-      context: getSaveContext(),
-      levelId: level.id,
-      players,
-      completedLevelIds: this.session.completedLevelIds,
-      enabled: isSavingAllowed({ quick: getQuickParams()?.quick === true, search }),
-      onError: (err) => {
-        const text = err.code === 'quota' ? t('save.error.quota') : t('save.error.unavailable');
-        this.huds[0]?.showToast(text, 0xff8a6a, 5000);
-      },
-    });
+    // Tutoriel : AUCUN AutoSaver (le niveau n'est pas dans le contexte de sauvegarde, et rien ne doit jamais être écrit).
+    if (!tut) {
+      this.autoSaver = new AutoSaver({
+        repository: getSaveRepository(),
+        context: getSaveContext(),
+        levelId: level.id,
+        players,
+        completedLevelIds: this.session.completedLevelIds,
+        enabled: isSavingAllowed({ quick: getQuickParams()?.quick === true, search }),
+        onError: (err) => {
+          const text = err.code === 'quota' ? t('save.error.quota') : t('save.error.unavailable');
+          this.huds[0]?.showToast(text, 0xff8a6a, 5000);
+        },
+      });
+    }
 
-    inputManager.setPlayerCount(playerCount);
+    inputManager.setPlayerCount(viewCount);
     inputManager.reset();
 
     // vues
     ensureFxTextures(this);
-    this.layout = computeLayout(playerCount);
+    this.layout = computeLayout(viewCount);
     this.rig = new ViewRig(this, this.layout);
     this.fx = new FxManager(this, this.rig, this.layout.zoom);
     this.specialFx = new SpecialFx(this, this.rig, this.fx);
@@ -242,10 +298,16 @@ export class GameScene extends Phaser.Scene {
       specialHint: (id) => specialHintLabel(inputManager.getAssignments()[id], inputManager.getBindings().special),
     };
     createSeparators(this.ctx, this.layout);
-    this.huds = state.players.map((p) => new PlayerHud(env, p.id, p));
+    this.huds = state.players.slice(0, viewCount).map((p) => new PlayerHud(env, p.id, p));
     if (this.layout.teamPanel) this.teamPanel = new TeamPanelHud(env, this.layout.teamPanel, state.players);
     this.overlay = new GameOverlay(this.ctx, level);
     this.pauseMenu = new PauseMenu(this.ctx);
+    if (tut) {
+      this.pauseMenu.setTutorial(true); // confirmation de sortie propre au tutoriel (rien n'est sauvegardé ni perdu)
+      this.tutorial = new TutorialRuntime(level, { initialDevice: tut.initialDevice, startRoomIndex: this.session.startRoomIndex });
+      this.tutorialHud = new TutorialHud(this.ctx, this.layout.viewports[0]);
+      this.tutorialHud.setSkipHandler(() => this.doTutorialSkip());
+    }
 
     // construction de la vue de la salle de départ
     this.buildRoom('start');
@@ -253,11 +315,18 @@ export class GameScene extends Phaser.Scene {
     // écouteurs
     this.input.keyboard?.on('keydown-ESC', this.onEscape);
     this.input.keyboard?.on('keydown-M', this.onMute);
+    if (tut) {
+      this.input.keyboard?.on('keydown-ENTER', this.onEnter);
+      this.input.keyboard?.on('keydown-SPACE', this.onSpaceEnd);
+      this.input.keyboard?.on('keydown', this.onAnyKey);
+    }
     window.addEventListener('blur', this.onWindowBlur);
     this.game.events.on(Phaser.Core.Events.HIDDEN, this.onGameHidden);
     this.offLanguage = onLanguageChange(() => this.retranslate());
     // mémorise l'état « tenu » initial des boutons Start pour ne pas déclencher une pause fantôme
     this.pollPadStart();
+    this.padEdge(PAD_SELECT_BUTTON);
+    this.padEdge(PAD_A_BUTTON);
   }
 
   /** Affiche une erreur lisible puis retourne au menu (niveau introuvable, session vide). */
@@ -335,14 +404,24 @@ export class GameScene extends Phaser.Scene {
     const plan = planSteps(this.accumulatorMs, dt, SIM_STEP_MS, MAX_STEPS_PER_FRAME);
     this.accumulatorMs = plan.accumulatorMs;
     let stepped = false;
+    // Tutoriel : zones du HUD visibles (condition `regionVisible`) et touches de saut / de confirmation des manettes.
+    const tutorial = this.tutorial;
+    const regionIds = tutorial && this.huds[0] ? visibleRegionIds(this.huds[0].regions()) : [];
+    if (tutorial) this.pollTutorialPad();
     if (!this.leaving) {
       for (let i = 0; i < plan.steps; i++) {
-        const inputs = i === 0 ? (this.latched ?? cur) : cur;
+        let inputs = i === 0 ? (this.latched ?? cur) : cur;
+        // Tutoriel : le partenaire scripté est le joueur 1 (entrées posées À CHAQUE pas, jamais fusionnées ni mémorisées).
+        if (tutorial) inputs = tutorial.decorate(inputs, state);
         const events = this.sim.step(SIM_STEP_MS, inputs);
         if (i === 0) this.latched = null;
         stepped = true;
         this.autoSaver?.handleEvents(events); // début de salle / fin de niveau : jamais en pleine salle
         for (let k = 0; k < events.length; k++) this.handleEvent(events[k], state);
+        if (tutorial) {
+          tutorial.observe(events, state, regionIds);
+          for (const id of tutorial.takeKnockDowns()) this.sim.knockDown(id); // chute scénarisée (relevage, mort d'équipe)
+        }
       }
     }
     if (state.roomIndex !== this.viewRoomIndex || this.forceRebuild) this.buildRoom(this.pendingReason);
@@ -350,7 +429,10 @@ export class GameScene extends Phaser.Scene {
 
     if (this.finishing && !this.leaving) {
       this.finishMs += dt;
-      if (this.finishMs >= CELEBRATION_MS) this.finishLevel();
+      if (this.finishMs >= CELEBRATION_MS) {
+        if (this.tutorial) this.showTutorialEnd();
+        else this.finishLevel();
+      }
     }
   }
 
@@ -397,6 +479,7 @@ export class GameScene extends Phaser.Scene {
       this.huds[i].update({ state: s, room: this.sim.room, dtMs, timeMs, exitOpen, camCenter: this.rig.centerOf(i), banners });
     }
     this.teamPanel?.update(s, this.sim.room, dtMs);
+    this.updateTutorialHud(dtMs);
     this.overlay.update({
       phase: s.phase,
       phaseTimerMs: s.phaseTimerMs,
@@ -666,6 +749,110 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // ───────────────────────────── Tutoriel ─────────────────────────────
+
+  /** Relit l'appareil (clavier / manette / PlayStation / tactile) et les libellés de boutons ; rendu seulement. */
+  private refreshTutorialLabels(): void {
+    const tut = this.tutorial;
+    if (!tut) return;
+    const a = inputManager.getAssignments()[0];
+    tut.refreshDevice({
+      label: a?.label ?? 'keyboard',
+      gamepadIndex: a?.gamepadIndex,
+      gamepadName: a?.gamepadName,
+      virtualPadConnected: listGamepads().some((p) => p.index === VIRTUAL_PAD_INDEX),
+    });
+    this.tutorialLabels = tut.labels(inputManager.getBindings());
+  }
+
+  /** Met à jour l'interface du tutoriel (carte, cadres, repères, puce) depuis la vue du directeur. */
+  private updateTutorialHud(dtMs: number): void {
+    const tut = this.tutorial;
+    const hud = this.tutorialHud;
+    const human = this.sim.state.players[0];
+    const partner = this.sim.state.players[1];
+    if (!tut || !hud || !human || !partner || !this.huds[0]) return;
+    this.tutorialDeviceAccumMs += dtMs;
+    if (this.tutorialDeviceAccumMs >= TUTORIAL_DEVICE_REFRESH_MS || !this.tutorialLabels) {
+      this.tutorialDeviceAccumMs = 0;
+      this.refreshTutorialLabels();
+    }
+    const special = CHARACTERS[human.characterId]?.special;
+    hud.update({
+      view: tut.view(),
+      labels: this.tutorialLabels as Record<ButtonName, string>,
+      partnerName: t(`character.${partner.characterId}.name`),
+      specialName: special ? t(special.nameKey) : '',
+      regions: this.huds[0].regions(),
+      camCenter: this.rig.centerOf(0),
+      timeMs: this.time.now,
+      touch: tut.currentDevice === 'touch',
+    });
+  }
+
+  /** Saute l'étape courante ; si le directeur propose de sauter la salle, relance la scène à la salle suivante (ou termine). */
+  private doTutorialSkip(): void {
+    const tut = this.tutorial;
+    if (!tut || this.leaving || this.paused || this.tutorialEnded || this.finishing) return;
+    const r = tut.skip();
+    if (r.kind === 'step') return;
+    if (r.nextRoomIndex >= this.level.rooms.length) {
+      this.finishing = true; // la dernière salle est sautée : carte de fin
+      this.finishMs = CELEBRATION_MS;
+      return;
+    }
+    const data: GameSceneData = { session: { ...this.session, startRoomIndex: r.nextRoomIndex } };
+    this.leaveTo(SCENE_KEYS.Game, data);
+  }
+
+  /** La carte de fin est-elle affichée depuis assez longtemps pour qu'une touche la confirme (délai anti-martèlement) ? */
+  private tutorialEndConfirmReady(): boolean {
+    return this.time.now - this.tutorialEndedAt >= TUTORIAL_END_CONFIRM_DELAY_MS;
+  }
+
+  /** Carte de fin du tutoriel : rien n'est sauvegardé ; le bouton (ou Entrée / Espace / A / toucher) revient au menu. */
+  private showTutorialEnd(): void {
+    const hud = this.tutorialHud;
+    if (!hud || this.tutorialEnded) return;
+    this.tutorialEnded = true;
+    this.tutorialEndedAt = this.time.now;
+    const solo = (this.session.tutorial?.campaignPlayers ?? 1) === 1;
+    hud.showEnd(this.tutorialEndLabels(), solo, () => {
+      if (!this.leaving) this.leaveTo(SCENE_KEYS.Menu);
+    });
+  }
+
+  /** Libellés de la carte de fin : « Entrée » au clavier, « A » (ou le gros bouton A) à la manette / au tactile pour confirmer. */
+  private tutorialEndLabels(): Record<ButtonName, string> {
+    this.refreshTutorialLabels();
+    const labels = { ...(this.tutorialLabels as Record<ButtonName, string>) };
+    if (this.tutorial?.currentDevice === 'keyboard') labels.action = labels.skip;
+    return labels;
+  }
+
+  /** Select / Back : saute l'étape ; A : confirme la carte de fin. */
+  private pollTutorialPad(): void {
+    if (this.leaving || this.paused) {
+      this.padEdge(PAD_SELECT_BUTTON);
+      this.padEdge(PAD_A_BUTTON);
+      return;
+    }
+    if (this.padEdge(PAD_SELECT_BUTTON) && !this.tutorialEnded) this.doTutorialSkip();
+    if (this.padEdge(PAD_A_BUTTON) && this.tutorialEnded && this.tutorialEndConfirmReady()) this.leaveTo(SCENE_KEYS.Menu);
+  }
+
+  /** Front montant d'un bouton de n'importe quelle manette (état mémorisé par bouton). */
+  private padEdge(button: number): boolean {
+    let down = false;
+    for (const pad of listGamepads()) {
+      const b = pad.buttons[button];
+      if (b && (b.pressed || b.value > 0.5)) down = true;
+    }
+    const was = this.padEdgeDown[button] === true;
+    this.padEdgeDown[button] = down;
+    return down && !was;
+  }
+
   // ───────────────────────────── Fin de niveau ─────────────────────────────
 
   /** Reporte les statistiques du niveau dans la session puis enchaîne sur le dialogue de fin. */
@@ -833,6 +1020,8 @@ export class GameScene extends Phaser.Scene {
     this.teamPanel?.retranslate(players);
     this.overlay.retranslate();
     this.pauseMenu.retranslate();
+    this.tutorialLabels = null;
+    this.tutorialHud?.retranslate(this.tutorialEnded ? this.tutorialEndLabels() : undefined);
   }
 
   private cleanup(): void {
@@ -840,6 +1029,9 @@ export class GameScene extends Phaser.Scene {
     this.offLanguage = null;
     this.input.keyboard?.off('keydown-ESC', this.onEscape);
     this.input.keyboard?.off('keydown-M', this.onMute);
+    this.input.keyboard?.off('keydown-ENTER', this.onEnter);
+    this.input.keyboard?.off('keydown-SPACE', this.onSpaceEnd);
+    this.input.keyboard?.off('keydown', this.onAnyKey);
     window.removeEventListener('blur', this.onWindowBlur);
     this.game.events.off(Phaser.Core.Events.HIDDEN, this.onGameHidden);
     this.events.off(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown);
@@ -850,6 +1042,9 @@ export class GameScene extends Phaser.Scene {
     this.teamPanel?.destroy();
     this.teamPanel = null;
     this.pauseMenu?.destroy();
+    this.tutorialHud?.destroy();
+    this.tutorialHud = null;
+    this.tutorial = null;
     this.overlay?.destroy();
     this.darkRoom?.destroy();
     this.darkRoom = null;

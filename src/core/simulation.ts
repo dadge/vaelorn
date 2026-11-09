@@ -57,6 +57,7 @@
  *    avec les autres timers (a). Immobile tant que `callMs > CALL_DURATION_MS - CALL_FREEZE_MS`. Annulé si l'appelant tombe à terre ;
  *    tout (re)démarrage de salle (start / next / restart, donc défaite collective incluse) remet les deux à 0. Un joueur qui appelle reste
  *    vulnérable, sa torche continue de s'user et il compte normalement pour les zones d'objectif et de sortie.
+ *  - `knockDown(id)` (hors `IGameSimulation`, appelé ENTRE deux pas) : chute scénarisée du tutoriel, événement `playerDown` au pas suivant.
  */
 import {
   DOWNED_THREAT_RADIUS,
@@ -114,6 +115,7 @@ import {
   reviveAllDowned,
   stepPlayerTimers,
   isCallFrozen,
+  markPlayerDown,
   canStartCall,
   startCall,
   cancelCall,
@@ -303,6 +305,22 @@ export class GameSimulation implements IGameSimulation {
   /** Snapshot JSON du `GameState`. */
   serialize(): string {
     return JSON.stringify(this.state);
+  }
+
+  /**
+   * Mise à terre SCÉNARISÉE d'un joueur (tutoriel uniquement : démonstration du relevage et de la mort d'équipe).
+   * À appeler ENTRE deux pas ; ignore l'invulnérabilité. Même effet qu'une chute au combat (`markPlayerDown`), et l'événement
+   * `playerDown` sort au pas suivant. Retourne false (aucun effet) si la phase n'est pas 'playing', si l'id est inconnu ou si le joueur
+   * est déjà à terre. Déterministe : mêmes entrées + mêmes appels au même tick = même état. (Si un réseau est ajouté, cet appel
+   * devra devenir une entrée datée.)
+   */
+  knockDown(id: PlayerId): boolean {
+    if (this.state.phase !== 'playing') return false;
+    const p = this.state.players.find((q) => q.id === id);
+    if (!p || p.status !== 'alive') return false;
+    markPlayerDown(p);
+    this.pending.push({ type: 'playerDown', playerId: id });
+    return true;
   }
 
   /**

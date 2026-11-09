@@ -59,6 +59,25 @@ export function createPlayerState(setup: PlayerSetup, spawnPx: Vec2): PlayerStat
 }
 
 /**
+ * Met un joueur À TERRE (muté) : PV à 0, statut `down`, invulnérabilité / animations / appel annulés, liens de relevage effacés,
+ * `downCount++`. Partagé par `applyDamageToPlayer` (chute au combat) et `GameSimulation.knockDown` (chute scénarisée du
+ * tutoriel) : une seule définition de « tomber ». L'appel est annulé quand l'appelant tombe (le délai de récupération continue de courir).
+ */
+export function markPlayerDown(p: PlayerState): void {
+  p.hp = 0;
+  p.status = 'down';
+  p.invulnMs = 0;
+  p.attackAnimMs = 0;
+  p.specialAnimMs = 0;
+  p.callMs = 0;
+  p.moving = false;
+  p.revivingId = null;
+  p.reviverId = null;
+  p.reviveProgressMs = 0;
+  p.downCount += 1;
+}
+
+/**
  * Applique des dégâts BRUTS à un joueur (muté : `hp`, `invulnMs`, et si KO `status`, liens de relevage, `downCount`).
  *
  * - Joueur déjà à terre : AUCUN effet (il ne peut pas être achevé) → `{applied:0, downed:false}`.
@@ -80,17 +99,7 @@ export function applyDamageToPlayer(p: PlayerState, rawDamage: number): { applie
   const applied = damageToPlayer(rawDamage, getCharacter(p.characterId), p.difficulty);
   p.hp = Math.max(0, p.hp - applied);
   if (p.hp <= 0) {
-    p.hp = 0;
-    p.status = 'down';
-    p.invulnMs = 0;
-    p.attackAnimMs = 0;
-    p.specialAnimMs = 0;
-    p.callMs = 0; // l'appel est annulé quand l'appelant tombe (le délai de récupération continue de courir)
-    p.moving = false;
-    p.revivingId = null;
-    p.reviverId = null;
-    p.reviveProgressMs = 0;
-    p.downCount += 1;
+    markPlayerDown(p);
     return { applied, downed: true };
   }
   p.invulnMs = PLAYER_INVULN_MS;

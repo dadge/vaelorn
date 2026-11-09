@@ -385,6 +385,8 @@ export class PauseMenu {
   private index = 0;
   private shown = false;
   private confirmingQuit = false;
+  /** Tutoriel : la confirmation de sortie dit que rien n'est sauvegardé (au lieu de « progression perdue »). */
+  private tutorialMode = false;
 
   constructor(ctx: ViewContext) {
     const cx = GAME_WIDTH / 2;
@@ -399,6 +401,11 @@ export class PauseMenu {
     this.hint = hudText(ctx, cx, cy + 62, '', { size: 14, originX: 0.5, color: 0xb8c0d8, bold: false, depth: HUD_DEPTH.pause + 2, wrap: 480, align: 'center' });
     this.controls = hudText(ctx, cx, cy + 100, '', { size: 14, originX: 0.5, color: 0xe6e0c8, bold: false, depth: HUD_DEPTH.pause + 2, wrap: 480, align: 'center' });
     this.setVisible(false);
+  }
+
+  /** Active la variante « tutoriel » du texte de confirmation de sortie. */
+  setTutorial(on: boolean): void {
+    this.tutorialMode = on;
   }
 
   private setVisible(v: boolean): void {
@@ -459,7 +466,7 @@ export class PauseMenu {
 
   retranslate(): void {
     setTextIfChanged(this.title, t('hud.pause'));
-    this.hint.setText(this.confirmingQuit ? t('game.pause.quit.confirm') : t('game.pause.hint'));
+    this.hint.setText(this.confirmingQuit ? t(this.tutorialMode ? 'tutorial.quit.confirm' : 'game.pause.quit.confirm') : t('game.pause.hint'));
     // rappel des commandes : déplacement, action, spécial et appeler (boutons dédiés), pause
     this.controls.setText(`${t('controls.keyboard')} : ${t('controls.keyboard.move')} - ${t('controls.keyboard.action')} - ${t('call.pause.keyboard')} - ${t('controls.keyboard.pause')}\n${t('controls.gamepad')} : ${t('controls.gamepad.move')} - ${t('controls.gamepad.action')} - ${t('call.pause.gamepad')} - ${t('controls.gamepad.pause')}`);
     this.refreshItems();

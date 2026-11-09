@@ -1,4 +1,5 @@
 import type { PlayerId, PlayerSetup } from '../core/types';
+import type { DeviceKind } from '../tutorial/types';
 
 /** Clés de scènes Phaser (une seule source de vérité). */
 export const SCENE_KEYS = {
@@ -42,6 +43,12 @@ export interface GameSession {
    * Renseigné à la reprise (« Continuer ») ; GameScene le met à jour à la fin de chaque niveau pour le niveau suivant.
    */
   completedLevelIds?: string[];
+  /**
+   * Tutoriel (menu « Tutoriel » ou `?tutorial=1`) : `GameScene` joue `tutorialLevel` (hors campagne, hors sauvegarde) avec un partenaire
+   * scripté. JSON pur. `initialDevice` : appareil qui l'a lancé (libellés de boutons avant la première entrée) ;
+   * `campaignPlayers` : nombre de joueurs choisi au menu (la carte de fin précise l'effet en partie solo).
+   */
+  tutorial?: { initialDevice?: DeviceKind; campaignPlayers?: number };
 }
 
 /** Données de MenuScene : session précédente (pour restaurer les choix en revenant au menu). */

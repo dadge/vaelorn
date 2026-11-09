@@ -16,6 +16,7 @@ import { VIRTUAL_PAD_INDEX } from '../input/VirtualPad';
 import type { DeviceAssignment, DeviceId } from '../input/actions';
 import { inputManager } from '../input/InputManager';
 import type { PlayerAssignment } from '../input/InputManager';
+import type { DeviceKind } from '../tutorial/types';
 import { emptyStats, type GameSession } from './session';
 
 /** Langues acceptées par le paramètre d'URL `lang` (miroir de i18n.Language, sans import runtime). */
@@ -140,6 +141,29 @@ export function sessionFromChoices(
     players,
     levelIndex: clampInt(choices.startLevel, 0, Math.max(0, levelCount - 1), 0),
     stats: emptyStats(playerCount),
+  };
+}
+
+/**
+ * Session du TUTORIEL (menu « Tutoriel » ou `?tutorial=1`) : 1 joueur humain (le personnage mémorisé, sinon David), difficulté facile,
+ * niveau 0 (le niveau-tutoriel est choisi par `GameScene` d'après `session.tutorial`, il n'est PAS dans la campagne). Ne lit ni
+ * n'écrit aucune sauvegarde. `initialDevice` : appareil qui a lancé le tutoriel (libellés de boutons avant la première entrée) ;
+ * `campaignPlayers` : nombre de joueurs choisi au menu (la carte de fin précise l'effet des mécaniques à deux en solo).
+ */
+export function sessionForTutorial(
+  characters: readonly (CharacterId | undefined)[] = [],
+  initialDevice?: DeviceKind,
+  campaignPlayers = 1,
+): GameSession {
+  const characterId = pickDistinctCharacters(1, characters)[0];
+  const tutorial: NonNullable<GameSession['tutorial']> = { campaignPlayers: clampInt(campaignPlayers, 1, MAX_PLAYERS, 1) };
+  if (initialDevice) tutorial.initialDevice = initialDevice;
+  return {
+    playerCount: 1,
+    players: [{ id: 0 as PlayerId, characterId, difficulty: 1 }],
+    levelIndex: 0,
+    stats: emptyStats(1),
+    tutorial,
   };
 }
 
@@ -743,6 +767,8 @@ export interface QuickParams {
   debug: boolean;
   /** Langue forcée par `?lang=fr|en`, sinon absente. */
   language?: UiLanguage;
+  /** Option `?tutorial=1` : lance directement le tutoriel (`&room=N` : salle de départ, `&chars=` : personnage, `&lang=`, `&touch=1`). */
+  tutorial: boolean;
   /** Option `?p1pad=1` : J1 à la manette. */
   player1Gamepad: boolean;
   /** Option `?pads=1` : tous les joueurs sur manettes 0..N-1 (attribution explicite). */
@@ -821,6 +847,7 @@ export function parseQuickParams(search: string, levelCount = 3): QuickParams {
   const out: QuickParams = {
     quick,
     debug,
+    tutorial: truthy(params.get('tutorial')),
     player1Gamepad: choices.player1Gamepad,
     pads: truthy(params.get('pads')),
     keyboardPlayer,
