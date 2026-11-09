@@ -263,6 +263,74 @@ export interface ProjectileState {
 
 export type PlayerStatus = 'alive' | 'down';
 
+// ───────────────────────────── Équipement ─────────────────────────────
+
+/** Emplacements « simples » de l'équipement : un objet par niveau (I, II, III). Voir `balance.ts` [B18]. */
+export type BasicGearSlot = 'boots' | 'protection' | 'artifact' | 'magic' | 'weapon';
+
+/** Les 6 emplacements d'équipement (ordre d'affichage du HUD) : les 5 simples + l'accessoire (une seule sorte à la fois, étape accessoires). */
+export type GearSlot = BasicGearSlot | 'accessory';
+
+/** Niveau d'un objet d'équipement : 1 (I), 2 (II) ou 3 (III). */
+export type GearLevel = 1 | 2 | 3;
+
+/** Sortes d'accessoires (6e emplacement) : lanterne, aimant à cœurs, cor de guerre, anneau du vampire (niveau III seulement). */
+export type AccessoryKind = 'lantern' | 'magnet' | 'warhorn' | 'vampire';
+
+/** Accessoire équipé : sorte + niveau. */
+export interface EquippedAccessory {
+  kind: AccessoryKind;
+  level: GearLevel;
+}
+
+/**
+ * Objet d'équipement (au sol ou équipé) : emplacement + niveau ; `accessory` précise la sorte pour l'emplacement 'accessory'.
+ * JSON pur.
+ */
+export interface GearItem {
+  slot: GearSlot;
+  level: GearLevel;
+  accessory?: AccessoryKind;
+}
+
+/**
+ * Équipement PERMANENT d'un joueur (conservé de salle en salle jusqu'à la fin du niveau, sauvegardé par l'autosave) : niveau équipé par
+ * emplacement simple (0 = vide, 1..3) et accessoire. Ne contient PAS les buffs temporaires (voir `PlayerLoadout`).
+ */
+export interface PlayerGear {
+  boots: number;
+  protection: number;
+  artifact: number;
+  magic: number;
+  weapon: number;
+  accessory: EquippedAccessory | null;
+}
+
+/**
+ * Bonus temporaires (perdus à la chute) : potion de vitesse (+40 %, 8 s), éclair de rage (+50 % dégâts, 8 s), étoile (invulnérabilité, 4 s), et
+ * 'horn' = bonus de vitesse reçu de l'APPEL d'un allié porteur du cor de guerre (3 s ; `power` = fraction de vitesse).
+ */
+export type BuffKind = 'speed' | 'rage' | 'star' | 'horn';
+
+/** Bonus temporaires RAMASSABLES au sol (tous sauf 'horn', qui vient du cor de guerre d'un allié). */
+export type DroppedBuffKind = 'speed' | 'rage' | 'star';
+
+/** Bonus temporaire actif. */
+export interface ActiveBuff {
+  kind: BuffKind;
+  /** Temps restant (ms). */
+  remainingMs: number;
+  /** Force du bonus (fraction) : seulement pour 'horn' (+20 / +30 / +40 % selon le niveau du cor). */
+  power?: number;
+}
+
+/** Équipement + bonus temporaires d'un joueur (`PlayerState.loadout`). Valeurs par défaut : tout vide (voir `createLoadout`). */
+export interface PlayerLoadout extends PlayerGear {
+  buffs: ActiveBuff[];
+  /** Ennemis tués depuis le dernier soin de l'anneau du vampire (0..2) ; remis à 0 quand l'anneau n'est plus porté. Absent = 0. */
+  ringKills?: number;
+}
+
 export interface PlayerState {
   id: PlayerId;
   characterId: CharacterId;
@@ -311,6 +379,11 @@ export interface PlayerState {
   callMs: number;
   /** Délai de récupération restant (ms) avant de pouvoir rappeler (`CALL_COOLDOWN_MS` à l'appui, décompté depuis l'appui). */
   callCooldownMs: number;
+  /**
+   * Équipement et bonus temporaires (vides par défaut). Perdus à la chute du joueur (RÈGLE STRICTE, y compris à la défaite d'équipe),
+   * conservés d'une salle à l'autre, réinitialisés au niveau suivant. Un ancien snapshot n'a pas ce champ : valeur par défaut posée à la restauration.
+   */
+  loadout: PlayerLoadout;
 }
 
 // ───────────────────────────── Données de niveau ─────────────────────────────
@@ -762,6 +835,39 @@ export interface HealCrystalState {
   used: boolean;
 }
 
+/** Verrouillage d'un objet d'équipement au sol pour un joueur : pendant toute la vie de l'objet ('life') ou tant que le joueur n'a pas quitté son rayon ('leave'). */
+export type GearLockMode = 'life' | 'leave';
+
+/**
+ * Objet d'équipement posé au sol (laissé par un ennemi, ou ÉPARPILLÉ par un joueur tombé). Ramassé automatiquement au contact par un
+ * joueur vivant pour qui il est STRICTEMENT meilleur que son objet de l'emplacement ; disparaît au bout de `GEAR_TTL_MS`.
+ * Effacé à chaque (re)démarrage et changement de salle.
+ */
+export interface GearDropState {
+  /** Identifiant propre aux objets d'équipement (compteur `GameState.nextGearDropId`). */
+  id: number;
+  item: GearItem;
+  pos: Vec2;
+  /** Durée de vie restante (ms) ; les `GEAR_BLINK_MS` dernières millisecondes, le rendu fait clignoter l'objet. */
+  ttlMs: number;
+  /** Joueur qui ne peut PAS le ramasser (propriétaire qui l'a perdu / lâché), ou null. */
+  lockedFor: PlayerId | null;
+  lockMode: GearLockMode;
+}
+
+/**
+ * Bonus temporaire posé au sol (laissé par un ennemi). Ramassé au contact par le joueur vivant le plus proche ; disparaît au bout de `GEAR_TTL_MS`.
+ * Effacé à chaque (re)démarrage et changement de salle.
+ */
+export interface BuffDropState {
+  /** Identifiant (compteur `GameState.nextGearDropId`, partagé avec les objets d'équipement). */
+  id: number;
+  kind: DroppedBuffKind;
+  pos: Vec2;
+  /** Durée de vie restante (ms) ; les `GEAR_BLINK_MS` dernières millisecondes, le rendu fait clignoter l'objet. */
+  ttlMs: number;
+}
+
 export interface RoomState {
   roomId: string;
   enemies: EnemyState[];
@@ -778,6 +884,14 @@ export interface RoomState {
   pickups?: PickupState[];
   /** Cristaux de soin de la salle (uniquement ceux présents à ce nombre de joueurs) ; même convention d'optionnalité que `pickups`. */
   healCrystals?: HealCrystalState[];
+  /** Objets d'équipement au sol (même convention d'optionnalité que `pickups`). */
+  gearDrops?: GearDropState[];
+  /** Budget d'objets d'équipement RESTANT dans la salle (nombre de joueurs au début de la salle, décrémenté à chaque objet tiré). Absent = 0. */
+  gearBudget?: number;
+  /** Bonus temporaires au sol (même convention d'optionnalité que `pickups`). */
+  buffDrops?: BuffDropState[];
+  /** Budget de bonus temporaires RESTANT dans la salle (entier tiré à l'entrée : floor(0,3 n) + 1 avec la probabilité du reste). Absent = 0. */
+  buffBudget?: number;
 }
 
 export type GamePhase =
@@ -819,6 +933,15 @@ export interface GameState {
   lootDryKills?: number;
   /** Prochain id d'objet de soin. Absent = 1. */
   nextPickupId?: number;
+  /** Équipement actif (option `SimConfig.gear`, défaut true) : tirages d'objets par les ennemis vaincus ET ramassage. Absent = true. */
+  gearEnabled?: boolean;
+  /**
+   * État du PRNG ISOLÉ de l'équipement (graine dérivée de celle de la simulation, `GEAR_SEED_XOR`) : distinct de `rngState` ET de `lootRngState`,
+   * donc les tirages d'équipement ne décalent jamais les autres flux. Absent d'un ancien snapshot : dérivé de `rngState`.
+   */
+  gearRngState?: number;
+  /** Prochain id d'objet d'équipement au sol. Absent = 1. */
+  nextGearDropId?: number;
 }
 
 // ───────────────────────────── Événements (sons, FX, HUD) ─────────────────────────────
@@ -858,7 +981,22 @@ export type SimEvent =
   // ── Sources de vie (butin des ennemis, cristaux de soin) ──
   | { type: 'pickupDropped'; pickupId: number; kind: PickupKind; pos: Vec2 }
   | { type: 'pickupCollected'; pickupId: number; playerId: PlayerId; kind: PickupKind; healed: number; pos: Vec2 }
-  | { type: 'crystalUsed'; crystalId: string; playerId: PlayerId; healed: number; pos: Vec2 };
+  | { type: 'crystalUsed'; crystalId: string; playerId: PlayerId; healed: number; pos: Vec2 }
+  // ── Équipement ──
+  /** Un objet d'équipement apparaît au sol (butin d'un ennemi, ou `scattered` : équipement perdu éparpillé par un joueur tombé). */
+  | { type: 'gearDropped'; dropId: number; item: GearItem; pos: Vec2; scattered: boolean }
+  /** Un joueur ramasse (équipe) un objet ; `replaced` = l'objet qu'il remplace (disparu), ou null si l'emplacement était vide. */
+  | { type: 'gearPicked'; dropId: number; playerId: PlayerId; item: GearItem; replaced: GearItem | null; pos: Vec2 }
+  /** Un joueur tombé perd tout son équipement (`items`, éparpillés au sol) et ses bonus temporaires. */
+  | { type: 'gearLost'; playerId: PlayerId; items: GearItem[]; pos: Vec2 }
+  /** Un échange MANUEL d'accessoire (action A) : l'ancien, lâché aux pieds du joueur, est dans le `gearDropped` suivant. */
+  | { type: 'gearSwapped'; playerId: PlayerId; item: GearItem; dropped: GearItem; pos: Vec2 }
+  /** Un bonus temporaire apparaît au sol (butin d'un ennemi). */
+  | { type: 'buffDropped'; dropId: number; kind: DroppedBuffKind; pos: Vec2 }
+  /** Un bonus temporaire démarre (ramassé, ou reçu du cor de guerre d'un allié : `fromPlayerId`). */
+  | { type: 'buffStarted'; playerId: PlayerId; kind: BuffKind; durationMs: number; fromPlayerId?: PlayerId; pos?: Vec2 }
+  /** L'anneau du vampire rend des PV à son porteur (tous les 3 ennemis tués). */
+  | { type: 'vampireHeal'; playerId: PlayerId; healed: number; pos: Vec2 };
 
 // ───────────────────────────── Simulation (interface publique) ─────────────────────────────
 
@@ -883,6 +1021,13 @@ export interface SimConfig {
    * « avec / sans » de la calibration) ; les parties sont alors strictement celles d'avant l'ajout des sources de vie.
    */
   loot?: boolean;
+  /**
+   * Équipement actif (défaut true) : les ennemis vaincus laissent des objets d'équipement et les joueurs les ramassent. false = aucun
+   * objet (mesures « avec / sans » de la calibration) ; les parties sont alors strictement celles d'avant l'ajout de l'équipement.
+   */
+  gear?: boolean;
+  /** Équipement de départ par indice de joueur (reprise d'une sauvegarde « Continuer ») ; absent / indéfini = équipement vide. */
+  initialGear?: readonly (PlayerGear | undefined)[];
 }
 
 /** Entrées d'un pas pour tous les joueurs (absent = aucune entrée). */

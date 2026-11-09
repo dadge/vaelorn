@@ -6,6 +6,7 @@
 import type Phaser from 'phaser';
 import { PLAYER_COLORS } from '../core/constants';
 import { CHARACTERS } from '../core/characters';
+import { effectiveAttack } from '../core/gear';
 import type { Dir, PlayerState, SpecialKind } from '../core/types';
 import { ATLAS_KEY } from '../render/art';
 import { heroFrame, lanternFrame, slashFrame } from '../render/art/animations';
@@ -56,7 +57,6 @@ export class PlayerView {
   private readonly barBg: Phaser.GameObjects.Rectangle;
   private readonly barFill: Phaser.GameObjects.Rectangle;
   private readonly color: number;
-  private readonly melee: boolean;
   private readonly slashMs: number;
   private readonly fx: FxManager;
   private readonly special: SpecialKind | undefined;
@@ -81,7 +81,6 @@ export class PlayerView {
     this.special = CHARACTERS[p.characterId].special?.kind;
     this.color = PLAYER_COLORS[playerId] ?? 0xffffff;
     const def = CHARACTERS[p.characterId];
-    this.melee = def.attack.kind === 'melee';
     this.slashMs = def.attack.animMs;
     this.interp = new PosInterp(p.pos.x, p.pos.y);
 
@@ -176,8 +175,8 @@ export class PlayerView {
     this.marker.setDepth(ySortDepth(y + 5) + 0.5);
     this.marker.setVisible(!down);
 
-    // arc d'épée (mêlée)
-    if (this.melee && p.attackAnimMs > 0 && !down) {
+    // arc d'épée (mêlée) : l'attaque EFFECTIVE compte (avec l'Arc, un héros de mêlée tire des flèches : pas d'arc d'épée)
+    if (p.attackAnimMs > 0 && !down && effectiveAttack(CHARACTERS[p.characterId], p.loadout).kind === 'melee') {
       const a = slashAlpha(p.attackAnimMs, this.slashMs);
       const sf = slashFrame(p.attackDir);
       if (sf !== this.lastSlash) {

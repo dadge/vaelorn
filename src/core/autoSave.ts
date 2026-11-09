@@ -5,16 +5,23 @@
  * pas de simulation. Écritures :
  *  - `roomEntered` 'start' | 'next' : début de salle (jamais en pleine salle / plein combat) ;
  *  - `levelCompleted` : niveau terminé, AVANT de passer au niveau suivant (reprise = salle 0 du niveau suivant) ;
- *  - `roomEntered` 'restart' (défaite collective) et tous les autres événements : AUCUNE écriture, la sauvegarde existante
- *    n'est ni modifiée ni supprimée (on reprendra au début de la salle sauvegardée).
+ *  - `gearLost` (un joueur tombe et perd tout son équipement) : l'équipement sauvegardé de CE joueur est vidé IMMÉDIATEMENT, sans changer la salle de reprise
+ *    (règle stricte : quitter la partie puis « Continuer » ne restitue pas l'équipement perdu, y compris pendant le délai de la défaite d'équipe) ;
+ *  - `roomEntered` 'restart' (défaite collective) et tous les autres événements : la salle de reprise n'est ni modifiée ni supprimée (on reprendra au début de la
+ *    salle sauvegardée).
+ * ÉQUIPEMENT (schéma v3) : avec `gearProvider` (équipement courant de chaque joueur, lu au moment de l'événement), le début de salle ('start' | 'next') sauvegarde
+ * l'équipement porté à cet instant (l'équipement perdu n'y est évidemment plus) ; la fin d'un niveau le remet à zéro (équipement valable jusqu'à la fin du
+ * niveau). La perte (`gearLost`) est écrite au moment même de la chute ; une défaite collective ('restart') ne change PAS la salle de reprise, mais enregistre
+ * l'équipement (alors vide : règle stricte, pas de point de reprise) : « Continuer » ne ressuscite donc jamais l'équipement perdu. Écrit seulement si l'équipement
+ * a réellement changé.
  * Une écriture identique à la dernière valeur connue du stockage est sautée. Une écriture qui échoue est signalée via
  * `onError` (une seule fois par type d'erreur consécutif) et retentée à la prochaine salle.
  *
  * `enabled: false` (mode `?quick=1`, `?nosave=1`, paramètres de dev) : l'état est suivi mais RIEN n'est jamais écrit.
  */
-import { applySimEvents, newGameSave, serializeSave, type SaveContext, type SaveGame } from './save';
+import { applySimEvents, newGameSave, serializeSave, withGear, type SaveContext, type SaveGame } from './save';
 import type { SaveRepository, SaveStorageError } from './saveRepository';
-import type { PlayerSetup, SimEvent } from './types';
+import type { PlayerGear, PlayerSetup, SimEvent } from './types';
 
 export interface AutoSaverOptions {
   repository: SaveRepository;
@@ -32,6 +39,8 @@ export interface AutoSaverOptions {
   existing?: SaveGame | null;
   /** false : suit l'état mais n'écrit jamais (démarrage rapide, `?nosave=1`). Défaut true. */
   enabled?: boolean;
+  /** Équipement courant de chaque joueur (dans l'ordre de `players`), lu à chaque début de salle. Absent : l'équipement n'est pas sauvegardé. */
+  gearProvider?: () => readonly PlayerGear[];
   /** Appelé quand une écriture échoue (quota, stockage bloqué). */
   onError?: (error: SaveStorageError) => void;
 }
@@ -46,6 +55,7 @@ export class AutoSaver {
   private readonly levelId: string;
   private readonly enabled: boolean;
   private readonly onError?: (error: SaveStorageError) => void;
+  private readonly gearProvider?: () => readonly PlayerGear[];
   /** Dernière erreur d'écriture (null après une écriture réussie). */
   lastError: SaveStorageError | null = null;
   /** Nombre d'écritures réussies. */
@@ -57,6 +67,7 @@ export class AutoSaver {
     this.levelId = options.levelId;
     this.enabled = options.enabled !== false;
     this.onError = options.onError;
+    this.gearProvider = options.gearProvider;
     if (options.existing) {
       this.current = options.existing;
       this.lastWritten = serializeSave(options.existing);
@@ -84,10 +95,15 @@ export class AutoSaver {
   /** À appeler avec les événements de chaque pas de simulation. Retourne true si une écriture a eu lieu. */
   handleEvents(events: readonly SimEvent[]): boolean {
     const relevant = events.some(
-      (e) => (e.type === 'roomEntered' && (e.reason === 'start' || e.reason === 'next')) || e.type === 'levelCompleted',
+      (e) => (e.type === 'roomEntered' && (e.reason === 'start' || e.reason === 'next')) || e.type === 'levelCompleted' || e.type === 'gearLost',
     );
-    if (!relevant) return false;
+    // défaite collective : la salle de reprise ne change pas, mais l'équipement (perdu) est enregistré
+    const restart = this.gearProvider !== undefined && events.some((e) => e.type === 'roomEntered' && e.reason === 'restart');
+    if (!relevant && !restart) return false;
     this.current = applySimEvents(this.current, this.levelId, events, this.context);
+    if (this.gearProvider && events.some((e) => e.type === 'roomEntered') && !events.some((e) => e.type === 'levelCompleted')) {
+      this.current = withGear(this.current, this.gearProvider());
+    }
     if (!this.enabled) return false;
     const data = serializeSave(this.current);
     if (data === this.lastWritten) return false;

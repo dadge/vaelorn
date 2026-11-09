@@ -1,4 +1,4 @@
-import type { PlayerId, PlayerSetup } from '../core/types';
+import type { PlayerGear, PlayerId, PlayerSetup } from '../core/types';
 import type { DeviceKind } from '../tutorial/types';
 
 /** Clés de scènes Phaser (une seule source de vérité). */
@@ -38,6 +38,11 @@ export interface GameSession {
    * niveau suivant.
    */
   startRoomIndex?: number;
+  /**
+   * Équipement de départ de chaque joueur (reprise « Continuer », schéma de sauvegarde v3) : lu par GameScene (`SimConfig.initialGear`). Renseigné
+   * seulement par la reprise ; supprimé au niveau suivant et à une nouvelle tentative (l'équipement dure jusqu'à la fin du niveau).
+   */
+  startGear?: (PlayerGear | undefined)[];
   /**
    * Niveaux (identifiants) déjà terminés dans cette partie : reportés dans la sauvegarde (voir src/core/save.ts).
    * Renseigné à la reprise (« Continuer ») ; GameScene le met à jour à la fin de chaque niveau pour le niveau suivant.

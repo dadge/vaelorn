@@ -664,6 +664,7 @@ export type AfterDialogue =
 export function advanceLevel(session: GameSession): GameSession {
   const next: GameSession = { ...session, levelIndex: session.levelIndex + 1 };
   delete next.startRoomIndex;
+  delete next.startGear; // l'équipement est réinitialisé au niveau suivant
   return next;
 }
 
@@ -751,6 +752,7 @@ export function replaySession(session: GameSession, outcome: 'victory' | 'defeat
     stats: emptyStats(session.playerCount),
   };
   delete next.startRoomIndex;
+  delete next.startGear;
   // Victoire : nouvelle partie complète, aucun niveau terminé ; défaite : on retente le niveau, la progression est conservée.
   if (outcome === 'victory') delete next.completedLevelIds;
   else if (session.completedLevelIds) next.completedLevelIds = session.completedLevelIds.slice();

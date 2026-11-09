@@ -374,8 +374,11 @@ export class FxManager {
     img.setVisible(it.delay <= 0);
   }
 
-  /** Lance un nombre/texte flottant (monte et s'estompe). */
-  floatText(x: number, y: number, str: string, color: number, durMs = 700, rise = 16, size = 7): void {
+  /**
+   * Lance un nombre/texte flottant (monte et s'estompe). `wrap` (px MONDE, 0 = pas de retour à la ligne) : largeur de retour à la ligne, pour que les textes longs
+   * (équipement ramassé) ne dépassent pas la vue d'un joueur en écran partagé.
+   */
+  floatText(x: number, y: number, str: string, color: number, durMs = 700, rise = 16, size = 7, wrap = 0): void {
     const it = this.acquireText();
     const txt = it.txt;
     if (!txt) return;
@@ -394,6 +397,7 @@ export class FxManager {
     it.a1 = 0;
     it.eased = true;
     it.frames = null;
+    txt.setWordWrapWidth(wrap > 0 ? Math.round(wrap * this.zoom) : null, true);
     txt.setText(str);
     txt.setColor(hex(color));
     txt.setFontSize(Math.max(8, Math.round(size * this.zoom)));

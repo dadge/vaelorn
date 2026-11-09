@@ -15,6 +15,7 @@ import { canOccupy, projectileHitsWall, segmentBlocked } from '../core/collision
 import { getCharacter } from '../core/characters';
 import { enemyRadius, meleeTargets } from '../core/combat';
 import { ENEMIES } from '../core/enemies';
+import { pickupDecision } from '../core/gear';
 import { dirFromVec, dist, pointInTileRect, tileCenter } from '../core/geometry';
 import type { ActionFrame, Dir, EnemyKind, EnemyState, PlayerState, Vec2 } from '../core/types';
 import type { BackgroundFlags } from './botTypes';
@@ -870,11 +871,46 @@ export function decideEat(bot: BotPlayer): ActionFrame | null {
   return null;
 }
 
+/**
+ * Brique « ramasse l'équipement proche » (option `pickGear`, voir `BackgroundOptions`) : si le bot est vivant et qu'un objet d'équipement au sol, à moins de
+ * `gearRadius` px, serait ramassé par lui (STRICTEMENT meilleur que son objet, non verrouillé pour lui ; un accessoire d'une AUTRE sorte n'est jamais visé : l'échange
+ * se fait à la main), ou qu'un bonus temporaire est au sol à portée, il s'y rend par le plus court chemin. Retourne null
+ * si l'option est fausse, si rien n'est à portée ou si la cible est inatteignable. Pure lecture de l'état : n'écrit rien dans la simulation.
+ */
+export function decideGear(bot: BotPlayer): ActionFrame | null {
+  const o = bot.opts;
+  const p = bot.player;
+  if (!o.pickGear || p.status !== 'alive') return null;
+  let best: Vec2 | null = null;
+  let bd = o.gearRadius;
+  for (const d of bot.run.sim.state.room.gearDrops ?? []) {
+    if (d.lockedFor === p.id) continue;
+    const decision = pickupDecision(p.loadout, d.item);
+    if (decision !== 'equip' && decision !== 'upgrade') continue;
+    const dd = dist(p.pos, d.pos);
+    if (dd <= bd) {
+      bd = dd;
+      best = d.pos;
+    }
+  }
+  for (const d of bot.run.sim.state.room.buffDrops ?? []) {
+    const dd = dist(p.pos, d.pos);
+    if (dd <= bd) {
+      bd = dd;
+      best = d.pos;
+    }
+  }
+  if (!best) return null;
+  const r = bot.follower.follow(bot, { pos: best, tolerance: 6 });
+  if (r.status === 'moving') return frameOf({ moveX: r.vec.x, moveY: r.vec.y });
+  return null;
+}
+
 // ───────────────────────────── Agrégation ─────────────────────────────
 
 /**
- * Comportements de fond d'un bot, par ordre de priorité : (1) relevage en cours (maintenu) ; (2) auto-combat sur les
- * ennemis dans `engageRadius` ; (3) relevage d'un allié à terre ; (4) regroupement. Seuls les comportements activés
+ * Comportements de fond d'un bot, par ordre de priorité : (1) relevage en cours (maintenu) ; (1b) nourriture proche (`eat`) ; (2) auto-combat sur les
+ * ennemis dans `engageRadius` ; (3) relevage d'un allié à terre ; (3b) équipement proche (`pickGear`) ; (4) regroupement. Seuls les comportements activés
  * dans `flags` ET dans `bot.opts` sont évalués. Retourne null si aucun n'agit.
  */
 export function decideBackground(bot: BotPlayer, flags: BackgroundFlags): ActionFrame | null {
@@ -896,6 +932,12 @@ export function decideBackground(bot: BotPlayer, flags: BackgroundFlags): Action
   if (flags.revive && o.revive) {
     const r = decideRevive(bot);
     if (r) return r;
+  }
+  // l'équipement passe APRÈS le combat et le relevage : un joueur ramasse l'objet quand les ennemis proches sont vaincus (il reste 20 s au sol),
+  // il ne tourne pas le dos à un combat pour aller le chercher (proxy plus fidèle ; l'effet mesuré sur les résultats est faible, voir le README)
+  if (flags.gear !== false && o.pickGear) {
+    const g = decideGear(bot);
+    if (g) return g;
   }
   if (flags.regroup && o.regroup) {
     const g = decideRegroup(bot);

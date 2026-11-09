@@ -60,6 +60,8 @@ export class TutorialRun {
         ],
         seed: opts.seed ?? TUTORIAL_SEED,
         startRoomIndex: opts.startRoomIndex,
+        // comme GameScene : le tutoriel ne produit ni n'accepte d'objets d'équipement
+        gear: false,
       },
       tutorialLevel,
     );

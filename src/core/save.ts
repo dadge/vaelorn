@@ -3,12 +3,13 @@
  *
  * Principe : la sauvegarde décrit une ÉQUIPE (joueurs, personnages, difficultés), le niveau et la SALLE de reprise, ainsi que
  * la liste des niveaux terminés. Elle est écrite au DÉBUT de chaque salle (événement `roomEntered` 'start' | 'next') et à la
- * fin d'un niveau (`levelCompleted`) — jamais en pleine salle. Une défaite collective (`roomEntered` 'restart') ne la modifie pas.
+ * fin d'un niveau (`levelCompleted`) — jamais en pleine salle. Une défaite collective (`roomEntered` 'restart') ne change PAS la salle de reprise ;
+ * en revanche la PERTE d'équipement (`gearLost`, chute d'un joueur) est enregistrée immédiatement (règle stricte : quitter puis « Continuer » ne la restitue pas).
  *
  * Ce module ne fait que :
  *  - définir le format (`SaveGame`, version de schéma courante `SAVE_SCHEMA_VERSION`) ;
  *  - sérialiser / désérialiser / VALIDER une donnée non fiable (`parseSave`) ;
- *  - MIGRER les anciennes versions vers la version courante (v0 → v1 → v2) ;
+ *  - MIGRER les anciennes versions vers la version courante (v0 → v1 → v2 → v3) ;
  *  - construire une `SimConfig` de reprise, et mettre à jour la sauvegarde (salle atteinte, niveau terminé, événements de simulation).
  *
  * Il ne connaît pas `src/levels` : l'appelant fournit un `SaveContext` (identifiants des niveaux et nombre de salles).
@@ -18,21 +19,27 @@
  *  - v0 (prototype, sans `schemaVersion`) : `{ level: <n° de niveau, 1-based>, room: <indice de salle>, chars: string[], diffs: number[], done: <n° de niveaux terminés>[] }` ;
  *  - v1 : `{ schemaVersion: 1, levelIndex, roomIndex, players: [{characterId, difficulty}], completedLevelIndices: number[] }`
  *         (références aux niveaux par INDICE : fragile dès qu'on insère ou réordonne des niveaux) ;
- *  - v2 (courante) : références par IDENTIFIANT de niveau (`levelId`, `completedLevelIds`), stables à l'ajout de niveaux.
+ *  - v2 : références par IDENTIFIANT de niveau (`levelId`, `completedLevelIds`), stables à l'ajout de niveaux ;
+ *  - v3 (courante) : v2 + ÉQUIPEMENT par joueur (`players[i].gear`, optionnel : absent = équipement vide). L'équipement dure jusqu'à la fin du
+ *    niveau : il est écrit au début de chaque salle (l'équipement perdu n'y est évidemment plus), remis à zéro à la fin d'un niveau, et restitué
+ *    par « Continuer ». Migration v2 → v3 : aucun équipement.
  */
 import { CHARACTERS, CHARACTER_IDS } from './characters';
 import { MAX_PLAYERS } from './constants';
-import type { CharacterId, Difficulty, PlayerId, PlayerSetup, SimConfig, SimEvent } from './types';
+import { ACCESSORY_KINDS, cloneGear, isGearEmpty, normalizeGear, sameGear } from './gear';
+import type { CharacterId, Difficulty, PlayerGear, PlayerId, PlayerSetup, SimConfig, SimEvent } from './types';
 
 // ───────────────────────────── Types ─────────────────────────────
 
 /** Version de schéma écrite par cette version du jeu. */
-export const SAVE_SCHEMA_VERSION = 2;
+export const SAVE_SCHEMA_VERSION = 3;
 
 /** Joueur sauvegardé : l'identifiant de joueur est l'indice dans `SaveGame.players`. */
 export interface SavedPlayer {
   characterId: CharacterId;
   difficulty: Difficulty;
+  /** Équipement du joueur au début de la salle de reprise (v3). Absent = vide (jamais écrit quand il est vide : une sauvegarde sans équipement reste identique à celle d'avant). */
+  gear?: PlayerGear;
 }
 
 /** Sauvegarde de progression (JSON pur). Le nombre de joueurs est `players.length` (1..4). */
@@ -132,6 +139,28 @@ function isNonNegInt(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0;
 }
 
+/**
+ * Valide l'équipement d'un joueur sauvegardé (donnée non fiable) : niveaux entiers 0..3 (absent = 0), accessoire absent / null ou {sorte connue, niveau 1..3}.
+ * Retourne `undefined` si l'équipement est vide (rien à stocker), `null` si la donnée est invalide. L'appelant (`validateSave`) DÉGRADE alors en équipement vide :
+ * l'équipement n'est qu'un bonus facultatif, une anomalie (retour à une version plus ancienne, sorte d'accessoire retirée) ne doit pas faire perdre la progression.
+ */
+function validateGear(v: unknown): PlayerGear | undefined | null {
+  if (v === undefined) return undefined;
+  if (!isRecord(v)) return null;
+  for (const slot of ['boots', 'protection', 'artifact', 'magic', 'weapon']) {
+    const lv = v[slot];
+    if (lv !== undefined && !(typeof lv === 'number' && Number.isInteger(lv) && lv >= 0 && lv <= 3)) return null;
+  }
+  const acc = v.accessory;
+  if (acc !== undefined && acc !== null) {
+    if (!isRecord(acc)) return null;
+    if (typeof acc.kind !== 'string' || !(ACCESSORY_KINDS as readonly string[]).includes(acc.kind)) return null;
+    if (!(typeof acc.level === 'number' && Number.isInteger(acc.level) && acc.level >= 1 && acc.level <= 3)) return null;
+  }
+  const gear = normalizeGear(v);
+  return isGearEmpty(gear) ? undefined : gear;
+}
+
 function levelInfo(ctx: SaveContext, levelId: string): SaveLevelInfo | undefined {
   return ctx.levels.find((l) => l.id === levelId);
 }
@@ -175,7 +204,10 @@ export function validateSave(data: unknown, ctx: SaveContext): ParseSaveResult {
     if (!isDifficulty(p.difficulty)) return fail('invalidField', `players[${i}].difficulty`);
     if (seen.has(p.characterId)) return fail('duplicateCharacter', `players[${i}].characterId`, p.characterId);
     seen.add(p.characterId);
-    players.push({ characterId: p.characterId, difficulty: p.difficulty });
+    // équipement invalide : traité comme VIDE (la progression - niveau, salle, équipe - reste lisible)
+    const gearChecked = validateGear(p.gear);
+    const gear = gearChecked === null ? undefined : gearChecked;
+    players.push(gear ? { characterId: p.characterId, difficulty: p.difficulty, gear } : { characterId: p.characterId, difficulty: p.difficulty });
   }
 
   if (!('completedLevelIds' in data)) return fail('missingField', 'completedLevelIds');
@@ -265,8 +297,11 @@ const migrateV1toV2: Migration = (data, ctx) => {
   return { ok: true, data: { schemaVersion: 2, levelId: level.id, roomIndex, players: data.players, completedLevelIds } };
 };
 
+/** v2 → v3 : ajout de l'équipement par joueur ; une sauvegarde v2 n'en a aucun (champ `gear` absent = équipement vide). */
+const migrateV2toV3: Migration = (data) => ({ ok: true, data: { ...data, schemaVersion: 3 } });
+
 /** Migrations indexées par version SOURCE : `MIGRATIONS[n]` fait passer de la version n à n + 1. */
-const MIGRATIONS: Readonly<Record<number, Migration>> = { 0: migrateV0toV1, 1: migrateV1toV2 };
+const MIGRATIONS: Readonly<Record<number, Migration>> = { 0: migrateV0toV1, 1: migrateV1toV2, 2: migrateV2toV3 };
 
 /** Version de schéma d'une donnée brute : absente → 0 (prototype) ; invalide → null. */
 function versionOf(data: Rec): number | null {
@@ -342,7 +377,10 @@ export function newGameSave(players: readonly PlayerSetup[], levelId: string): S
  * l'appelant (le core n'a pas d'horloge). La simulation considère les objectifs et salles précédents comme accomplis.
  */
 export function buildResumeSimConfig(save: SaveGame, seed: number): SimConfig {
-  return { levelId: save.levelId, players: playersOfSave(save), seed, startRoomIndex: save.roomIndex };
+  const config: SimConfig = { levelId: save.levelId, players: playersOfSave(save), seed, startRoomIndex: save.roomIndex };
+  // « Continuer » restitue l'équipement (champ absent quand personne n'en porte : la configuration reste celle d'avant)
+  if (save.players.some((p) => p.gear)) config.initialGear = save.players.map((p) => (p.gear ? cloneGear(p.gear) : undefined));
+  return config;
 }
 
 /** Libellé de reprise sous forme de numéros 1-based (la scène l'affiche via `save.resume`). */
@@ -392,15 +430,50 @@ export function withLevelCompleted(save: SaveGame, levelId: string, ctx: SaveCon
   if (index < 0) return save;
   const next = ctx.levels[index + 1] ?? ctx.levels[index];
   const completedLevelIds = save.completedLevelIds.includes(levelId) ? save.completedLevelIds : [...save.completedLevelIds, levelId];
-  if (completedLevelIds === save.completedLevelIds && save.levelId === next.id && save.roomIndex === 0) return save;
-  return { ...save, levelId: next.id, roomIndex: 0, completedLevelIds };
+  if (completedLevelIds === save.completedLevelIds && save.levelId === next.id && save.roomIndex === 0 && save.players.every((p) => !p.gear)) return save;
+  // l'équipement dure jusqu'à la FIN DU NIVEAU : il est réinitialisé au niveau suivant
+  const players = save.players.map((p) => ({ characterId: p.characterId, difficulty: p.difficulty }));
+  return { ...save, levelId: next.id, roomIndex: 0, completedLevelIds, players };
+}
+
+/**
+ * Met à jour l'équipement sauvegardé (un élément par joueur, dans l'ordre de `players`) : un équipement vide n'est pas stocké. Même référence si rien ne
+ * change (ou si le nombre de joueurs ne correspond pas : donnée ignorée).
+ */
+export function withGear(save: SaveGame, gears: readonly PlayerGear[]): SaveGame {
+  if (gears.length !== save.players.length) return save;
+  let changed = false;
+  const players = save.players.map((p, i) => {
+    const g = gears[i];
+    const before = p.gear ?? normalizeGear(undefined);
+    if (sameGear(before, g)) return p;
+    changed = true;
+    const base = { characterId: p.characterId, difficulty: p.difficulty };
+    return isGearEmpty(g) ? base : { ...base, gear: cloneGear(g) };
+  });
+  return changed ? { ...save, players } : save;
+}
+
+/**
+ * Équipement PERDU : vide l'équipement sauvegardé des joueurs indiqués (identifiant = indice dans `players`) sans toucher à la salle de reprise ni à
+ * l'équipement des autres (celui qu'ils ont ramassé en cours de salle n'est enregistré qu'au début de la salle suivante). Même référence si rien ne change.
+ */
+export function withGearLost(save: SaveGame, playerIds: readonly number[]): SaveGame {
+  let changed = false;
+  const players = save.players.map((p, i) => {
+    if (!playerIds.includes(i) || !p.gear) return p;
+    changed = true;
+    return { characterId: p.characterId, difficulty: p.difficulty };
+  });
+  return changed ? { ...save, players } : save;
 }
 
 /**
  * Applique les événements d'un pas de simulation à la sauvegarde :
  *  - `roomEntered` 'start' | 'next' → salle atteinte (niveau `levelId` de la partie en cours) ;
  *  - `roomEntered` 'restart' (défaite collective) → IGNORÉ : la sauvegarde ne change pas ;
- *  - `levelCompleted` → niveau terminé (reprise = salle 0 du niveau suivant).
+ *  - `levelCompleted` → niveau terminé (reprise = salle 0 du niveau suivant) ;
+ *  - `gearLost` → l'équipement sauvegardé du joueur tombé est vidé (règle stricte : pas de point de reprise).
  * Retourne la sauvegarde mise à jour (même référence si rien n'a changé). Les autres événements sont ignorés.
  *
  * @param levelId niveau joué par la simulation qui émet ces événements
@@ -412,6 +485,8 @@ export function applySimEvents(save: SaveGame, levelId: string, events: readonly
       if (e.reason === 'start' || e.reason === 'next') current = withRoomReached(current, levelId, e.roomIndex, ctx);
     } else if (e.type === 'levelCompleted') {
       current = withLevelCompleted(current, e.levelId, ctx);
+    } else if (e.type === 'gearLost') {
+      current = withGearLost(current, [e.playerId]);
     }
   }
   return current;

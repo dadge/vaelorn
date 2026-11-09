@@ -22,12 +22,25 @@
  *  [B16] LOOT_SEED_XOR ............. constante de dérivation de la graine du PRNG DÉDIÉ au butin (flux isolé)
  *  [B17] HEAL_CRYSTAL_HEAL ......... soin d'un cristal de soin (50 PV, usage unique) ; HEAL_CRYSTAL_RADIUS (contact) et distances mini de placement
  *
+ *  [B18] GEAR_BONUS ................ bonus des objets d'équipement par emplacement et niveau (I / II / III) : bottes, protection, artefact, magie, arme
+ *  [B19] GEAR_CAPS ................. plafonds de l'ÉQUIPEMENT : vitesse +30 %, protection -30 %, spécial -35 %, relevage -50 % (les effets temporaires de vitesse s'y ajoutent, voir [B27])
+ *  [B20] GEAR_BOW_* / GEAR_AXE_* ... arme : arc (distance ~190 px, 70 % du corps à corps, +15 % pour un tireur), hache (+35 % dégâts, attaque 20 % plus lente)
+ *  [B21] GEAR_BUDGET_PER_PLAYER .... budget d'objets par salle = nombre de joueurs ; GEAR_ENEMY_WEIGHTS (costaud ×4, standard ×1, faible ×0,5)
+ *  [B22] GEAR_LEVEL_WEIGHTS ........ niveaux tirés I 75 % / II 22 % / III 3 % ; GEAR_MINIBOSS_MIN_LEVEL (demi-boss : niveau II minimum)
+ *  [B23] GEAR_SLOT_WEIGHTS ......... poids de tirage des emplacements (magie 0 en solo ; accessoire 12) ; GEAR_EMPTY_SLOT_FACTOR (×2)
+ *  [B24] GEAR_TTL_MS / _BLINK_MS / _PICKUP_RADIUS / _SCATTER_RADIUS : durée au sol (20 s), clignotement (4 dernières s), rayon de ramassage et d'éparpillement
+ *  [B25] GEAR_SEED_XOR ............. constante de dérivation de la graine du PRNG ISOLÉ de l'équipement (distinct de celui du butin de vie)
+ *  [B26] ACCESSORY_BONUS ........... accessoires (6e emplacement) : lanterne (torche -30 / -50 / -70 %), aimant (rayon 50 / 80 / 120 px), cor de guerre (+20 / +30 / +40 % de vitesse aux alliés) ;
+ *        ACCESSORY_KIND_WEIGHTS (tirage de la sorte, anneau du vampire rare), MAGNET_PULL_SPEED, HORN_DURATION_MS / HORN_RADIUS_PX, VAMPIRE_* (+1 PV tous les 3 ennemis tués)
+ *  [B27] BUFF_* .................... bonus temporaires : potion de vitesse (+40 %), éclair de rage (+50 % dégâts) 8 s, étoile (invulnérabilité) 4 s ;
+ *        BUFF_BUDGET_PER_PLAYER (~0,3 par héros et par salle), BUFF_KIND_WEIGHTS, BUFF_SPEED_TOTAL_CAP (plafond de TOUTES les sources de vitesse)
+ *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
  *
  * La difficulté n'affecte JAMAIS : les PV du joueur, le nombre d'ennemis, les mécanismes.
  */
-import type { CharacterDef, Difficulty } from './types';
+import type { BasicGearSlot, CharacterDef, Difficulty } from './types';
 
 // ───────────────────────── Constantes d'équilibrage ─────────────────────────
 
@@ -133,6 +146,147 @@ export const HEAL_CRYSTAL_MIN_SPAWN_TILES = 8;
 /** [B17] Validation des niveaux : un cristal est à au moins ce nombre de tuiles de la position de départ de tout boss / demi-boss (hors zones de danger de départ). */
 export const HEAL_CRYSTAL_MIN_BOSS_TILES = 17;
 
+// ───────────────────────── Équipement (bonus « à la Bubble Bobble ») ─────────────────────────
+
+/**
+ * [B18] Bonus des objets par emplacement et niveau (indice 0 = niveau I, 1 = II, 2 = III ; table de départ CONSERVÉE après calibrage par bots : budget de puissance +22 à +25 %
+ * à la 4e salle, +75 à +92 % tout au niveau III, voir le README) :
+ *  - boots      : vitesse de déplacement +10 / +20 / +30 % (Sandales / Bottes de cuir / Bottes ailées) ;
+ *  - protection : dégâts reçus -10 / -20 / -30 % (Casque / Bouclier / Armure), appliqués APRÈS la difficulté et la résistance ;
+ *  - artifact   : recharge du spécial -15 / -25 / -35 % (Amulette / Sablier / Orbe) ;
+ *  - magic      : temps de relevage (de CELUI QUI RELÈVE) -20 / -35 / -50 % (Potion / Baguette / Chapeau de sorcier) ;
+ *  - weapon     : fraction de dégâts EN PLUS de l'Épée (0,20) et de la Hache (0,35) ; l'Arc (niveau III) a ses constantes `GEAR_BOW_*`.
+ */
+export const GEAR_BONUS: Readonly<Record<BasicGearSlot, readonly [number, number, number]>> = {
+  boots: [0.1, 0.2, 0.3],
+  protection: [0.1, 0.2, 0.3],
+  artifact: [0.15, 0.25, 0.35],
+  magic: [0.2, 0.35, 0.5],
+  weapon: [0.2, 0.35, 0],
+};
+
+/**
+ * [B19] Plafonds des bonus de l'ÉQUIPEMENT PERMANENT (une seule source par famille : bottes, protection, artefact, magie). Les effets TEMPORAIRES de
+ * vitesse (potion de vitesse, cor de guerre) s'ajoutent à celui des bottes, sous le plafond global `BUFF_SPEED_TOTAL_CAP` ([B27]).
+ */
+export const GEAR_CAPS = {
+  /** Vitesse de déplacement : +30 %. */
+  speed: 0.3,
+  /** Réduction des dégâts reçus : -30 %. */
+  protection: 0.3,
+  /** Réduction de la recharge du spécial : -35 %. */
+  special: 0.35,
+  /** Réduction du temps de relevage : -50 %. */
+  revive: 0.5,
+} as const;
+
+/** [B20] Hache (arme niveau II) : l'attaque est 20 % plus lente (délai entre deux attaques × 1,2). */
+export const GEAR_AXE_COOLDOWN_MULT = 1.2;
+/** [B20] Arc (arme niveau III) : portée (px) de l'attaque à distance d'un héros au corps à corps. */
+export const GEAR_BOW_RANGE_PX = 190;
+/** [B20] Arc : vitesse (px/s) du projectile « flèche » d'un héros au corps à corps (durée de vie = portée / vitesse). */
+export const GEAR_BOW_ARROW_SPEED = 260;
+/** [B20] Arc : rayon (px) de la flèche d'un héros au corps à corps. */
+export const GEAR_BOW_ARROW_RADIUS = 3;
+/** [B20] Arc : dégâts d'un héros au corps à corps = 70 % de son corps à corps. */
+export const GEAR_BOW_MELEE_DAMAGE_MULT = 0.7;
+/** [B20] Arc : +15 % de dégâts pour un héros qui tire déjà (Valentine : son tir est un projectile de soin, l'effet de soin est inchangé). */
+export const GEAR_BOW_RANGED_BONUS = 0.15;
+
+/** [B21] Budget d'objets d'équipement par salle de combat : 1 par joueur de la partie. */
+export const GEAR_BUDGET_PER_PLAYER = 1;
+/**
+ * [B21] Poids d'un ennemi dans la répartition du budget restant (palier de butin de `lootTierOf`) : costaud ×4, standard ×1, faible ×0,5.
+ * Chaque mort tire un objet avec la probabilité `budgetRestant × poids / sommeDesPoidsRestants` (ennemis vivants et apparitions en attente).
+ */
+export const GEAR_ENEMY_WEIGHTS: Readonly<Record<LootTierId, number>> = { weak: 0.5, standard: 1, tough: 4 };
+
+/**
+ * [B22] Poids de tirage du niveau I / II / III (somme = 100). Calibrage mesuré (README, « Équipement et bonus ») : 75 / 22 / 3 conservé ; ces chances pèsent peu sur la
+ * puissance moyenne (tous les objets de niveau I donnent quasi la même puissance), elles règlent la rareté et la progression.
+ */
+export const GEAR_LEVEL_WEIGHTS: readonly [number, number, number] = [75, 22, 3];
+/** [B22] Niveau minimal garanti de l'objet d'un demi-boss. */
+export const GEAR_MINIBOSS_MIN_LEVEL = 2;
+
+/**
+ * [B23] Poids de départ du tirage de l'emplacement. `magic` est retiré (poids 0) quand il n'y a qu'UN joueur (relevage inutile) et son poids
+ * est redistribué (le tirage est proportionnel).
+ */
+export const GEAR_SLOT_WEIGHTS: Readonly<Record<BasicGearSlot | 'accessory', number>> = {
+  boots: 18,
+  protection: 22,
+  weapon: 18,
+  artifact: 18,
+  magic: 12,
+  accessory: 12,
+};
+/** [B23] Un emplacement VIDE chez le joueur vivant le moins équipé pèse ×2 dans le tirage. */
+export const GEAR_EMPTY_SLOT_FACTOR = 2;
+
+/** [B24] Durée de vie (ms) d'un objet d'équipement au sol. */
+export const GEAR_TTL_MS = 20_000;
+/** [B24] Les `GEAR_BLINK_MS` dernières millisecondes, l'objet clignote (≤ 3 Hz, voir `render/gearFx.ts`). */
+export const GEAR_BLINK_MS = 4_000;
+/** [B24] Rayon de ramassage (px, centre à centre) d'un objet d'équipement. */
+export const GEAR_PICKUP_RADIUS = 14;
+/** [B24] Rayon (px) du cercle sur lequel l'équipement perdu est éparpillé autour du joueur tombé. */
+export const GEAR_SCATTER_RADIUS = 20;
+
+/** [B25] Constante XOR de la graine du PRNG ISOLÉ de l'équipement : `seedToState(seed ^ GEAR_SEED_XOR)` ("GEAR" en ASCII). */
+export const GEAR_SEED_XOR = 0x47454152;
+
+// ───────────────────────── Accessoires et bonus temporaires ─────────────────────────
+
+/**
+ * [B26] Bonus des accessoires par sorte et niveau (indice 0 = niveau I) :
+ *  - lantern : fraction de consommation de la torche en MOINS (la torche des salles sombres s'use 30 / 50 / 70 % moins vite) ;
+ *  - magnet  : rayon d'attraction (px) des cœurs ET des objets d'équipement au sol ;
+ *  - warhorn : bonus de vitesse (fraction) donné aux alliés proches quand le porteur lance son APPEL (`HORN_DURATION_MS`).
+ * L'anneau du vampire n'a pas de niveau variable : niveau III UNIQUEMENT (voir `VAMPIRE_*`).
+ */
+export const ACCESSORY_BONUS: Readonly<Record<'lantern' | 'magnet' | 'warhorn', readonly [number, number, number]>> = {
+  lantern: [0.3, 0.5, 0.7],
+  magnet: [50, 80, 120],
+  warhorn: [0.2, 0.3, 0.4],
+};
+
+/** [B26] Poids de tirage de la sorte d'accessoire (l'anneau du vampire, niveau III seulement, est RARE : 7 %). */
+export const ACCESSORY_KIND_WEIGHTS: Readonly<Record<'lantern' | 'magnet' | 'warhorn' | 'vampire', number>> = {
+  lantern: 31,
+  magnet: 31,
+  warhorn: 31,
+  vampire: 7,
+};
+
+/** [B26] Vitesse (px/s) à laquelle l'aimant tire un cœur ou un objet vers son porteur. */
+export const MAGNET_PULL_SPEED = 110;
+/** [B26] Durée (ms) du bonus de vitesse que le cor de guerre donne aux alliés proches (celle de l'appel). */
+export const HORN_DURATION_MS = 3_000;
+/** [B26] Rayon (px) autour de l'appelant dans lequel les alliés reçoivent le bonus du cor de guerre. */
+export const HORN_RADIUS_PX = 160;
+/** [B26] Anneau du vampire : +1 PV (`VAMPIRE_HEAL_HP`) tous les 3 ennemis tués (`VAMPIRE_KILLS_PER_HEAL`) ; seuls les ennemis NON invoqués comptent. */
+export const VAMPIRE_HEAL_HP = 1;
+export const VAMPIRE_KILLS_PER_HEAL = 3;
+
+/** [B27] Durée (ms) des bonus temporaires « potion de vitesse » et « éclair de rage ». */
+export const BUFF_DURATION_MS = 8_000;
+/** [B27] Durée (ms) du bonus temporaire « étoile » (invulnérabilité). */
+export const BUFF_STAR_DURATION_MS = 4_000;
+/** [B27] Potion de vitesse : +40 % de vitesse de déplacement. */
+export const BUFF_SPEED_BONUS = 0.4;
+/** [B27] Éclair de rage : +50 % de dégâts infligés (attaque normale ET spécial). */
+export const BUFF_RAGE_BONUS = 0.5;
+/**
+ * [B27] Plafond GLOBAL de la vitesse de déplacement : bottes (plafonnées à `GEAR_CAPS.speed`) + effet temporaire (potion de vitesse OU cor de guerre,
+ * le plus fort des deux, jamais cumulés) ≤ +60 %.
+ */
+export const BUFF_SPEED_TOTAL_CAP = 0.6;
+/** [B27] Budget (moyenne) de bonus temporaires par héros et par salle : le budget entier de la salle est floor(0,3 n) + (1 avec la probabilité du reste). */
+export const BUFF_BUDGET_PER_PLAYER = 0.3;
+/** [B27] Poids de tirage de la sorte de bonus temporaire (l'étoile est la plus rare). */
+export const BUFF_KIND_WEIGHTS: Readonly<Record<'speed' | 'rage' | 'star', number>> = { speed: 40, rage: 40, star: 20 };
+
 /** Multiplicateurs de difficulté appliqués aux ENNEMIS (du point de vue d'un joueur donné). */
 export interface DifficultyMultipliers {
   /** Multiplicateur des PV ennemis : les dégâts infligés PAR ce joueur sont divisés par cette valeur. */
@@ -215,14 +369,17 @@ export function damageToEnemy(rawDamage: number, attackerDifficulty: Difficulty)
  * @param rawDamage dégâts bruts de l'ennemi / du projectile (`EnemyDef.damage`…)
  * @param character personnage victime (résistance)
  * @param victimDifficulty difficulté du joueur victime
+ * @param gearReduction réduction de l'équipement (fraction, plafonnée à `GEAR_CAPS.protection`, [B18]) appliquée APRÈS la difficulté et la résistance ; défaut 0
  */
 export function damageToPlayer(
   rawDamage: number,
   character: ResistanceStat,
   victimDifficulty: Difficulty,
+  gearReduction = 0,
 ): number {
   if (!(rawDamage > 0)) return 0;
+  const gear = Math.min(GEAR_CAPS.protection, Math.max(0, Number.isFinite(gearReduction) ? gearReduction : 0));
   const scaled =
-    rawDamage * difficultyMultipliers(victimDifficulty).enemyDamageMult * (1 - damageReductionFor(character));
+    rawDamage * difficultyMultipliers(victimDifficulty).enemyDamageMult * (1 - damageReductionFor(character)) * (1 - gear);
   return Math.max(MIN_DAMAGE, Math.round(scaled));
 }

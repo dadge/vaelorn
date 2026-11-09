@@ -31,8 +31,12 @@
  *  (i) projectiles et impacts ;
  *  (i2) sources de vie (phase 'playing', sim créée avec `loot` vrai) : vieillissement et péremption de la nourriture au sol, ramassage
  *      (`pickupCollected`) par le joueur vivant blessé le plus proche, usage des cristaux de soin (`crystalUsed`) ;
+ *  (i3) équipement au sol (phase 'playing') : vieillissement / péremption des objets, verrous, ramassage automatique (`gearPicked`) par le joueur
+ *      vivant le plus proche pour qui l'objet est STRICTEMENT meilleur (`gear.ts` `pickupDecision`) ;
  *  (j) morts d'ennemis (enemyDied, kills du tueur, retrait) ; BUTIN : chaque mort d'ennemi non invoqué tire son butin de vie avec le PRNG
- *      DÉDIÉ (`lootRngState`, jamais `rngState`) → `pickupDropped` (voir `loot.ts`, `balance.ts` [B10]-[B17]) ;
+ *      DÉDIÉ (`lootRngState`, jamais `rngState`) → `pickupDropped` (voir `loot.ts`, `balance.ts` [B10]-[B17]) ; puis, s'il ne laisse pas de cœur,
+ *      son objet d'ÉQUIPEMENT avec le PRNG ISOLÉ `gearRngState` (budget par salle, `gear.ts`, [B18]-[B25]) → `gearDropped` ;
+ *      un joueur TOMBÉ perd tout son équipement, éparpillé au sol et verrouillé pour lui (`gearLost`) : règle stricte, même à la défaite d'équipe ;
  *  (k) objectifs personnels (`updateObjectives`) ;
  *  (l) sortie de salle : exigences de sortie satisfaites ET tous les joueurs vivants (≥ 1) dans `exit.rect` ⇒ phase
  *      'roomCleared' (événement roomCleared) puis, après ROOM_CLEAR_DELAY_MS, salle suivante (roomEntered 'next') ;
@@ -63,9 +67,23 @@
  *  - sources de vie : nourriture (`room.pickups`) et cristaux (`room.healCrystals`) sont remis à zéro / à neuf à chaque entrée de salle (start /
  *    next / restart), comme le compteur anti-malchance (`lootDryKills`) ; leur flux aléatoire (`lootRngState`) et leurs ids (`nextPickupId`) sont
  *    DISTINCTS de ceux du reste de la partie : sans ramassage, une partie est strictement identique à celle d'avant leur ajout ;
+ *  - équipement : conservé d'une salle à l'autre, perdu à la chute, réinitialisé avec la simulation (nouveau niveau) ; `room.gearDrops` et `room.gearBudget`
+ *    sont remis à neuf à chaque entrée de salle (start / next / restart) ; le flux aléatoire (`gearRngState`) et les ids (`nextGearDropId`) sont ISOLÉS :
+ *    sans ramassage, une partie est strictement identique à celle d'avant l'ajout de l'équipement (aux champs d'état supplémentaires près) ;
  *  - `knockDown(id)` (hors `IGameSimulation`, appelé ENTRE deux pas) : chute scénarisée du tutoriel, événement `playerDown` au pas suivant.
  */
-import { HEAL_CRYSTAL_HEAL, HEAL_CRYSTAL_RADIUS, LOOT_SEED_XOR, PICKUP_RADIUS, PICKUP_TTL_MS } from './balance';
+import {
+  GEAR_BUDGET_PER_PLAYER,
+  GEAR_PICKUP_RADIUS,
+  GEAR_SEED_XOR,
+  GEAR_TTL_MS,
+  HEAL_CRYSTAL_HEAL,
+  HORN_RADIUS_PX,
+  HEAL_CRYSTAL_RADIUS,
+  LOOT_SEED_XOR,
+  PICKUP_RADIUS,
+  PICKUP_TTL_MS,
+} from './balance';
 import {
   DOWNED_THREAT_RADIUS,
   INTERACT_RANGE,
@@ -90,7 +108,29 @@ import {
   stepSpecialEffects,
   type CombatContext,
 } from './combat';
-import { getEnemyDef, isAnyBossKind, isFlyingKind } from './enemies';
+import { getEnemyDef, isAnyBossKind, isFlyingKind, isMiniBossKind } from './enemies';
+import {
+  addBuff,
+  ageGearDrops,
+  buffDurationMs,
+  enemyGearWeight,
+  equipItem,
+  gearDropChance,
+  hornBuffFor,
+  magnetRadius,
+  magnetStep,
+  normalizeGear,
+  pickupDecision,
+  registerRingKill,
+  rollBuffBudget,
+  rollBuffDrop,
+  rollGearDrop,
+  scatterPoints,
+  speedBonus,
+  stripLoadout,
+  swapCandidate,
+  ensureLoadout,
+} from './gear';
 import { dirFromVec, distSq, pointInTileRect, tileCenter } from './geometry';
 import { RoomGrid } from './grid';
 import { lightSources, type LightSource } from './light';
@@ -130,7 +170,18 @@ import {
   stepPlayerTorch,
   updateRevive,
 } from './players';
-import { agePickups, collectorFor, healAmountFor, isSummonedEnemy, mostWoundedFraction, pickupHealValue, rollLoot } from './loot';
+import {
+  agePickups,
+  collectorFor,
+  healAmountFor,
+  isSummonedEnemy,
+  lootChances,
+  lootNeedMultiplier,
+  lootTierOf,
+  mostWoundedFraction,
+  pickupHealValue,
+  rollLoot,
+} from './loot';
 import { nextRandom, seedToState, type RngHolder } from './rng';
 import { resolveSlot } from './slots';
 import type {
@@ -139,6 +190,9 @@ import type {
   EnemyKind,
   EnemyState,
   GameState,
+  BuffDropState,
+  GearDropState,
+  GearItem,
   HealCrystalState,
   IGameSimulation,
   LevelDef,
@@ -211,7 +265,7 @@ export function createHealCrystalStates(room: RoomDef, playerCount: number, loot
   return (room.healCrystals ?? []).filter((c) => (c.minPlayers ?? 1) <= playerCount).map((c) => ({ id: c.id, used: false }));
 }
 
-function newRoomState(room: RoomDef, playerCount: number, lootEnabled = true): RoomState {
+function newRoomState(room: RoomDef, playerCount: number, lootEnabled = true, gearEnabled = true): RoomState {
   return {
     roomId: room.id,
     enemies: [],
@@ -221,6 +275,10 @@ function newRoomState(room: RoomDef, playerCount: number, lootEnabled = true): R
     elapsedMs: 0,
     pickups: [],
     healCrystals: createHealCrystalStates(room, playerCount, lootEnabled),
+    gearDrops: [],
+    gearBudget: gearEnabled ? playerCount * GEAR_BUDGET_PER_PLAYER : 0,
+    buffDrops: [],
+    buffBudget: 0, // tiré à l'entrée de la salle (`loadRoom`, PRNG isolé de l'équipement)
   };
 }
 
@@ -242,6 +300,26 @@ function normalizeLootState(state: GameState, room: RoomDef | undefined): void {
   }
 }
 
+/**
+ * Compatibilité : pose les valeurs par défaut des champs d'ÉQUIPEMENT absents (ancien snapshot, état construit à la main) — équipement actif,
+ * flux dérivé de `rngState`, prochain id 1, aucun objet au sol, budget de la salle = nombre de joueurs, loadout vide pour chaque joueur.
+ * N'écrase JAMAIS une valeur valide (un loadout présent est seulement normalisé).
+ */
+function normalizeGearState(state: GameState): void {
+  if (typeof state.gearEnabled !== 'boolean') state.gearEnabled = true;
+  if (typeof state.gearRngState !== 'number' || !Number.isFinite(state.gearRngState)) {
+    state.gearRngState = seedToState((state.rngState | 0) ^ GEAR_SEED_XOR);
+  }
+  if (typeof state.nextGearDropId !== 'number' || !Number.isFinite(state.nextGearDropId)) state.nextGearDropId = 1;
+  if (!Array.isArray(state.room.gearDrops)) state.room.gearDrops = [];
+  if (!Array.isArray(state.room.buffDrops)) state.room.buffDrops = [];
+  if (typeof state.room.buffBudget !== 'number' || !Number.isFinite(state.room.buffBudget)) state.room.buffBudget = 0;
+  if (typeof state.room.gearBudget !== 'number' || !Number.isFinite(state.room.gearBudget)) {
+    state.room.gearBudget = state.gearEnabled ? state.playerCount * GEAR_BUDGET_PER_PLAYER : 0;
+  }
+  for (const p of state.players) ensureLoadout(p);
+}
+
 // ───────────────────────────── Simulation ─────────────────────────────
 
 /** Résultat de l'arbitrage d'action d'un pas (par joueur). */
@@ -250,6 +328,8 @@ interface Arbitration {
   reviving: Set<PlayerId>;
   /** Front montant d'interaction arbitré. */
   interactPressed: Partial<Record<PlayerId, boolean>>;
+  /** Joueurs dont l'appui d'action ÉCHANGE un accessoire ce pas (jamais en même temps qu'un mécanisme : un seul effet par appui). */
+  swapPressed: Set<PlayerId>;
   /** Joueurs qui attaquent ce pas. */
   attacking: Set<PlayerId>;
   /** Joueurs dont le bouton de spécial vient d'être pressé (front montant) ce pas. */
@@ -271,6 +351,10 @@ export class GameSimulation implements IGameSimulation {
   private lastEvents: SimEvent[] = [];
   /** Adaptateur du PRNG DÉDIÉ au butin (lit / écrit `state.lootRngState`) : `nextRandom(this.lootRng)` ne touche jamais `state.rngState`. */
   private readonly lootRng: RngHolder;
+  /** Adaptateur du PRNG ISOLÉ de l'équipement (lit / écrit `state.gearRngState`) : distinct de `rngState` ET de `lootRngState`. */
+  private readonly gearRng: RngHolder;
+  /** Ennemis morts de CE pas dont le butin est déjà tiré (voir `collectDeaths`) ; transitoire, jamais sérialisé. */
+  private readonly deathHandled = new Set<EnemyState>();
 
   /** @internal Utiliser `createSimulation` ou `GameSimulation.restore`. */
   constructor(state: GameState, level: LevelDef, pendingEvents: SimEvent[] = []) {
@@ -279,6 +363,15 @@ export class GameSimulation implements IGameSimulation {
     this.roomGrid = new RoomGrid(level.rooms[state.roomIndex].layout);
     this.pending = pendingEvents;
     normalizeLootState(state, level.rooms[state.roomIndex]);
+    normalizeGearState(state);
+    this.gearRng = {
+      get rngState(): number {
+        return state.gearRngState as number;
+      },
+      set rngState(v: number) {
+        state.gearRngState = v;
+      },
+    };
     this.lootRng = {
       get rngState(): number {
         return state.lootRngState as number;
@@ -371,6 +464,7 @@ export class GameSimulation implements IGameSimulation {
     if (!p || p.status !== 'alive') return false;
     markPlayerDown(p);
     this.pending.push({ type: 'playerDown', playerId: id });
+    this.loseGear(p, this.pending);
     return true;
   }
 
@@ -497,7 +591,12 @@ export class GameSimulation implements IGameSimulation {
     stepProjectiles(cctx, dt);
 
     // (i2) sources de vie : nourriture au sol (vieillissement, ramassage) et cristaux de soin
+    if (s.phase === 'playing' || s.phase === 'roomCleared') this.stepMagnets(dt);
     if (s.phase === 'playing') this.stepLifeSources(dt, events);
+
+    // (i3) équipement au sol : vieillissement, verrous, ramassage
+    // (aussi pendant 'roomCleared' : l'objet laissé par le dernier ennemi reste ramassable et vieillit pendant le délai avant la salle suivante)
+    if (s.phase === 'playing' || s.phase === 'roomCleared') this.stepGear(dt, events, arb);
 
     // (j) morts
     const deaths = this.collectDeaths(events, killers);
@@ -520,6 +619,9 @@ export class GameSimulation implements IGameSimulation {
 
     // (l) sortie de salle
     if (s.phase === 'playing') this.checkExit(events);
+
+    // garde-fou : tout joueur à terre est dépouillé de son équipement (quelle que soit la cause de la chute), AVANT la mort d'équipe / le redémarrage
+    for (const p of players) if (p.status === 'down') this.loseGear(p, events);
 
     // (m) mort d'équipe et transitions de phase
     this.updatePhases(events);
@@ -595,7 +697,7 @@ export class GameSimulation implements IGameSimulation {
    *    (touche d'action unique du clavier) ; uniquement en phase 'playing'.
    */
   private arbitrate(frameOf: (p: PlayerState) => ActionFrame): Arbitration {
-    const arb: Arbitration = { reviving: new Set(), interactPressed: {}, attacking: new Set(), special: new Set(), call: new Set() };
+    const arb: Arbitration = { reviving: new Set(), interactPressed: {}, swapPressed: new Set(), attacking: new Set(), special: new Set(), call: new Set() };
     const playing = this.state.phase === 'playing';
     for (const p of this.state.players) {
       if (p.status !== 'alive') continue;
@@ -617,7 +719,11 @@ export class GameSimulation implements IGameSimulation {
       if (pressed) arb.interactPressed[p.id] = true;
       // L'attaque n'est supprimée que sur le front montant qui actionne réellement un mécanisme : un bouton maintenu
       // continue d'attaquer, un nouvel appui près d'un levier l'actionne sans attaquer.
-      if (f.attack && !(pressed && this.interactableNear(p))) arb.attacking.add(p.id);
+      // Un seul effet par appui : un mécanisme à portée prime sur l'échange d'accessoire ; comme un levier, l'échange manuel n'attaque pas non plus.
+      const mech = pressed && this.interactableNear(p);
+      const swap = pressed && !mech && swapCandidate(this.state.room.gearDrops as GearDropState[], p) !== null;
+      if (swap) arb.swapPressed.add(p.id);
+      if (f.attack && !(mech || swap)) arb.attacking.add(p.id);
     }
     return arb;
   }
@@ -628,6 +734,22 @@ export class GameSimulation implements IGameSimulation {
       if (!arb.call.has(p.id)) continue;
       startCall(p);
       events.push({ type: 'callStarted', playerId: p.id });
+      this.applyHorn(p, events);
+    }
+  }
+
+  /**
+   * Cor de guerre : l'APPEL de son porteur donne aux alliés VIVANTS proches (`HORN_RADIUS_PX`, centre à centre) un bonus de vitesse de 3 s (+20 / +30 / +40 % selon
+   * le niveau), jamais à l'appelant lui-même ; ne se cumule pas avec les autres sources temporaires de vitesse (voir `speedBonus`). Émet `buffStarted` par allié.
+   */
+  private applyHorn(caller: PlayerState, events: SimEvent[]): void {
+    const proto = hornBuffFor(caller.loadout);
+    if (!proto) return;
+    const r2 = HORN_RADIUS_PX * HORN_RADIUS_PX;
+    for (const ally of this.state.players) {
+      if (ally.id === caller.id || ally.status !== 'alive' || distSq(ally.pos, caller.pos) > r2) continue;
+      addBuff(ally.loadout, { ...proto });
+      events.push({ type: 'buffStarted', playerId: ally.id, kind: 'horn', durationMs: proto.remainingMs, fromPlayerId: caller.id, pos: { x: ally.pos.x, y: ally.pos.y } });
     }
   }
 
@@ -647,7 +769,7 @@ export class GameSimulation implements IGameSimulation {
         continue;
       }
       const amplitude = Math.min(1, norm);
-      const speed = getCharacter(p.characterId).speed * amplitude;
+      const speed = getCharacter(p.characterId).speed * (1 + speedBonus(p.loadout)) * amplitude;
       const k = (speed * dt) / 1000 / norm;
       p.facing = dirFromVec({ x: f.moveX, y: f.moveY }, p.facing);
       const before = p.pos;
@@ -688,7 +810,10 @@ export class GameSimulation implements IGameSimulation {
       get damageEnabled(): boolean {
         return sim.state.phase === 'playing';
       },
-      onPlayerDowned: () => sim.checkTeamWipe(events),
+      onPlayerDowned: (player) => {
+        sim.loseGear(player, events); // l'équipement est perdu AVANT le test de mort d'équipe (règle stricte)
+        sim.checkTeamWipe(events);
+      },
       stunEnemy: (enemy, ms) => {
         stunEnemy(enemy, ms);
       },
@@ -896,6 +1021,8 @@ export class GameSimulation implements IGameSimulation {
     const s = this.state;
     const deaths: DeathRecord[] = [];
     const remaining: EnemyState[] = [];
+    // morts du même pas déjà traitées : les autres (encore à traiter) comptent comme « restantes » dans la répartition du budget d'équipement (pondération respectée)
+    this.deathHandled.clear();
     for (const e of s.room.enemies) {
       if (!e.dead && e.hp > 0) {
         remaining.push(e);
@@ -903,13 +1030,20 @@ export class GameSimulation implements IGameSimulation {
       }
       const byPlayer = killers.get(e.id) ?? null;
       events.push({ type: 'enemyDied', enemyId: e.id, kind: e.kind, pos: { x: e.pos.x, y: e.pos.y }, byPlayer });
-      this.dropLoot(e, events);
+      const heart = this.dropLoot(e, events);
+      const gearChance = this.dropGear(e, heart, events);
+      this.dropBuff(e, heart, gearChance, events);
+      this.deathHandled.add(e);
       if (byPlayer !== null) {
         const killer = s.players.find((p) => p.id === byPlayer);
-        if (killer) killer.kills += 1;
+        if (killer) {
+          killer.kills += 1;
+          this.vampireKill(killer, e, events);
+        }
       }
       deaths.push({ kind: e.kind, byPlayer, roomId: s.room.roomId });
     }
+    this.deathHandled.clear();
     s.room.enemies = remaining;
     return deaths;
   }
@@ -921,9 +1055,13 @@ export class GameSimulation implements IGameSimulation {
    * échéant, pose une nourriture au sol (`pickupDropped`). Sans effet hors phase 'playing' ou si les sources de vie sont désactivées.
    * Les ennemis invoqués (vague `SUMMON_WAVE`) et les boss finaux ne laissent rien ; un demi-boss laisse toujours un cœur entier.
    */
-  private dropLoot(e: EnemyState, events: SimEvent[]): void {
+  private dropLoot(e: EnemyState, events: SimEvent[]): { heart: boolean; chance: number } {
     const s = this.state;
-    if (s.lootEnabled === false || s.phase !== 'playing') return;
+    const none = { heart: false, chance: 0 };
+    if (s.lootEnabled === false || s.phase !== 'playing') return none;
+    const tier = isSummonedEnemy(e) ? 'none' : lootTierOf(e.kind);
+    // probabilité de cœur de CET ennemi (avant le tirage) : sert à compenser l'exclusion mutuelle cœur / objet d'équipement
+    const chance = tier === 'none' ? 0 : tier === 'miniBoss' ? 1 : lootChances(tier, lootNeedMultiplier(mostWoundedFraction(s.players))).total;
     const res = rollLoot({
       kind: e.kind,
       summoned: isSummonedEnemy(e),
@@ -932,12 +1070,273 @@ export class GameSimulation implements IGameSimulation {
       random: () => nextRandom(this.lootRng),
     });
     s.lootDryKills = res.dryKills;
-    if (res.drop === null) return;
+    if (res.drop === null) return { heart: false, chance };
     const id = s.nextPickupId ?? 1;
     s.nextPickupId = id + 1;
     const pos = this.findPickupSpot(e.pos);
     (s.room.pickups as PickupState[]).push({ id, kind: res.drop, pos, ttlMs: PICKUP_TTL_MS });
     events.push({ type: 'pickupDropped', pickupId: id, kind: res.drop, pos: { x: pos.x, y: pos.y } });
+    return { heart: true, chance };
+  }
+
+  // ── Équipement : butin des ennemis, éparpillement, ramassage ──
+
+  /** Somme des poids d'équipement des ennemis ORDINAIRES restants (vivants non invoqués + apparitions en attente) et nombre de demi-boss restants, hors `except`. */
+  private remainingGearWeights(except: EnemyState): { weight: number; miniBosses: number } {
+    const s = this.state;
+    let weight = 0;
+    let miniBosses = 0;
+    for (const o of s.room.enemies) {
+      if (o === except || this.deathHandled.has(o) || isSummonedEnemy(o)) continue;
+      weight += enemyGearWeight(o.kind);
+      if (isMiniBossKind(o.kind)) miniBosses++;
+    }
+    const spawned = s.room.spawnedSpawnIdx;
+    this.room.enemies.forEach((def, i) => {
+      if ((def.minPlayers ?? 1) > s.playerCount || spawned.includes(i)) return;
+      weight += enemyGearWeight(def.kind);
+      if (isMiniBossKind(def.kind)) miniBosses++;
+    });
+    return { weight, miniBosses };
+  }
+
+  /**
+   * Objet d'ÉQUIPEMENT d'un ennemi qui vient de mourir (voir `gear.ts` `rollGearDrop`) : budget par salle, tirage sur le PRNG ISOLÉ
+   * `gearRngState`, pas d'objet si l'ennemi laisse déjà un cœur (`heart`). Sans effet hors phase 'playing' ou si l'équipement est désactivé.
+   */
+  private dropGear(e: EnemyState, heart: { heart: boolean; chance: number }, events: SimEvent[]): { dropped: boolean; chance: number } {
+    const s = this.state;
+    const none = { dropped: false, chance: 0 };
+    if (s.gearEnabled === false || s.phase !== 'playing') return none;
+    const budget = s.room.gearBudget ?? 0;
+    if (!(budget > 0)) return none;
+    const rest = this.remainingGearWeights(e);
+    const own = enemyGearWeight(e.kind);
+    // probabilité d'objet de CET ennemi (sert à compenser l'exclusion mutuelle avec le bonus temporaire) ; le demi-boss en laisse toujours un
+    const chance = isMiniBossKind(e.kind) ? 1 : gearDropChance({ kind: e.kind, budget, reservedForMiniBosses: rest.miniBosses, weightLeft: own + rest.weight, heartChance: heart.chance });
+    const item = rollGearDrop({
+      kind: e.kind,
+      summoned: isSummonedEnemy(e),
+      hasHeart: heart.heart,
+      heartChance: heart.chance,
+      budget,
+      reservedForMiniBosses: rest.miniBosses,
+      weightLeft: own + rest.weight,
+      playerCount: s.playerCount,
+      players: s.players,
+      random: () => nextRandom(this.gearRng),
+    });
+    if (!item) return { dropped: false, chance };
+    s.room.gearBudget = budget - 1;
+    // un cœur laissé au même endroit : l'objet est posé à côté pour rester lisible
+    const origin = heart.heart ? { x: e.pos.x + 9, y: e.pos.y } : e.pos;
+    this.addGearDrop(item, this.findPickupSpot(origin), null, 'life', false, events);
+    return { dropped: true, chance };
+  }
+
+  /**
+   * Bonus TEMPORAIRE d'un ennemi qui vient de mourir (voir `gear.ts` `rollBuffDrop`) : petit budget entier de la salle (~0,3 par héros, tiré à l'entrée), même
+   * répartition que l'équipement, exclusif avec le cœur et l'objet d'équipement de cet ennemi (probabilité compensée). PRNG isolé de l'équipement.
+   */
+  private dropBuff(e: EnemyState, heart: { heart: boolean; chance: number }, gear: { dropped: boolean; chance: number }, events: SimEvent[]): void {
+    const s = this.state;
+    if (s.gearEnabled === false || s.phase !== 'playing') return;
+    const budget = s.room.buffBudget ?? 0;
+    if (!(budget > 0)) return;
+    const rest = this.remainingGearWeights(e);
+    const kind = rollBuffDrop({
+      kind: e.kind,
+      summoned: isSummonedEnemy(e),
+      hasDrop: heart.heart || gear.dropped,
+      otherDropChance: heart.chance + (1 - heart.chance) * Math.min(1, gear.chance),
+      budget,
+      weightLeft: enemyGearWeight(e.kind) + rest.weight,
+      random: () => nextRandom(this.gearRng),
+    });
+    if (!kind) return;
+    s.room.buffBudget = budget - 1;
+    const pos = this.findPickupSpot({ x: e.pos.x - 9, y: e.pos.y });
+    const id = s.nextGearDropId ?? 1;
+    s.nextGearDropId = id + 1;
+    (s.room.buffDrops as BuffDropState[]).push({ id, kind, pos: { x: pos.x, y: pos.y }, ttlMs: GEAR_TTL_MS });
+    events.push({ type: 'buffDropped', dropId: id, kind, pos: { x: pos.x, y: pos.y } });
+  }
+
+  /** Anneau du vampire : un ennemi NON invoqué tué par le porteur compte ; tous les 3, +1 PV (plafonné aux PV max). Émet `vampireHeal`. */
+  private vampireKill(killer: PlayerState, e: EnemyState, events: SimEvent[]): void {
+    if (killer.status !== 'alive' || isSummonedEnemy(e)) return;
+    const heal = registerRingKill(killer.loadout);
+    if (heal <= 0) return;
+    const healed = Math.max(0, Math.min(heal, killer.maxHp - killer.hp));
+    killer.hp += healed;
+    if (healed > 0) events.push({ type: 'vampireHeal', playerId: killer.id, healed, pos: { x: killer.pos.x, y: killer.pos.y } });
+  }
+
+  /** Pose un objet d'équipement au sol et émet `gearDropped`. */
+  private addGearDrop(item: GearItem, pos: Vec2, lockedFor: PlayerId | null, lockMode: 'life' | 'leave', scattered: boolean, events: SimEvent[]): void {
+    const s = this.state;
+    const id = s.nextGearDropId ?? 1;
+    s.nextGearDropId = id + 1;
+    (s.room.gearDrops as GearDropState[]).push({ id, item, pos: { x: pos.x, y: pos.y }, ttlMs: GEAR_TTL_MS, lockedFor, lockMode });
+    events.push({ type: 'gearDropped', dropId: id, item, pos: { x: pos.x, y: pos.y }, scattered });
+  }
+
+  /**
+   * Un joueur TOMBÉ perd TOUT : les 6 emplacements et les bonus temporaires. L'équipement perdu est ÉPARPILLÉ autour de lui (`scatterPoints`, ramené sur des
+   * cases praticables), 20 s au sol (`GEAR_TTL_MS`), VERROUILLÉ pour lui (il ne peut pas les reprendre) ; ses alliés les ramassent s'ils sont meilleurs que
+   * les leurs. Règle stricte : aussi à la défaite d'équipe (pas de point de reprise). Idempotent : sans équipement, ne fait rien. Émet `gearLost` puis `gearDropped`.
+   */
+  private loseGear(p: PlayerState, events: SimEvent[]): void {
+    const hadBuffs = p.loadout.buffs.length > 0;
+    const lost = stripLoadout(p.loadout);
+    if (lost.length === 0) {
+      if (hadBuffs) p.loadout.buffs = [];
+      return;
+    }
+    events.push({ type: 'gearLost', playerId: p.id, items: lost, pos: { x: p.pos.x, y: p.pos.y } });
+    const points = scatterPoints(p.pos, lost.length);
+    lost.forEach((item, i) => this.addGearDrop(item, this.findPickupSpot(points[i]), p.id, 'life', true, events));
+  }
+
+  /**
+   * Pas de l'équipement au sol (phase 'playing') : vieillissement et péremption (`GEAR_TTL_MS`) des objets et des bonus temporaires, levée des verrous
+   * 'leave', ÉCHANGE MANUEL d'accessoire (le joueur qui appuie sur l'action avec un objet échangeable à portée : `swapCandidate`), puis ramassage objet par objet
+   * par le joueur VIVANT le plus proche (égalité : plus petit id) dans `GEAR_PICKUP_RADIUS` pour qui l'objet n'est pas verrouillé et ne peut pas être
+   * ignoré (`pickupDecision` : strictement meilleur ; accessoire : emplacement vide ou même sorte de niveau supérieur). L'ancien objet de l'emplacement
+   * disparaît (sauf l'accessoire échangé à la main, lâché au sol). Un objet que personne ne peut prendre reste au sol. Les bonus temporaires sont ramassés
+   * par le joueur vivant le plus proche.
+   */
+  private stepGear(dt: number, events: SimEvent[], arb: Arbitration): void {
+    const s = this.state;
+    const drops = s.room.gearDrops as GearDropState[];
+    const buffDrops = s.room.buffDrops as BuffDropState[];
+    if (drops.length === 0 && buffDrops.length === 0) return;
+    ageGearDrops(drops, dt);
+    ageGearDrops(buffDrops, dt);
+    const r2 = GEAR_PICKUP_RADIUS * GEAR_PICKUP_RADIUS;
+    for (const d of drops) {
+      // verrou « tant que le joueur n'a pas quitté le rayon » : levé dès qu'il en sort (ou s'il est à terre / absent)
+      if (d.lockMode === 'leave' && d.lockedFor !== null) {
+        const owner = s.players.find((q) => q.id === d.lockedFor);
+        if (!owner || owner.status !== 'alive' || distSq(owner.pos, d.pos) > r2) d.lockedFor = null;
+      }
+    }
+    // échange manuel d'accessoire (priorité : relevage > interaction / échange > attaque, voir `arbitrate`)
+    for (const p of s.players) {
+      if (!arb.swapPressed.has(p.id)) continue;
+      const cand = swapCandidate(drops, p);
+      if (cand) this.swapAccessory(p, cand, drops, events);
+    }
+    for (let i = 0; i < drops.length; ) {
+      const d = drops[i];
+      let best: PlayerState | null = null;
+      let bestD = Infinity;
+      for (const p of s.players) {
+        if (p.status !== 'alive' || d.lockedFor === p.id) continue;
+        const dd = distSq(p.pos, d.pos);
+        if (dd > r2 || dd >= bestD) continue;
+        const decision = pickupDecision(p.loadout, d.item);
+        if (decision !== 'equip' && decision !== 'upgrade') continue; // 'swap' : échange manuel (action A), 'ignore' : reste au sol
+        best = p;
+        bestD = dd;
+      }
+      if (!best) {
+        i++;
+        continue;
+      }
+      const replaced = equipItem(best.loadout, d.item);
+      drops.splice(i, 1);
+      events.push({ type: 'gearPicked', dropId: d.id, playerId: best.id, item: d.item, replaced, pos: { x: d.pos.x, y: d.pos.y } });
+    }
+    for (let i = 0; i < buffDrops.length; ) {
+      const d = buffDrops[i];
+      let best: PlayerState | null = null;
+      let bestD = Infinity;
+      for (const p of s.players) {
+        if (p.status !== 'alive') continue;
+        const dd = distSq(p.pos, d.pos);
+        if (dd > r2 || dd >= bestD) continue;
+        best = p;
+        bestD = dd;
+      }
+      if (!best) {
+        i++;
+        continue;
+      }
+      const durationMs = buffDurationMs(d.kind);
+      addBuff(best.loadout, { kind: d.kind, remainingMs: durationMs });
+      buffDrops.splice(i, 1);
+      events.push({ type: 'buffStarted', playerId: best.id, kind: d.kind, durationMs, pos: { x: d.pos.x, y: d.pos.y } });
+    }
+  }
+
+  /**
+   * Échange MANUEL d'accessoire : `p` équipe l'accessoire au sol `d` (d'une AUTRE sorte que le sien) et LÂCHE l'ancien à ses pieds (20 s, clignotement). L'ancien est
+   * VERROUILLÉ pour `p` tant qu'il n'a pas quitté son rayon (pas d'échange infini) ; un allié peut le prendre. Émet `gearSwapped` puis `gearDropped`.
+   */
+  private swapAccessory(p: PlayerState, d: GearDropState, drops: GearDropState[], events: SimEvent[]): void {
+    const idx = drops.indexOf(d);
+    if (idx < 0) return;
+    drops.splice(idx, 1);
+    const old = equipItem(p.loadout, d.item);
+    events.push({ type: 'gearSwapped', playerId: p.id, item: d.item, dropped: old ?? d.item, pos: { x: d.pos.x, y: d.pos.y } });
+    if (old) this.addGearDrop(old, this.findPickupSpot(p.pos), p.id, 'leave', false, events);
+  }
+
+  /**
+   * Aimant à cœurs : chaque joueur vivant qui le porte tire vers lui, à `MAGNET_PULL_SPEED`, dans son rayon (50 / 80 / 120 px) : les cœurs (s'il est blessé), les
+   * objets d'équipement qu'il peut ramasser (non verrouillés pour lui, 'equip' ou 'upgrade') et les bonus temporaires. Un objet visé par plusieurs aimants va vers
+   * le plus proche. Le déplacement respecte les murs (glissement sur un axe). Sans aimant : aucun effet (ni coût, ni changement d'état).
+   * Co-op : l'aimant ne « vole » pas un objet à un allié mieux placé : si un autre joueur vivant qui pourrait le prendre (même critère) est PLUS PROCHE de l'objet
+   * que le porteur (égalité : le plus petit id, comme le ramassage), l'objet n'est pas tiré (la traction, 110 px/s, dépasse la vitesse de tous les héros).
+   */
+  private stepMagnets(dt: number): void {
+    const s = this.state;
+    const magnets: { p: PlayerState; r: number }[] = [];
+    for (const p of s.players) {
+      if (p.status !== 'alive') continue;
+      const r = magnetRadius(p.loadout);
+      if (r > 0) magnets.push({ p, r });
+    }
+    if (magnets.length === 0) return;
+    const solids = this.solidRects();
+    const grid = this.roomGrid;
+    const pull = (pos: Vec2, eligible: (p: PlayerState) => boolean): void => {
+      let target: PlayerState | null = null;
+      let bestD = Infinity;
+      for (const m of magnets) {
+        if (!eligible(m.p)) continue;
+        const dd = distSq(m.p.pos, pos);
+        if (dd > m.r * m.r || dd >= bestD) continue;
+        target = m.p;
+        bestD = dd;
+      }
+      if (!target) return;
+      // un allié éligible mieux placé (plus proche, ou à égalité de distance avec un plus petit id) garde la priorité : pas de traction
+      for (const o of s.players) {
+        if (o === target || o.status !== 'alive' || !eligible(o)) continue;
+        const od = distSq(o.pos, pos);
+        if (od < bestD || (od === bestD && o.id < target.id)) return;
+      }
+      const next = magnetStep(pos, target.pos, dt);
+      const tries: Vec2[] = [next, { x: next.x, y: pos.y }, { x: pos.x, y: next.y }];
+      for (const c of tries) {
+        if (canOccupy(c, 4, grid, solids, false)) {
+          pos.x = c.x;
+          pos.y = c.y;
+          return;
+        }
+      }
+    };
+    for (const pk of s.room.pickups as PickupState[]) pull(pk.pos, (p) => p.hp < p.maxHp);
+    for (const d of s.room.gearDrops as GearDropState[]) {
+      pull(d.pos, (p) => {
+        if (d.lockedFor === p.id) return false;
+        const decision = pickupDecision(p.loadout, d.item);
+        return decision === 'equip' || decision === 'upgrade';
+      });
+    }
+    for (const d of s.room.buffDrops as BuffDropState[]) pull(d.pos, () => true);
   }
 
   /**
@@ -1081,7 +1480,9 @@ export class GameSimulation implements IGameSimulation {
     }
     s.roomIndex = index;
     this.roomGrid = new RoomGrid(room.layout);
-    s.room = newRoomState(room, s.playerCount, s.lootEnabled !== false);
+    s.room = newRoomState(room, s.playerCount, s.lootEnabled !== false, s.gearEnabled !== false);
+    // budget de bonus temporaires de la salle : tiré sur le PRNG isolé de l'équipement (jamais sur le flux principal ni celui du butin de vie)
+    if (s.gearEnabled !== false) s.room.buffBudget = rollBuffBudget(s.playerCount, () => nextRandom(this.gearRng));
     s.lootDryKills = 0; // compteur anti-malchance remis à zéro à chaque début de salle (start / next / restart)
     s.phase = 'playing';
     s.phaseTimerMs = 0;
@@ -1115,6 +1516,11 @@ export function createSimulation(config: SimConfig, level: LevelDef): GameSimula
   const first = level.rooms[startIndex];
   const spawns = spawnPixels(first);
   const players = setups.map((setup, i) => createPlayerState(setup, spawns[i % spawns.length]));
+  // reprise (« Continuer ») : équipement de départ des joueurs, normalisé (une donnée invalide devient un emplacement vide)
+  players.forEach((p, i) => {
+    const g = config.initialGear?.[i];
+    if (g) p.loadout = { ...normalizeGear(g), buffs: [] };
+  });
   const state: GameState = {
     version: 1,
     tick: 0,
@@ -1127,13 +1533,16 @@ export function createSimulation(config: SimConfig, level: LevelDef): GameSimula
     roomIndex: startIndex,
     phase: 'playing',
     phaseTimerMs: 0,
-    room: newRoomState(first, players.length, config.loot !== false),
+    room: newRoomState(first, players.length, config.loot !== false, config.gear !== false),
     objectives: createObjectives(level, players.length),
     clearedRooms: level.rooms.slice(0, startIndex).map((r) => r.id),
     lootEnabled: config.loot !== false,
     lootRngState: seedToState((Number.isFinite(config.seed) ? Math.floor(config.seed) | 0 : 0) ^ LOOT_SEED_XOR),
     lootDryKills: 0,
     nextPickupId: 1,
+    gearEnabled: config.gear !== false,
+    gearRngState: seedToState((Number.isFinite(config.seed) ? Math.floor(config.seed) | 0 : 0) ^ GEAR_SEED_XOR),
+    nextGearDropId: 1,
   };
   // Reprise : les objectifs personnels des salles précédentes sont considérés accomplis (ils persistent entre salles).
   if (startIndex > 0) {

@@ -135,6 +135,12 @@ export interface BotRunOptions {
    * `loot: true` (nourriture et cristaux au sol, ramassés par contact) et, pour qu'ils les cherchent, `background: { eat: true }` (voir `BackgroundOptions`).
    */
   loot?: boolean;
+  /**
+   * Équipement de la simulation (`SimConfig.gear`) : DÉFAUT FALSE pour les bots (même principe que `loot`) : les bots existants ne cherchent pas les objets mais
+   * les traverseraient par hasard, ce qui changerait leurs résultats ; désactivé, leurs parties sont strictement celles d'avant l'ajout de l'équipement.
+   * Pour mesurer le jeu réel : `gear: true` et, pour qu'ils les cherchent, `background: { pickGear: true }`.
+   */
+  gear?: boolean;
   /** Conserver les files d'actions quand une salle est (re)chargée (défaut false : elles sont vidées, leurs coordonnées n'ont plus de sens). */
   keepQueuesAcrossRooms?: boolean;
 }
@@ -456,7 +462,7 @@ export class BotRun {
       characterId: chars[i] ?? CHARACTER_IDS[i % CHARACTER_IDS.length],
       difficulty: diffs[i] ?? 2,
     }));
-    let sim = createSimulation({ levelId: level.id, players, seed: opts.seed ?? 1, loot: opts.loot === true }, level);
+    let sim = createSimulation({ levelId: level.id, players, seed: opts.seed ?? 1, loot: opts.loot === true, gear: opts.gear === true }, level);
     const start = Math.max(0, Math.min(level.rooms.length - 1, Math.floor(opts.startRoomIndex ?? 0)));
     if (start > 0) sim = jumpToRoom(sim, level, start);
     this.sim = sim;

@@ -22,6 +22,7 @@ import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS, SIM_STEP_MS } from '../core/constants';
 import { CHARACTERS } from '../core/characters';
 import { AutoSaver } from '../core/autoSave';
+import { cloneGear } from '../core/gear';
 import { createSimulation, type GameSimulation } from '../core/simulation';
 import { ActivityWatcher, takeCarriedActivity } from '../attract/activity';
 import { ATTRACT_TIMEOUT_FADE_MS } from '../attract/config';
@@ -54,6 +55,7 @@ import { ViewRig } from '../render/camera';
 import { DEPTH_LABELS, FxManager, damageNumberColor, ensureFxTextures } from '../render/fx';
 import { SpecialFx } from '../render/specialFx';
 import { CRYSTAL_HALO_COLOR, pickupHaloColor, pickupTextColor, pickupTextFor } from '../render/lifeFx';
+import { GEAR_FLOAT_WRAP_PX, buffColor, buffStartedText, gearLevelColor, gearPickedColor, gearPickedText, gearSwappedText } from '../render/gearFx';
 import { CallWorldFx } from '../render/callHud';
 import { heroFrame } from '../render/art/animations';
 import { spriteTier } from '../render/art/enemyTiers';
@@ -278,7 +280,11 @@ export class GameScene extends Phaser.Scene {
     const seed = tut ? TUTORIAL_SEED : demo ? demo.seed : (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
     // Salle de départ : reprise d'une sauvegarde ou dev `?room=N` (honorée par la simulation, voir SimConfig.startRoomIndex).
     const players = setups.slice(0, playerCount);
-    this.sim = createSimulation({ levelId: level.id, players, seed, startRoomIndex: this.session.startRoomIndex }, level);
+    // Équipement : actif en partie normale uniquement (la démo et le tutoriel ignorent les objets) ; « Continuer » restitue l'équipement sauvegardé.
+    this.sim = createSimulation(
+      { levelId: level.id, players, seed, startRoomIndex: this.session.startRoomIndex, gear: !tut && !demo, initialGear: tut || demo ? undefined : this.session.startGear },
+      level,
+    );
 
     // Sauvegarde automatique : désactivée en démarrage rapide, `?nosave=1` et paramètres de dev (la vraie sauvegarde n'est jamais écrasée).
     // Tutoriel : AUCUN AutoSaver (le niveau n'est pas dans le contexte de sauvegarde, et rien ne doit jamais être écrit).
@@ -290,6 +296,7 @@ export class GameScene extends Phaser.Scene {
         levelId: level.id,
         players,
         completedLevelIds: this.session.completedLevelIds,
+        gearProvider: () => this.sim.state.players.map((p) => cloneGear(p.loadout)), // équipement porté, sauvegardé au début de chaque salle
         enabled: isSavingAllowed({ quick: getQuickParams()?.quick === true, search }),
         onError: (err) => {
           const text = err.code === 'quota' ? t('save.error.quota') : t('save.error.unavailable');
@@ -323,6 +330,7 @@ export class GameScene extends Phaser.Scene {
       level,
       layout: this.layout,
       specialHint: (id) => specialHintLabel(inputManager.getAssignments()[id], inputManager.getBindings().special),
+      gear: state.gearEnabled !== false, // démo et tutoriel : pas de rangée d'équipement
     };
     createSeparators(this.ctx, this.layout);
     this.huds = state.players.slice(0, viewCount).map((p) => new PlayerHud(env, p.id, p));
@@ -649,6 +657,54 @@ export class GameScene extends Phaser.Scene {
         fx.ring(e.pos.x, e.pos.y, CRYSTAL_HALO_COLOR, 30, 520);
         fx.sparkles(pos.x, pos.y - 6, CRYSTAL_HALO_COLOR, 12, 8);
         fx.floatText(pos.x, pos.y - 12, t('loot.crystal.heal', { n: e.healed }), CRYSTAL_HALO_COLOR, 1000, 18, 8);
+        break;
+      }
+      case 'gearDropped':
+        // l'objet apparaît dans un éclat de la couleur de son niveau (le halo permanent est dessiné par LifeViews)
+        fx.sparkles(e.pos.x, e.pos.y - 4, gearLevelColor(e.item.level), e.scattered ? 5 : 8, 6);
+        break;
+      case 'gearPicked': {
+        const pos = this.playerPos(e.playerId, state);
+        const picker = state.players[e.playerId];
+        const ranged = picker ? CHARACTERS[picker.characterId].attack.kind === 'ranged' : false;
+        fx.sparkles(pos.x, pos.y - 6, gearPickedColor(e.item), 10, 7);
+        fx.ring(pos.x, pos.y, gearPickedColor(e.item), 20, 380);
+        // « Bottes ailées III : +30 % vitesse » (retour à la ligne : le texte reste dans la vue en écran partagé)
+        fx.floatText(pos.x, pos.y - 14, gearPickedText(e.item, ranged, t), gearPickedColor(e.item), 1500, 18, 8, GEAR_FLOAT_WRAP_PX);
+        break;
+      }
+      case 'gearSwapped': {
+        // échange manuel : l'accessoire équipé s'annonce comme un ramassage ; l'ancien (lâché aux pieds) arrive dans le `gearDropped` suivant
+        const pos = this.playerPos(e.playerId, state);
+        fx.sparkles(pos.x, pos.y - 6, gearPickedColor(e.item), 10, 7);
+        fx.ring(pos.x, pos.y, gearPickedColor(e.item), 20, 380);
+        fx.floatText(pos.x, pos.y - 14, gearSwappedText(e.item, t), gearPickedColor(e.item), 1500, 18, 8, GEAR_FLOAT_WRAP_PX);
+        break;
+      }
+      case 'buffDropped':
+        fx.sparkles(e.pos.x, e.pos.y - 4, buffColor(e.kind), 8, 6);
+        break;
+      case 'buffStarted': {
+        // le bonus (ramassé, ou reçu du cor de guerre d'un allié) démarre : anneau et texte flottant de la couleur du bonus
+        const pos = this.playerPos(e.playerId, state);
+        const holder = state.players[e.playerId];
+        const buff = holder?.loadout?.buffs?.find((b) => b.kind === e.kind);
+        fx.sparkles(pos.x, pos.y - 6, buffColor(e.kind), 10, 7);
+        fx.ring(pos.x, pos.y, buffColor(e.kind), 20, 380);
+        fx.floatText(pos.x, pos.y - 14, buffStartedText(e.kind, buff?.power, e.durationMs, t), buffColor(e.kind), 1500, 18, 8, GEAR_FLOAT_WRAP_PX);
+        break;
+      }
+      case 'vampireHeal': {
+        // +1 PV de l'anneau du vampire : petit texte rouge sombre, discret (il peut tomber souvent)
+        const pos = this.playerPos(e.playerId, state);
+        fx.floatText(pos.x, pos.y - 12, t('gear.vampire.heal', { n: e.healed }), 0xff5a7a, 700, 14, 8);
+        break;
+      }
+      case 'gearLost': {
+        // les icônes éclatent (une gerbe par objet, de la couleur de son niveau), puis « Équipement perdu ! »
+        const pos = this.playerPos(e.playerId, state);
+        for (const item of e.items) fx.burst(pos.x, pos.y - 6, 9, gearLevelColor(item.level), 64, 560, 70, 1.4);
+        fx.floatText(pos.x, pos.y - 16, t('gear.lost'), 0xff6a6a, 1500, 20, 9);
         break;
       }
       case 'specialUsed': {

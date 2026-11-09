@@ -75,6 +75,24 @@ export const EXTRA_FRAME_SPECS: readonly FrameSpec[] = [
   { name: 'heal_crystal_0', size: [16, 16] },
   { name: 'heal_crystal_1', size: [16, 16] },
   { name: 'heal_crystal_used', size: [16, 16] },
+  // ── Équipement (src/render/art/gear.ts) : 5 emplacements × 3 niveaux, objet au sol 16×16 + icône de HUD 8×8 ──
+  ...(['boots', 'protection', 'artifact', 'magic', 'weapon'] as const).flatMap((slot): FrameSpec[] =>
+    [1, 2, 3].flatMap((level): FrameSpec[] => [
+      { name: `gear_${slot}_${level}`, size: [16, 16] },
+      { name: `gear_icon_${slot}_${level}`, size: [8, 8] },
+    ]),
+  ),
+  // accessoires : lanterne, aimant, cor de guerre × 3 niveaux, anneau du vampire (niveau III seulement) ; bonus temporaires : speed, rage, star
+  ...(['lantern', 'magnet', 'warhorn', 'vampire'] as const).flatMap((kind): FrameSpec[] =>
+    (kind === 'vampire' ? [3] : [1, 2, 3]).flatMap((level): FrameSpec[] => [
+      { name: `gear_accessory_${kind}_${level}`, size: [16, 16] },
+      { name: `gear_icon_accessory_${kind}_${level}`, size: [8, 8] },
+    ]),
+  ),
+  ...(['speed', 'rage', 'star'] as const).flatMap((kind): FrameSpec[] => [
+    { name: `gear_buff_${kind}`, size: [16, 16] },
+    { name: `gear_icon_buff_${kind}`, size: [8, 8] },
+  ]),
 ];
 
 /** Toutes les frames du contrat, avec leurs tailles. */

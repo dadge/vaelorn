@@ -1,14 +1,17 @@
 /**
- * Vues des sources de vie : nourriture au sol (cœur + halo, clignotement des 3 dernières secondes) et cristaux de soin
+ * Vues des sources de vie ET de l'équipement au sol (objets d'équipement : dessin + halo doux de la couleur du niveau, SANS cadre, clignotement des
+ * 4 dernières secondes) : nourriture au sol (cœur + halo, clignotement des 3 dernières secondes) et cristaux de soin
  * (cristal animé + halo vert, étiquette de proximité, version « vidée » après usage). Pur rendu : elles LISENT `GameState.room.pickups` /
  * `healCrystals` et ne décident de rien. Une instance vit le temps de la scène ; `build(room)` / `clear()` à chaque changement de salle.
  */
 import type Phaser from 'phaser';
 import { TILE } from '../core/constants';
-import type { GameState, HealCrystalDef, HealCrystalState, PickupState, RoomDef } from '../core/types';
+import { swapCandidate } from '../core/gear';
+import type { BuffDropState, GameState, GearDropState, HealCrystalDef, HealCrystalState, PickupState, RoomDef } from '../core/types';
 import { t } from '../i18n/i18n';
 import { ATLAS_KEY } from '../render/art';
 import { DEPTH_LABELS, FX_GLOW_KEY, makeWorldText } from '../render/fx';
+import { GEAR_SWAP_PROMPT_KEY, buffColor, buffFrame, gearAlpha, gearBob, gearFrame, gearLabel, gearLevelColor } from '../render/gearFx';
 import { CRYSTAL_HALO_COLOR, crystalFrame, pickupAlpha, pickupBob, pickupFrame, pickupHaloColor } from '../render/lifeFx';
 import { DEPTH, type ViewContext } from './common';
 
@@ -42,12 +45,21 @@ interface CrystalView {
 
 export class LifeViews {
   private readonly pickups = new Map<number, PickupView>();
+  /** Objets d'équipement au sol (par id de `GearDropState`). */
+  private readonly gears = new Map<number, PickupView>();
+  /** Bonus temporaires au sol (par id de `BuffDropState`). */
+  private readonly buffs = new Map<number, PickupView>();
+  /** Invites « A : échanger » au-dessus des accessoires échangeables (par id d'objet au sol). */
+  private readonly swapLabels = new Map<number, Phaser.GameObjects.Text>();
   private crystals: CrystalView[] = [];
   private frameNo = 0;
   /** Moins d'animation demandé : pas de clignotement, de flottement ni de pulsation du halo (relu à chaque salle). */
   private reducedMotion = prefersReducedMotion();
   /** Ids de nourritures à retirer (réutilisé, pas d'allocation par frame). */
   private readonly stale: number[] = [];
+  private readonly staleGear: number[] = [];
+  private readonly staleBuff: number[] = [];
+  private readonly staleLabel: number[] = [];
 
   constructor(private readonly ctx: ViewContext) {}
 
@@ -106,7 +118,115 @@ export class LifeViews {
         this.pickups.delete(this.stale[i]);
       }
     }
+    this.syncGear(state.room.gearDrops ?? [], timeMs);
+    this.syncBuffDrops(state.room.buffDrops ?? [], timeMs);
+    this.syncSwapPrompts(state);
     this.syncCrystals(state, timeMs);
+  }
+
+  /** Objets d'équipement au sol : même halo doux que les cœurs (teinté par le niveau), clignotement des 4 dernières secondes, `prefers-reduced-motion` respecté. */
+  private syncGear(list: readonly GearDropState[], timeMs: number): void {
+    const { scene, rig } = this.ctx;
+    const rm = this.reducedMotion;
+    for (let i = 0; i < list.length; i++) {
+      const g = list[i];
+      let v = this.gears.get(g.id);
+      if (!v) {
+        const halo = rig.registerWorld(scene.add.image(g.pos.x, g.pos.y, FX_GLOW_KEY));
+        halo.setBlendMode(1).setTint(gearLevelColor(g.item.level)).setScale(0.9);
+        const sprite = rig.registerWorld(scene.add.image(g.pos.x, g.pos.y, ATLAS_KEY, gearFrame(g.item)));
+        v = { sprite, halo, seen: 0 };
+        this.gears.set(g.id, v);
+      }
+      v.seen = this.frameNo;
+      const bob = gearBob(timeMs, g.id, rm);
+      const a = gearAlpha(g.ttlMs, timeMs, rm);
+      v.sprite.setPosition(g.pos.x, g.pos.y - 3 + bob).setAlpha(a).setDepth(DEPTH.flat + 0.6);
+      v.halo.setPosition(g.pos.x, g.pos.y - 3 + bob).setAlpha(a * (rm ? 0.4 : 0.4 + 0.12 * Math.sin(timeMs / 170 + g.id))).setDepth(DEPTH.flat + 0.45);
+    }
+    if (this.gears.size > list.length) {
+      this.staleGear.length = 0;
+      this.gears.forEach((v, id) => {
+        if (v.seen !== this.frameNo) this.staleGear.push(id);
+      });
+      for (let i = 0; i < this.staleGear.length; i++) {
+        const v = this.gears.get(this.staleGear[i]);
+        if (v) {
+          v.sprite.destroy();
+          v.halo.destroy();
+        }
+        this.gears.delete(this.staleGear[i]);
+      }
+    }
+  }
+
+  /** Bonus temporaires au sol : même halo doux (teinté par la sorte), clignotement des 4 dernières secondes, `prefers-reduced-motion` respecté. */
+  private syncBuffDrops(list: readonly BuffDropState[], timeMs: number): void {
+    const { scene, rig } = this.ctx;
+    const rm = this.reducedMotion;
+    for (let i = 0; i < list.length; i++) {
+      const g = list[i];
+      let v = this.buffs.get(g.id);
+      if (!v) {
+        const halo = rig.registerWorld(scene.add.image(g.pos.x, g.pos.y, FX_GLOW_KEY));
+        halo.setBlendMode(1).setTint(buffColor(g.kind)).setScale(0.9);
+        const sprite = rig.registerWorld(scene.add.image(g.pos.x, g.pos.y, ATLAS_KEY, buffFrame(g.kind)));
+        v = { sprite, halo, seen: 0 };
+        this.buffs.set(g.id, v);
+      }
+      v.seen = this.frameNo;
+      const bob = gearBob(timeMs, g.id, rm);
+      const a = gearAlpha(g.ttlMs, timeMs, rm);
+      v.sprite.setPosition(g.pos.x, g.pos.y - 3 + bob).setAlpha(a).setDepth(DEPTH.flat + 0.6);
+      v.halo.setPosition(g.pos.x, g.pos.y - 3 + bob).setAlpha(a * (rm ? 0.4 : 0.4 + 0.12 * Math.sin(timeMs / 170 + g.id))).setDepth(DEPTH.flat + 0.45);
+    }
+    if (this.buffs.size > list.length) {
+      this.staleBuff.length = 0;
+      this.buffs.forEach((v, id) => {
+        if (v.seen !== this.frameNo) this.staleBuff.push(id);
+      });
+      for (let i = 0; i < this.staleBuff.length; i++) {
+        const v = this.buffs.get(this.staleBuff[i]);
+        if (v) {
+          v.sprite.destroy();
+          v.halo.destroy();
+        }
+        this.buffs.delete(this.staleBuff[i]);
+      }
+    }
+  }
+
+  /**
+   * Invite « A : échanger » (+ nom de l'accessoire) au-dessus d'un accessoire d'une autre sorte que celui d'un joueur vivant qui se tient dessus (`swapCandidate`,
+   * la même règle que la simulation). Un seul texte par objet, quel que soit le nombre de joueurs concernés.
+   */
+  private syncSwapPrompts(state: GameState): void {
+    const drops = state.room.gearDrops ?? [];
+    const seen = this.frameNo;
+    if (drops.length > 0) {
+      for (const p of state.players) {
+        const d = swapCandidate(drops, p);
+        if (!d) continue;
+        let label = this.swapLabels.get(d.id);
+        if (!label) {
+          const { scene, rig, zoom } = this.ctx;
+          label = rig.registerWorld(makeWorldText(scene, zoom, `${gearLabel(d.item, t)}\n${t(GEAR_SWAP_PROMPT_KEY)}`, { size: 8, color: 0xffffff, wrap: 96 }));
+          label.setDepth(DEPTH_LABELS);
+          this.swapLabels.set(d.id, label);
+        }
+        label.setVisible(true).setAlpha(1).setPosition(d.pos.x, d.pos.y - 16).setData('seen', seen);
+      }
+    }
+    if (this.swapLabels.size > 0) {
+      this.staleLabel.length = 0;
+      this.swapLabels.forEach((l, id) => {
+        if (l.getData('seen') !== seen) this.staleLabel.push(id);
+      });
+      for (let i = 0; i < this.staleLabel.length; i++) {
+        this.swapLabels.get(this.staleLabel[i])?.destroy();
+        this.swapLabels.delete(this.staleLabel[i]);
+      }
+    }
   }
 
   private createPickup(p: PickupState): PickupView {
@@ -154,6 +274,8 @@ export class LifeViews {
   /** Re-traduit les étiquettes (changement de langue). */
   retranslate(): void {
     for (const c of this.crystals) c.label.setText(t('loot.crystal.label'));
+    for (const l of this.swapLabels.values()) l.destroy(); // recréées dans la nouvelle langue au prochain `sync`
+    this.swapLabels.clear();
   }
 
   /** Détruit tout (changement de salle). */
@@ -163,6 +285,18 @@ export class LifeViews {
       v.halo.destroy();
     }
     this.pickups.clear();
+    for (const v of this.gears.values()) {
+      v.sprite.destroy();
+      v.halo.destroy();
+    }
+    this.gears.clear();
+    for (const v of this.buffs.values()) {
+      v.sprite.destroy();
+      v.halo.destroy();
+    }
+    this.buffs.clear();
+    for (const l of this.swapLabels.values()) l.destroy();
+    this.swapLabels.clear();
     for (const c of this.crystals) {
       c.sprite.destroy();
       c.halo.destroy();

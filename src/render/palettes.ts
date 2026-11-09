@@ -497,6 +497,30 @@ export const LOOT_COLORS = {
   usedShade: 0x46525c,
 } as const;
 
+/**
+ * Équipement (PROVISOIRE, `art/gear.ts`) : cuir, métal, or, bleu, pourpre, vert, rouge, ailes. Une lettre par couleur dans les dessins (voir `GEAR_MAP`).
+ */
+export const GEAR_COLORS = {
+  leatherDark: 0x6a4222,
+  leather: 0x9a6636,
+  leatherLight: 0xd09a58,
+  metalDark: 0x5c6478,
+  metal: 0x9aa4b8,
+  metalLight: 0xe2e8f6,
+  goldDark: 0xb07a14,
+  gold: 0xf5c53d,
+  goldLight: 0xfff0a0,
+  blue: 0x3a68c0,
+  blueLight: 0x8fb8ff,
+  purple: 0x7a4ac8,
+  purpleLight: 0xc0a0ff,
+  green: 0x3fcf86,
+  greenLight: 0xb8ffd8,
+  red: 0xd0384a,
+  wing: 0xb8ecff,
+  white: 0xffffff,
+} as const;
+
 export const LIGHT_COLORS = {
   /** Charbon éteint / bois calciné. */
   coal: 0x2a1c26,
@@ -560,7 +584,7 @@ function collect(obj: unknown, out: Set<number>): void {
 export const ALL_PALETTE_COLORS: ReadonlySet<number> = (() => {
   const s = new Set<number>();
   collect(
-    [THEME_PALETTES, HERO_COLORS, ENEMY_COLORS, MINIBOSS_COLORS, BOSS_COLORS, HURT_COLORS, MECH_COLORS, PUZZLE_COLORS, RUNE_COLORS, DECOR_COLORS, FX_COLORS, UI_COLORS, LIGHT_COLORS, LOOT_COLORS, SLOT_SHADES, SLOT_LIGHTS, PLAYER_COLORS, OUTLINE, WHITE, EYE],
+    [THEME_PALETTES, HERO_COLORS, ENEMY_COLORS, MINIBOSS_COLORS, BOSS_COLORS, HURT_COLORS, MECH_COLORS, PUZZLE_COLORS, RUNE_COLORS, DECOR_COLORS, FX_COLORS, UI_COLORS, LIGHT_COLORS, LOOT_COLORS, GEAR_COLORS, SLOT_SHADES, SLOT_LIGHTS, PLAYER_COLORS, OUTLINE, WHITE, EYE],
     s,
   );
   return s;

@@ -7,6 +7,7 @@
  *
  * Pour ranged : `attack.range` ≈ projectile.speed × lifeMs / 1000.
  */
+import { effectiveSpecialCooldownMs } from './gear';
 import type { CharacterDef, CharacterId, PlayerState, SpecialDef } from './types';
 
 /** Ordre canonique (écran de sélection) : famille d'abord, puis personnages libres. */
@@ -198,13 +199,14 @@ export function getSpecialDef(characterId: CharacterId): SpecialDef | undefined 
 
 /**
  * Niveau de recharge de l'attaque spéciale pour le HUD : 0 = vide (vient d'être utilisée) … 1 = prête.
- * Pur ; 0 si le personnage n'a pas de spécial ; toujours borné à [0, 1].
- * @param p état du joueur (`specialCooldownMs` est lu)
+ * Pur ; 0 si le personnage n'a pas de spécial ; toujours borné à [0, 1]. La recharge de référence est la recharge EFFECTIVE (Artefact équipé).
+ * @param p état du joueur (`specialCooldownMs` et, s'il existe, `loadout` sont lus)
  * @param character définition du personnage du joueur
  */
-export function specialFraction(p: Pick<PlayerState, 'specialCooldownMs'>, character: CharacterDef): number {
+export function specialFraction(p: Pick<PlayerState, 'specialCooldownMs'> & { loadout?: PlayerState['loadout'] }, character: CharacterDef): number {
   const def = character.special;
   if (!def || !(def.cooldownMs > 0)) return 0;
   const cd = Number.isFinite(p.specialCooldownMs) ? p.specialCooldownMs : 0;
-  return Math.min(1, Math.max(0, 1 - cd / def.cooldownMs));
+  const full = effectiveSpecialCooldownMs(def.cooldownMs, p.loadout);
+  return full > 0 ? Math.min(1, Math.max(0, 1 - cd / full)) : 1;
 }

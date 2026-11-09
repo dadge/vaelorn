@@ -40,9 +40,10 @@ function level(rooms: RoomDef[]): LevelDef {
   return makeTestLevel({ rooms });
 }
 
-function mk(n: number, r: RoomDef = room('r1'), opts: { seed?: number; loot?: boolean; rooms?: RoomDef[] } = {}): GameSimulation {
+/** NB : l'équipement (`gear`) est DÉSACTIVÉ par défaut ici : cette suite mesure les sources de vie seules (l'exclusion cœur / objet d'équipement change qui laisse quoi). */
+function mk(n: number, r: RoomDef = room('r1'), opts: { seed?: number; loot?: boolean; gear?: boolean; rooms?: RoomDef[] } = {}): GameSimulation {
   const lv = level(opts.rooms ?? [r, room('r2')]);
-  return createSimulation({ levelId: lv.id, players: setups(n), seed: opts.seed ?? 99, loot: opts.loot }, lv);
+  return createSimulation({ levelId: lv.id, players: setups(n), seed: opts.seed ?? 99, loot: opts.loot, gear: opts.gear === true }, lv);
 }
 
 function stepN(s: GameSimulation, n: number, inputs: TickInputs | ((i: number) => TickInputs) = {}): SimEvent[] {

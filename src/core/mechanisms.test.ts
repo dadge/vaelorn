@@ -65,6 +65,7 @@ function makePlayer(id: PlayerId, tile: TileXY): PlayerState {
     callMs: 0,
     callCooldownMs: 0,
     moving: false,
+    loadout: { boots: 0, protection: 0, artifact: 0, magic: 0, weapon: 0, accessory: null, buffs: [] },
   };
 }
 

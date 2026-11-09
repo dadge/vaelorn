@@ -18,6 +18,7 @@ import { CALL_COOLDOWN_MS, CALL_DURATION_MS, CALL_FREEZE_MS, TORCH_LOW_FRACTION,
 import { PLAYER_INVULN_MS, REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW } from './constants';
 import { damageToPlayer, maxHpFor, REVIVE_INVULN_MS } from './balance';
 import { getCharacter } from './characters';
+import { createLoadout, damageReduction, isStarActive, lanternReduction, reviveTimeReduction, stepBuffs } from './gear';
 import { distSq } from './geometry';
 import type { PlayerId, PlayerSetup, PlayerState, SimEvent, Vec2 } from './types';
 
@@ -55,6 +56,7 @@ export function createPlayerState(setup: PlayerSetup, spawnPx: Vec2): PlayerStat
     callMs: 0,
     callCooldownMs: 0,
     moving: false,
+    loadout: createLoadout(),
   };
 }
 
@@ -93,10 +95,10 @@ export function markPlayerDown(p: PlayerState): void {
  * @returns `applied` : dégâts réels calculés (0 si ignoré) ; `downed` : true si CE coup met le joueur à terre
  */
 export function applyDamageToPlayer(p: PlayerState, rawDamage: number): { applied: number; downed: boolean } {
-  if (p.status === 'down' || p.invulnMs > 0 || !(rawDamage > 0)) {
-    return { applied: 0, downed: false };
+  if (p.status === 'down' || p.invulnMs > 0 || !(rawDamage > 0) || isStarActive(p.loadout)) {
+    return { applied: 0, downed: false }; // l'étoile (bonus temporaire) rend invulnérable, comme l'invulnérabilité résiduelle
   }
-  const applied = damageToPlayer(rawDamage, getCharacter(p.characterId), p.difficulty);
+  const applied = damageToPlayer(rawDamage, getCharacter(p.characterId), p.difficulty, damageReduction(p.loadout));
   p.hp = Math.max(0, p.hp - applied);
   if (p.hp <= 0) {
     markPlayerDown(p);
@@ -114,9 +116,12 @@ export function isRescuing(p: PlayerState): boolean {
   return p.status === 'alive' && p.revivingId !== null;
 }
 
-/** Durée de relevage nominale (ms) quand `reviver` relève quelqu'un : `REVIVE_DURATION_MS × reviveTimeMult`. */
+/**
+ * Durée de relevage nominale (ms) quand `reviver` relève quelqu'un : `REVIVE_DURATION_MS × reviveTimeMult × (1 - réduction de la Magie)`
+ * (équipement de CELUI QUI RELÈVE, plafonné à -50 %, voir `balance.ts` [B18]/[B19]).
+ */
 export function reviveDurationFor(reviver: PlayerState): number {
-  return REVIVE_DURATION_MS * getCharacter(reviver.characterId).reviveTimeMult;
+  return REVIVE_DURATION_MS * getCharacter(reviver.characterId).reviveTimeMult * (1 - reviveTimeReduction(reviver.loadout));
 }
 
 /**
@@ -322,6 +327,7 @@ export function stepPlayerTimers(p: PlayerState, dtMs: number): void {
   p.specialAnimMs = Math.max(0, (Number.isFinite(p.specialAnimMs) ? p.specialAnimMs : 0) - dtMs);
   p.callMs = stepCallTimer(p.callMs, dtMs);
   p.callCooldownMs = stepCallTimer(p.callCooldownMs, dtMs);
+  if (p.loadout) stepBuffs(p.loadout, dtMs); // bonus temporaires (potion, rage, étoile, cor)
 }
 
 // ───────────────────────────── Appel ─────────────────────────────
@@ -391,7 +397,7 @@ export function stepPlayerTorch(p: PlayerState, dtMs: number, roomDark: boolean)
     p.torchMs = 0;
     return [];
   }
-  const after = Math.max(0, before - dtMs);
+  const after = Math.max(0, before - dtMs * (1 - lanternReduction(p.loadout))); // Lanterne : la torche s'use 30 / 50 / 70 % moins vite
   p.torchMs = after;
   const events: SimEvent[] = [];
   const threshold = TORCH_MAX_MS * TORCH_LOW_FRACTION;

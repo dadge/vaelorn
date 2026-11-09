@@ -49,7 +49,14 @@ export type SfxName =
   // sources de vie
   | 'pickupDrop'
   | 'pickup'
-  | 'crystalHeal';
+  | 'crystalHeal'
+  // équipement
+  | 'gearDrop'
+  | 'gearPick'
+  | 'gearLost'
+  | 'gearSwap'
+  | 'buffStart'
+  | 'vampireHeal';
 
 interface SfxSpec {
   /** Fréquence de départ / d'arrivée (Hz). */
@@ -108,6 +115,14 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   pickupDrop: { f0: 700, f1: 980, durMs: 70, type: 'sine', vol: 0.025 },
   pickup: { f0: 620, f1: 930, durMs: 110, type: 'triangle', vol: 0.06, then: { f0: 930, f1: 1400, delayMs: 90 } },
   crystalHeal: { f0: 440, f1: 880, durMs: 240, type: 'sine', vol: 0.07, then: { f0: 660, f1: 1320, delayMs: 140 } },
+  // équipement (placeholders) : tintement à l'apparition, fanfare montante au ramassage, chute grave quand tout est perdu
+  gearDrop: { f0: 820, f1: 1180, durMs: 80, type: 'triangle', vol: 0.03 },
+  gearPick: { f0: 520, f1: 780, durMs: 110, type: 'square', vol: 0.05, then: { f0: 780, f1: 1170, delayMs: 100 } },
+  gearLost: { f0: 330, f1: 90, durMs: 420, type: 'sawtooth', vol: 0.08, then: { f0: 220, f1: 70, delayMs: 160 } },
+  // accessoires et bonus temporaires (placeholders) : double clic à l'échange, arpège rapide au démarrage d'un bonus, petite goutte grave pour l'anneau du vampire
+  gearSwap: { f0: 600, f1: 420, durMs: 70, type: 'square', vol: 0.05, then: { f0: 420, f1: 700, delayMs: 80 } },
+  buffStart: { f0: 500, f1: 700, durMs: 80, type: 'triangle', vol: 0.06, then: { f0: 700, f1: 1050, delayMs: 70 } },
+  vampireHeal: { f0: 260, f1: 180, durMs: 120, type: 'sine', vol: 0.05 },
 };
 
 /** Son d'une attaque spéciale selon sa famille. Pur. */
@@ -198,6 +213,20 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
       return 'pickup';
     case 'crystalUsed':
       return 'crystalHeal';
+    case 'gearDropped':
+      return 'gearDrop';
+    case 'gearPicked':
+      return 'gearPick';
+    case 'gearLost':
+      return 'gearLost';
+    case 'gearSwapped':
+      return 'gearSwap';
+    case 'buffDropped':
+      return 'gearDrop';
+    case 'buffStarted':
+      return 'buffStart';
+    case 'vampireHeal':
+      return 'vampireHeal';
     default:
       return null;
   }

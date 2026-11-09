@@ -20,7 +20,7 @@ import { canOccupy } from '../core/collision';
 import { dist } from '../core/geometry';
 import { requiredPushers } from '../core/mechanisms';
 import type { BlockState, Dir, EnemyKind, PlayerId, TileXY, Vec2 } from '../core/types';
-import { decideCombat, decideEat, decideInPlace, decideRevive, moveVector, stepDistanceOf, type FollowGoal } from './botBrain';
+import { decideCombat, decideEat, decideGear, decideInPlace, decideRevive, moveVector, stepDistanceOf, type FollowGoal } from './botBrain';
 import {
   makeAction,
   resolveTarget,
@@ -544,6 +544,13 @@ export function attackUntilClear(opts: AttackUntilClearOptions = {}): BotAction 
         if (eat) {
           stallMs = 0;
           ctx.set(eat);
+          return 'running';
+        }
+        // Brique « ramasse l'équipement proche » (option `pickGear`, désactivée par défaut).
+        const gearMove = ctx.bot.opts.pickGear ? decideGear(ctx.bot) : null;
+        if (gearMove) {
+          stallMs = 0;
+          ctx.set(gearMove);
           return 'running';
         }
         const c = decideCombat(ctx.bot, { mode: 'chase', radius: Infinity, kinds });

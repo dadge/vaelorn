@@ -18,7 +18,10 @@ import { level3 } from '../levels/level3';
 import { level4 } from '../levels/level4';
 import { level5 } from '../levels/level5';
 import { level6 } from '../levels/level6';
+import { GEAR_BUDGET_PER_PLAYER } from '../core/balance';
+import { rollBuffBudget } from '../core/gear';
 import { mostWoundedFraction } from '../core/loot';
+import { nextRandom, type RngHolder } from '../core/rng';
 import { createHealCrystalStates } from '../core/simulation';
 import type { LevelDef, SimEvent } from '../core/types';
 import { BotRun, runLevelScripts, type BackgroundOptions, type LevelRunOptions, type RoomScript } from './botKit';
@@ -97,6 +100,27 @@ export function enableLoot(run: BotRun, eat: Partial<BackgroundOptions> = {}): v
   run.state.lootEnabled = true;
   run.state.room.healCrystals = createHealCrystalStates(run.room, run.playerCount, true);
   run.setBackground('all', { eat: true, ...eat });
+}
+
+/**
+ * Active l'ÉQUIPEMENT sur une partie de bots déjà créée (les fabriques des niveaux ne passent pas `gear`) : bascule l'interrupteur de l'état, pose le budget de la
+ * salle courante (nombre de joueurs ; les salles suivantes le recréent elles-mêmes) et active la brique `pickGear` de tous les bots (`gear` : surcharge de
+ * `gearRadius`, ou `pickGear: false` pour des bots « passifs » qui ne ramassent que par contact fortuit). Mesure de l'équipement : voir le README (« calibrage mesuré »).
+ */
+export function enableGear(run: BotRun, gear: Partial<BackgroundOptions> = {}): void {
+  run.state.gearEnabled = true;
+  run.state.room.gearBudget = run.playerCount * GEAR_BUDGET_PER_PLAYER;
+  // budget de bonus temporaires de la salle courante, tiré sur le flux isolé de l'équipement comme à chaque entrée de salle
+  const holder: RngHolder = {
+    get rngState(): number {
+      return run.state.gearRngState as number;
+    },
+    set rngState(v: number) {
+      run.state.gearRngState = v;
+    },
+  };
+  run.state.room.buffBudget = rollBuffBudget(run.playerCount, () => nextRandom(holder));
+  run.setBackground('all', { pickGear: true, ...gear });
 }
 
 /** Compteurs d'événements de sources de vie, cumulés sur une partie. */

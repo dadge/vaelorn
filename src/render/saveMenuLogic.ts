@@ -9,6 +9,7 @@
  * (sélection par défaut) le choix SÛR (annuler / conserver).
  */
 import type { MenuAction } from '../input/actions';
+import { cloneGear } from '../core/gear';
 import { playersOfSave, describeResume, type ResumeInfo, type SaveContext, type SaveGame, type SaveParseError } from '../core/save';
 import type { SaveLoadResult } from '../core/saveRepository';
 import { emptyStats, type GameSession } from './session';
@@ -205,7 +206,7 @@ export function sessionFromSave(save: SaveGame, ctx: SaveContext): GameSession |
   const levelIndex = ctx.levels.findIndex((l) => l.id === save.levelId);
   if (levelIndex < 0) return null;
   const players = playersOfSave(save);
-  return {
+  const session: GameSession = {
     playerCount: players.length,
     players,
     levelIndex,
@@ -213,6 +214,9 @@ export function sessionFromSave(save: SaveGame, ctx: SaveContext): GameSession |
     startRoomIndex: save.roomIndex,
     completedLevelIds: save.completedLevelIds.slice(),
   };
+  // « Continuer » restitue l'équipement sauvegardé (champ absent si personne n'en porte)
+  if (save.players.some((p) => p.gear)) session.startGear = save.players.map((p) => (p.gear ? cloneGear(p.gear) : undefined));
+  return session;
 }
 
 /**

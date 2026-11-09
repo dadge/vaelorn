@@ -25,6 +25,7 @@ de frames** (voir le tableau ci-dessous) : aucun autre code n'a à changer.
 | `mechanisms46.ts` | Statues jumelles, sablier, herse, pont de lumière, lanterne (niveaux 4-6) |
 | `enemyTiers.ts` | Table PURE `ENEMY_SPRITES : Record<EnemyKind, …>` : gabarit de sprite (small 16 / mini 32 / boss 48), préfixe de frame, décalages, ombre |
 | `loot.ts` | Sources de vie (**provisoire**) : `pickup_half`, `pickup_full` (cœur de l'UI seul, agrandi ×2, réutilisé via `heartBitmap`, sans cartouche), `heal_crystal_0/1/used` |
+| `gear.ts` | Équipement (**provisoire**) : `gear_<emplacement>_<1..3>` (16×16, objet au sol) et `gear_icon_<emplacement>_<1..3>` (8×8, icône du HUD) pour boots / protection / artifact / magic / weapon, plus les 10 accessoires (`gear_accessory_<sorte>_<niveau>`, icônes `gear_icon_accessory_*`) et les 3 bonus temporaires (`gear_buff_*`, `gear_icon_buff_*`) ; un seul dessin 6×6 par objet, agrandi ×2 (sol) ou posé tel quel (HUD), contour sombre, sans cadre |
 | `light.ts` | Torches / salles sombres : `brazier_*`, `ui_torch_*`, `fx_ember_0..2` (voir « Lumière et obscurité ») |
 | `../darkness.ts` | `DarknessLayer` : voile d'obscurité (RenderTexture) + pinceaux lumineux générés par code (hors atlas) |
 | `../palettes.ts` | Toutes les couleurs (thèmes `crypt`/`grove`/`citadel`/`frost`/`ember`/`void`, héros, ennemis, demi-boss, boss, mécanismes, `PUZZLE_COLORS`, FX, UI) ; `ALL_PALETTE_COLORS` = liste blanche testée |
@@ -163,6 +164,31 @@ Nourriture laissée par les ennemis et cristaux de soin des salles de boss / dem
 | `pickup_full` | 16×16 | Cœur entier de nourriture (+10 PV) : le cœur plein de l'interface agrandi ×2, sans cadre ni fond ; halo doré (plus large) ajouté au rendu | Objet 16×16, plus voyant que le demi |
 | `heal_crystal_0`, `heal_crystal_1` | 16×16 | Cristal de soin (50 PV, usage unique) : cristal émeraude sur socle de pierre, croix d'éclat qui change de place (2 frames) | Cristal 16×16, 2 frames animées |
 | `heal_crystal_used` | 16×16 | Cristal vidé (gris, fissuré, sans éclat) après usage | Cristal éteint 16×16 |
+
+### Équipement (PROVISOIRE)
+
+Objets d'équipement laissés par les ennemis (5 emplacements × 3 niveaux, 10 accessoires, 3 bonus temporaires). Dessins **provisoires** (générés par `src/render/art/gear.ts`, palette `GEAR_COLORS`) : à remplacer par de vrais sprites (`TODO.md`). Chaque objet existe en **deux frames** tirées du même dessin : l'objet au sol (16×16, **dessin seul, sans cadre ni boîte**) et l'icône du HUD (8×8). Le halo doux (texture `fx_glow` teintée par le niveau : argenté I, bleu II, doré III), les pastilles de niveau (1 à 3 pastilles dans une bande sous l'icône du HUD, jamais sur le dessin) et le clignotement des 4 dernières secondes sont des effets de rendu (`src/entities/LifeViews.ts`, `src/render/hud.ts`, `src/render/gearFx.ts`), pas des frames. Les anneaux de compte à rebours des bonus temporaires (HUD) et l'invite « A : échanger » sont des effets de rendu.
+
+| Emplacement | Niveau I | Niveau II | Niveau III |
+|---|---|---|---|
+| `boots` | Sandales (cuir, sangles) | Bottes de cuir | Bottes ailées (ailes cyan, liseré or) |
+| `protection` | Casque d'acier | Bouclier bleu bordé d'or | Armure (plastron d'acier) |
+| `artifact` | Amulette (médaillon doré sur chaîne) | Sablier (sable bleu, bords or) | Orbe pourpre sur socle d'or |
+| `magic` | Potion verte | Baguette dorée | Chapeau de sorcier pourpre |
+| `weapon` | Épée | Hache | Arc (flèche blanche) |
+
+Frames : `gear_<emplacement>_<niveau>` (16×16 × 15) et `gear_icon_<emplacement>_<niveau>` (8×8 × 15). À remplacer par : objets 16×16 lisibles à zoom 2 (le niveau doit se lire à la forme ou à la couleur) et icônes 8×8 lisibles à 640×360.
+
+**Accessoires** (6e emplacement) : la **teinte de l'objet suit le niveau** (I cuir, II métal, III or) ; l'anneau du vampire n'existe qu'au niveau III.
+
+| Accessoire | Dessin | Frames |
+|---|---|---|
+| Lanterne | cadre teinté, flamme dorée | `gear_accessory_lantern_<1..3>` (16×16), `gear_icon_accessory_lantern_<1..3>` (8×8) |
+| Aimant à cœurs | fer à cheval rouge, pôles teintés | `gear_accessory_magnet_<1..3>`, `gear_icon_accessory_magnet_<1..3>` |
+| Cor de guerre | pavillon teinté, embouchure sombre | `gear_accessory_warhorn_<1..3>`, `gear_icon_accessory_warhorn_<1..3>` |
+| Anneau du vampire | anneau d'or, gemme rouge | `gear_accessory_vampire_3`, `gear_icon_accessory_vampire_3` |
+
+**Bonus temporaires** : `gear_buff_speed` (fiole bleue), `gear_buff_rage` (éclair rouge liseré d'or), `gear_buff_star` (étoile dorée) en 16×16 au sol, et `gear_icon_buff_<speed|rage|star>` en 8×8 pour le HUD ; le bonus reçu du cor de guerre réutilise l'icône du cor (`gear_icon_accessory_warhorn_<niveau>`). Halos : bleu clair (vitesse), rouge-orangé (rage), jaune (étoile).
 
 ### Interface (UI)
 

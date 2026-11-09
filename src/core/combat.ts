@@ -21,6 +21,7 @@
 import { PLAYER_RADIUS } from './constants';
 import { damageToEnemy, playerBaseDamage, playerSpecialDamage } from './balance';
 import { getCharacter } from './characters';
+import { attackDamageMultiplier, effectiveAttack, effectiveSpecialCooldownMs, rageMultiplier } from './gear';
 import { moveCircle, projectileHitsWall, segmentBlocked, type PixelRect } from './collision';
 import { angleBetween, circleOverlap, dirVec, isInArc, vecFromAngle } from './geometry';
 import { ENEMIES } from './enemies';
@@ -157,8 +158,8 @@ export function healPlayer(target: PlayerState, amount: number): number {
 }
 
 /**
- * Construit (sans l'ajouter nulle part) le projectile d'une attaque à distance, ou null si le personnage n'a pas de projectile
- * ou si le départ est dans un mur. Dégâts BRUTS = `playerBaseDamage(personnage)` ; durée de vie = `projectile.lifeMs` ;
+ * Construit (sans l'ajouter nulle part) le projectile d'une attaque à distance (celle du personnage, ou celle de l'ARC équipé : `effectiveAttack`),
+ * ou null si l'attaque effective n'est pas à distance ou si le départ est dans un mur. Dégâts BRUTS = `playerBaseDamage(personnage)` × multiplicateur d'arme ; durée de vie = `projectile.lifeMs` ;
  * perforation = `projectile.pierce`. Le projectile part devant le joueur dans la direction `dir`.
  * @param player tireur
  * @param id identifiant du projectile
@@ -174,7 +175,7 @@ export function buildPlayerProjectile(
   dir: Dir = player.facing,
 ): ProjectileState | null {
   const character = getCharacter(player.characterId);
-  const atk = character.attack;
+  const atk = effectiveAttack(character, player.loadout); // l'Arc fait tirer un héros au corps à corps
   const proj = atk.projectile;
   if (atk.kind !== 'ranged' || !proj) return null;
   const v = dirVec(dir);
@@ -188,7 +189,7 @@ export function buildPlayerProjectile(
       owner: { type: 'player', id: player.id },
       pos,
       vel: { x: v.x * proj.speed, y: v.y * proj.speed },
-      damage: playerBaseDamage(character),
+      damage: playerBaseDamage(character) * attackDamageMultiplier(character, player.loadout),
       radius: proj.radius,
       lifeMs: proj.lifeMs,
       pierce: proj.pierce,
@@ -327,14 +328,14 @@ export function damagePlayersInCircle(ctx: CombatContext, center: Vec2, radius: 
 export function performPlayerAttack(ctx: CombatContext, player: PlayerState): boolean {
   if (!ctx.damageEnabled || !canPlayerAttack(player)) return false;
   const character = getCharacter(player.characterId);
-  const atk = character.attack;
+  const atk = effectiveAttack(character, player.loadout); // hache : cadence plus lente ; arc : tir à distance
   player.attackCooldownMs = atk.cooldownMs;
   player.attackAnimMs = atk.animMs;
   player.attackDir = player.facing;
   ctx.events.push({ type: 'playerAttack', playerId: player.id, dir: player.facing });
 
   if (atk.kind === 'melee') {
-    const raw = playerBaseDamage(character);
+    const raw = playerBaseDamage(character) * attackDamageMultiplier(character, player.loadout);
     for (const e of meleeTargets(player, ctx.room.enemies, ctx.grid, ctx.solids, player.facing)) {
       damageEnemy(ctx, e, raw, player, player.pos);
     }
@@ -562,7 +563,7 @@ export function stepSpecialEffects(ctx: CombatContext, player: PlayerState, anim
   const def = character.special;
   if (!def || def.kind !== 'bladeDance') return 0;
   const due = bladeDanceHitsDone(def, player.specialAnimMs) - bladeDanceHitsDone(def, animBefore);
-  const raw = playerSpecialDamage(character);
+  const raw = playerSpecialDamage(character) * rageMultiplier(player.loadout); // éclair de rage : +50 % de dégâts
   for (let i = 0; i < due; i++) bladeDanceStrike(ctx, player, def, raw);
   return Math.max(0, due);
 }
@@ -587,9 +588,9 @@ export function performPlayerSpecial(ctx: CombatContext, player: PlayerState): b
   if (!ctx.damageEnabled || !canPlayerSpecial(player)) return false;
   const character = getCharacter(player.characterId);
   const def = character.special as SpecialDef;
-  const raw = playerSpecialDamage(character);
+  const raw = playerSpecialDamage(character) * rageMultiplier(player.loadout); // éclair de rage : +50 % de dégâts
   const origin = { x: player.pos.x, y: player.pos.y };
-  player.specialCooldownMs = def.cooldownMs;
+  player.specialCooldownMs = effectiveSpecialCooldownMs(def.cooldownMs, player.loadout); // Artefact : recharge réduite
   player.specialAnimMs = def.animMs;
   player.attackDir = player.facing;
   let eventPos: Vec2 = origin;

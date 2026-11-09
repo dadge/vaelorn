@@ -41,6 +41,7 @@ import {
   type HourglassLevel,
 } from './mechHud';
 import { edgeIndicator } from './camera';
+import { BUFF_HUD_ORDER, buffHudEntries, buffHudSignature, gearEmptyFrame, gearHudSignature, gearHudSlots } from './gearFx';
 import { CallEdgeHud } from './callHud';
 import { hex } from './palettes';
 import {
@@ -381,7 +382,7 @@ export interface SpecialStatus {
 }
 
 /** Niveau de charge du spécial du joueur `p` (utilise `specialFraction` du moteur). Pur. */
-export function specialStatus(p: Pick<PlayerState, 'characterId' | 'specialCooldownMs'>): SpecialStatus {
+export function specialStatus(p: Pick<PlayerState, 'characterId' | 'specialCooldownMs'> & { loadout?: PlayerState['loadout'] }): SpecialStatus {
   const def = CHARACTERS[p.characterId];
   if (!def || !def.special) return { has: false, ratio: 0, ready: false, secondsLeft: 0 };
   const ratio = specialFraction(p, def);
@@ -514,6 +515,8 @@ export interface HudEnv {
   layout: SplitLayout;
   /** Rappel du bouton du spécial pour un joueur (« F/X », « Y »...), fourni par la scène (absent = « F/X »). */
   specialHint?: (playerId: PlayerId) => string;
+  /** false : l'équipement est désactivé (démo, tutoriel) : ni rangée de 6 cases ni bonus temporaires (absent = true). */
+  gear?: boolean;
 }
 
 /** Rectangle en coordonnées écran. */
@@ -558,6 +561,19 @@ export class PlayerHud {
   private readonly hearts: Img[] = [];
   private readonly heartFramesCache: string[] = [];
   private readonly keyIcons: Img[] = [];
+  /** Rangée d'équipement (6 cases sous les cœurs) : fond, icône et 3 pastilles de niveau par case. */
+  private readonly gearBgs: Rect[] = [];
+  private readonly gearIcons: Img[] = [];
+  private readonly gearPips: Rect[][] = [];
+  private gearSig = '';
+  /** Icônes de bonus temporaires (une case par sorte, à droite de la rangée d'équipement) : icône, secondes restantes et anneau de compte à rebours. */
+  private readonly buffIcons: Img[] = [];
+  private readonly buffTexts: Text[] = [];
+  private readonly buffRing: Phaser.GameObjects.Graphics;
+  private readonly buffCell: number;
+  private readonly buffX0: number;
+  private readonly buffY0: number;
+  private buffSig = '';
   private readonly objHeader: Text;
   private readonly objIcons: Img[] = [];
   private readonly objTexts: Text[] = [];
@@ -691,8 +707,46 @@ export class PlayerHud {
       this.hearts.push(h);
       this.heartFramesCache.push('ui_heart_full');
     }
-    // indicateur d'attaque spéciale : icône + jauge + texte, sous les cœurs
-    const sy = hy + 8 * u + 6;
+    // rangée d'équipement : 6 cases (bottes, protection, artefact, magie, arme, accessoire) sous les cœurs. Le niveau I-III s'affiche dans une BANDE dédiée sous
+    // l'icône (jamais sur le dessin) : 1 à 3 pastilles pleines, sur un fond sombre, lisibles même à 640x360 ou sur téléphone.
+    const gearOn = env.gear !== false;
+    const gy = hy + 8 * u + 4;
+    const pipH = Math.max(3, u + 1);
+    const pipW = Math.max(4, Math.floor((8 * u - 2) / 3));
+    for (let i = 0; gearOn && i < 6; i++) {
+      const gx = vx + m + i * (8 * u + u + 3);
+      const bg = hudRect(ctx, gx - 1, gy - 1, 8 * u + 2, 8 * u + pipH + 4, 0x0b0912, 0.7);
+      bg.setOrigin(0, 0);
+      const ic = hudIcon(ctx, gx, gy, 'gear_icon_boots_1', u);
+      ic.setVisible(false);
+      const pips: Rect[] = [];
+      for (let k = 0; k < 3; k++) {
+        const pip = hudRect(ctx, gx + k * (pipW + 1), gy + 8 * u + 1, pipW, pipH, 0xffffff, 1, HUD_DEPTH.content + 0.5);
+        pip.setOrigin(0, 0).setVisible(false);
+        pips.push(pip);
+      }
+      this.gearBgs.push(bg);
+      this.gearIcons.push(ic);
+      this.gearPips.push(pips);
+    }
+    // bonus temporaires (potion, rage, étoile, cor) : icônes avec anneau de compte à rebours et secondes, à droite de la rangée d'équipement
+    this.buffCell = 8 * u + 8;
+    this.buffX0 = vx + m + 6 * (8 * u + u + 3) + 8;
+    this.buffY0 = gy;
+    this.buffRing = ctx.scene.add.graphics();
+    this.buffRing.setDepth(HUD_DEPTH.content + 0.6);
+    ctx.rig.registerHud(this.buffRing);
+    for (let i = 0; gearOn && i < BUFF_HUD_ORDER.length; i++) {
+      const ic = hudIcon(ctx, this.buffX0 + i * this.buffCell, gy, 'gear_icon_buff_speed', u);
+      ic.setVisible(false);
+      this.buffIcons.push(ic);
+      // secondes restantes : lisibles (>= 11 px de police à 4 joueurs, contour du texte compris) ; l'anneau reste l'indicateur principal
+      const tx = hudText(ctx, this.buffX0 + i * this.buffCell + 8 * u, gy + 8 * u, '', { size: Math.max(11, this.fs - 2), originX: 1, originY: 1, depth: HUD_DEPTH.content + 0.7 });
+      tx.setVisible(false);
+      this.buffTexts.push(tx);
+    }
+    // indicateur d'attaque spéciale : icône + jauge + texte, sous la rangée d'équipement (équipement désactivé : directement sous les cœurs)
+    const sy = gearOn ? gy + 8 * u + pipH + 7 : hy + 8 * u + 6;
     const rowMid = sy + 4 * u;
     this.spBarW = Math.max(64, Math.min(96, Math.floor(vw * 0.2)));
     this.spIcon = hudIcon(ctx, vx + m, sy, 'ui_special', u);
@@ -991,6 +1045,47 @@ export class PlayerHud {
     }
   }
 
+  /**
+   * Bonus temporaires : une icône par bonus actif (ordre : vitesse, rage, étoile, cor), anneau de compte à rebours qui se vide et secondes restantes. L'anneau et le
+   * nombre se redessinent à chaque rafraîchissement du HUD (60 ms) ; les icônes seulement quand l'ensemble change.
+   */
+  private refreshBuffs(p: PlayerState): void {
+    if (this.buffIcons.length === 0) return; // équipement désactivé (démo, tutoriel) : pas de zone de bonus
+    const entries = buffHudEntries(p.loadout?.buffs);
+    const sig = buffHudSignature(p.loadout?.buffs);
+    const u = this.u;
+    const g = this.buffRing;
+    g.clear();
+    if (sig !== this.buffSig) {
+      this.buffSig = sig;
+      for (let i = 0; i < this.buffIcons.length; i++) {
+        const e = entries[i];
+        if (e) this.buffIcons[i].setFrame(e.frame).setVisible(true);
+        else {
+          this.buffIcons[i].setVisible(false);
+          this.buffTexts[i].setVisible(false);
+        }
+      }
+    }
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const cx = this.buffX0 + i * this.buffCell + 4 * u;
+      const cy = this.buffY0 + 4 * u;
+      const r = 4 * u + 2;
+      this.buffIcons[i].setPosition(this.buffX0 + i * this.buffCell, this.buffY0);
+      this.buffTexts[i].setPosition(this.buffX0 + i * this.buffCell + 8 * u + 2, this.buffY0 + 8 * u + 2).setVisible(true);
+      setTextIfChanged(this.buffTexts[i], String(e.seconds));
+      g.lineStyle(2, 0x0b0912, 0.8);
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2, false);
+      g.strokePath();
+      g.lineStyle(2, e.color, 1);
+      g.beginPath();
+      g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * e.fraction, false);
+      g.strokePath();
+    }
+  }
+
   private refresh(p: PlayerState, a: PlayerHudUpdate): void {
     const { state, room } = a;
     const { level } = this.env;
@@ -1011,6 +1106,22 @@ export class PlayerHud {
         this.heartFramesCache[i] = f;
       }
     }
+
+    // équipement : icônes (emplacement vide = silhouette atténuée) et pastilles de niveau, rafraîchis seulement quand la rangée change
+    const gSig = gearHudSignature(p.loadout);
+    if (this.gearIcons.length > 0 && gSig !== this.gearSig) {
+      this.gearSig = gSig;
+      const slots = gearHudSlots(p.loadout);
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        const ic = this.gearIcons[i];
+        if (s.frame) ic.setFrame(s.frame).clearTint().setAlpha(1).setVisible(true);
+        else ic.setFrame(gearEmptyFrame(s.slot)).setTint(0x9a96b8).setAlpha(0.4).setVisible(true); // silhouette claire atténuée (emplacement vide, type reconnaissable)
+        for (let k = 0; k < 3; k++) this.gearPips[i][k].setFillStyle(s.color, 1).setVisible(k < s.level);
+      }
+    }
+
+    this.refreshBuffs(p);
 
     // clés détenues
     const keySlots: number[] = [];
@@ -1402,8 +1513,14 @@ export class PlayerHud {
       this.promptBg, this.promptText, this.signBg, this.signText, this.downOverlay, this.downIcon, this.downTitle, this.downSub,
       this.barBg, this.barFill, this.toastBg, this.toastText, ...this.arrows, ...this.enemyArrows, this.goalBg, this.goalHeader, ...this.goalIcons, ...this.goalTexts, this.torchIcon, this.torchBarBg, this.torchBarFill, this.spIcon, this.spBarBg, this.spBarFill, this.spText,
       this.puzBg, this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText, this.lanBg, this.lanIcon, this.lanText,
+      ...this.gearBgs, ...this.gearIcons, ...this.gearPips.flat(), ...this.buffIcons, ...this.buffTexts, this.buffRing,
     ];
     for (const o of all) o.destroy();
+    this.gearBgs.length = 0;
+    this.gearIcons.length = 0;
+    this.gearPips.length = 0;
+    this.buffIcons.length = 0;
+    this.buffTexts.length = 0;
     this.hearts.length = 0;
     this.keyIcons.length = 0;
     this.objIcons.length = 0;

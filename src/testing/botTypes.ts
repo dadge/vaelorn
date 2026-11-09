@@ -45,6 +45,8 @@ export interface BackgroundFlags {
   regroup: boolean;
   /** Ramassage de la nourriture / des cristaux de soin proches quand les PV sont bas (ignoré si l'option `eat` du bot est fausse ; défaut : actif). */
   eat?: boolean;
+  /** Ramassage de l'équipement au sol proche (ignoré si l'option `pickGear` du bot est fausse ; défaut : actif). */
+  gear?: boolean;
 }
 
 /**
@@ -134,6 +136,13 @@ export interface BackgroundOptions {
   eatBelowFrac: number;
   /** Rayon (px) dans lequel le bot repère nourriture et cristaux (défaut 160). */
   eatRadius: number;
+  /**
+   * Brique « équipement » : le bot va ramasser l'objet d'équipement au sol, à moins de `gearRadius` px, qui est STRICTEMENT meilleur que le sien et qui ne lui
+   * est pas verrouillé (le contact suffit : ramassage automatique). Désactivée par défaut (les bots existants ne ramassent rien) ; la calibration l'active.
+   */
+  pickGear: boolean;
+  /** Rayon (px) dans lequel le bot repère l'équipement au sol (défaut 140). */
+  gearRadius: number;
 }
 
 /** Valeurs par défaut des comportements de fond (tous activés). */
@@ -151,6 +160,8 @@ export const DEFAULT_BACKGROUND: Readonly<BackgroundOptions> = Object.freeze({
   eat: false,
   eatBelowFrac: 0.7,
   eatRadius: 160,
+  pickGear: false,
+  gearRadius: 140,
 });
 
 // ───────────────────────────── Statistiques ─────────────────────────────
