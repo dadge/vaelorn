@@ -25,15 +25,17 @@ export const VIRTUAL_PAD_INDEX = 4;
 export const VIRTUAL_PAD_BUTTON_COUNT = 16;
 
 /** Contrôles à bouton de la manette virtuelle. */
-export type VirtualButton = 'a' | 'b' | 'x' | 'y' | 'call' | 'pause';
+export type VirtualButton = 'a' | 'b' | 'y' | 'call' | 'pause';
 
-export const VIRTUAL_BUTTONS: readonly VirtualButton[] = ['a', 'b', 'x', 'y', 'call', 'pause'];
+export const VIRTUAL_BUTTONS: readonly VirtualButton[] = ['a', 'b', 'y', 'call', 'pause'];
 
-/** Bouton du mapping standard de chaque contrôle (A=0 B=1 X=2 Y=3 ; appel = LB=4 ; pause = Start=9). */
+/**
+ * Bouton du mapping standard de chaque contrôle (A=0 B=1 Y=3 ; appel = LB=4 ; pause = Start=9). Pas de bouton X virtuel : sur
+ * tactile, A fait déjà l'attaque contextuelle ; le losange A / B / Y + appel (à la place du X) tient en 4 boutons.
+ */
 export const VIRTUAL_BUTTON_INDEX: Readonly<Record<VirtualButton, number>> = {
   a: PAD_BUTTON.A,
   b: PAD_BUTTON.B,
-  x: PAD_BUTTON.X,
   y: PAD_BUTTON.Y,
   call: PAD_BUTTON.LB,
   pause: PAD_BUTTON.START,

@@ -1,7 +1,7 @@
 /**
  * Manette virtuelle tactile (couche DOM mince). Toute la logique (état des boutons par pointeur, stick → axes,
  * instantané de manette standard) est dans `src/input/VirtualPad.ts` (pure, testée). Ce fichier ne fait que :
- *  - créer les éléments (stick à gauche ; A B X Y en losange + APPEL à droite ; PAUSE en haut au centre) ;
+ *  - créer les éléments (stick à gauche ; losange A / B / Y + APPEL (à la place du X) à droite ; PAUSE en haut au centre) ;
  *  - brancher les Pointer Events (multi-touch : chaque contrôle suit SON pointerId via `setPointerCapture`) ;
  *  - mettre à jour l'aspect (enfoncé) et décider de l'affichage (tactile + paysage, ou `?touch=1` ; masquée dès qu'une
  *    vraie manette est connectée ; `?touch=0` la force cachée) avec `shouldShowVirtualPad` (device.ts).
@@ -66,10 +66,8 @@ const STYLE = `
 #touch-controls .vp-btn::before { content: ''; position: absolute; inset: -12%; border-radius: 50%; }
 #touch-controls .vp-a { --s: calc(var(--vp-base) * 0.5); --cx: calc(var(--vp-base) * 0.625); --cy: calc(var(--vp-base) * 0.995); border-color: #ffd27a; color: #ffd27a; }
 #touch-controls .vp-b { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.995); --cy: calc(var(--vp-base) * 0.625); }
-#touch-controls .vp-x { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.255); --cy: calc(var(--vp-base) * 0.625); }
 #touch-controls .vp-y { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.625); --cy: calc(var(--vp-base) * 0.255); }
-#touch-controls .vp-call { --s: max(30px, calc(var(--vp-base) * 0.3)); --cx: calc(var(--vp-base) * 0.17); --cy: calc(var(--vp-base) * 0.17); }
-#touch-controls .vp-call::before { inset: -25%; }
+#touch-controls .vp-call { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.255); --cy: calc(var(--vp-base) * 0.625); }
 #touch-controls .vp-pause {
   --s: clamp(34px, calc(var(--vp-base) * 0.34), 46px); position: absolute; pointer-events: auto; border-radius: 50%;
   width: var(--s); height: var(--s); top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; margin-left: calc(var(--s) / -2);
@@ -85,7 +83,7 @@ const STYLE = `
 @media (prefers-reduced-motion: reduce) { #touch-controls .vp-btn, #touch-controls .vp-pause { transition: none; } }
 `;
 
-/** Icône « signal » (point + 3 arcs de 90° vers l'intérieur, comme l'indicateur d'appel du jeu). */
+/** Icône « signal » du bouton d'appel (au rang du X) : point + 3 arcs, comme l'indicateur d'appel du jeu. */
 const CALL_ICON = `<svg class="vp-icon" viewBox="0 0 24 24" fill="none" stroke="#f0e2b0" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="4.5" cy="12" r="1.8" fill="#f0e2b0" stroke="none"/><path d="M8.04 8.46A5 5 0 0 1 8.04 15.54"/><path d="M10.86 5.64A9 9 0 0 1 10.86 18.36"/><path d="M13.69 2.81A13 13 0 0 1 13.69 21.19"/></svg>`;
 
 /** Icône pause (deux barres). */
@@ -156,7 +154,7 @@ function build(): TouchControlsHandle {
       const letter = document.createElement('span');
       letter.className = 'vp-letter';
       letter.setAttribute('aria-hidden', 'true');
-      letter.textContent = content; // lettre du bouton (A B X Y) : identique dans toutes les langues
+      letter.textContent = content; // lettre du bouton (A B Y) : identique dans toutes les langues
       el.append(letter);
     } else if (html !== null) {
       el.innerHTML = html; // SVG statique défini dans ce fichier
@@ -167,11 +165,10 @@ function build(): TouchControlsHandle {
   };
   const a = makeButton('a', 'vp-btn vp-a', 'A', null);
   const b = makeButton('b', 'vp-btn vp-b', 'B', null);
-  const x = makeButton('x', 'vp-btn vp-x', 'X', null);
   const y = makeButton('y', 'vp-btn vp-y', 'Y', null);
   const call = makeButton('call', 'vp-btn vp-call', null, CALL_ICON);
   const pause = makeButton('pause', 'vp-pause', null, PAUSE_ICON);
-  cluster.append(y.el, x.el, b.el, a.el, call.el);
+  cluster.append(y.el, call.el, b.el, a.el);
   root.append(stick, cluster, pause.el);
 
   const labels = (): void => {
@@ -180,7 +177,6 @@ function build(): TouchControlsHandle {
     stick.setAttribute('aria-label', t('touch.stick'));
     a.el.setAttribute('aria-label', t('touch.a'));
     b.el.setAttribute('aria-label', t('touch.b'));
-    x.el.setAttribute('aria-label', t('touch.x'));
     y.el.setAttribute('aria-label', t('touch.y'));
     call.el.setAttribute('aria-label', t('touch.call'));
     pause.el.setAttribute('aria-label', t('touch.pause'));

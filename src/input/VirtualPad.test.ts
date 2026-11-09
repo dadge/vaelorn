@@ -27,8 +27,9 @@ describe('constantes', () => {
   it('indice 4, hors des vraies manettes 0..3', () => {
     expect(VIRTUAL_PAD_INDEX).toBe(4);
   });
-  it('boutons : A=0 B=1 X=2 Y=3, appel = LB (4), pause = Start (9)', () => {
-    expect(VIRTUAL_BUTTON_INDEX).toEqual({ a: 0, b: 1, x: 2, y: 3, call: 4, pause: 9 });
+  it('boutons : A=0 B=1 Y=3, appel = LB (4), pause = Start (9) ; pas de X virtuel', () => {
+    expect(VIRTUAL_BUTTON_INDEX).toEqual({ a: 0, b: 1, y: 3, call: 4, pause: 9 });
+    expect(VIRTUAL_BUTTONS).not.toContain('x');
     expect(VIRTUAL_BUTTON_INDEX.call).toBe(PAD_BUTTON.LB);
     expect(VIRTUAL_BUTTON_INDEX.pause).toBe(PAD_BUTTON.START);
     expect(new Set(Object.values(VIRTUAL_BUTTON_INDEX)).size).toBe(VIRTUAL_BUTTONS.length);
@@ -203,10 +204,10 @@ describe('VirtualPad : boutons multi-pointeurs', () => {
   it('stick + bouton simultanés', () => {
     const p = connectedPad();
     p.beginStick(1, R, 0, R);
-    p.pressButton(2, 'x');
+    p.pressButton(2, 'y');
     const s = p.snapshot();
     expect(s.axes[0]).toBeCloseTo(1);
-    expect(s.buttons[2].pressed).toBe(true);
+    expect(s.buttons[3].pressed).toBe(true);
     p.releasePointer(2);
     expect(p.snapshot().axes[0]).toBeCloseTo(1);
     expect(p.isStickActive()).toBe(true);

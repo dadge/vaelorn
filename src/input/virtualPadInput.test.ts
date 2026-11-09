@@ -87,15 +87,11 @@ describe('manette virtuelle : vue comme une manette d’indice 4', () => {
     expect(f.call).toBe(false);
   });
 
-  it('X = attaque seule, B = interagir/relever seul, Y = spécial, LB (appel) = call', () => {
+  it('B = interagir/relever seul, Y = spécial, appel (au rang du X, LB) = call ; pas de bouton X virtuel', () => {
     pad.setConnected(true);
     const { mgr } = makeManager();
-    pad.pressButton(1, 'x');
-    let f = mgr.poll()[0]!;
-    expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([true, false, false, false, false]);
-    pad.releasePointer(1);
     pad.pressButton(1, 'b');
-    f = mgr.poll()[0]!;
+    let f = mgr.poll()[0]!;
     expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([false, true, true, false, false]);
     pad.releasePointer(1);
     pad.pressButton(1, 'y');
