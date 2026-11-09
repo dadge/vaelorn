@@ -19,16 +19,52 @@ export interface GamepadLike extends GamepadSnapshot {
 /** Fournit la liste (éventuellement creuse : `null` pour les emplacements vides) des manettes. */
 export type GamepadProvider = () => ArrayLike<GamepadLike | null | undefined>;
 
-/** Fournisseur par défaut : `navigator.getGamepads()` protégé (Node, contexte non sécurisé, erreurs). */
+/**
+ * Registre des manettes « extra » (injectées par le code, absentes de `navigator.getGamepads()`) : la manette
+ * virtuelle tactile (`VirtualPad`, indice `VIRTUAL_PAD_INDEX`) s'y enregistre. Chaque fonction retourne la manette
+ * (instantané) ou `null` si elle est absente / masquée.
+ */
+export type ExtraGamepadGetter = () => GamepadLike | null;
+
+const extraGamepads: ExtraGamepadGetter[] = [];
+
+/** Enregistre une manette extra ; retourne la fonction de désenregistrement (idempotente). */
+export function registerExtraGamepad(getter: ExtraGamepadGetter): () => void {
+  extraGamepads.push(getter);
+  return () => {
+    const i = extraGamepads.indexOf(getter);
+    if (i >= 0) extraGamepads.splice(i, 1);
+  };
+}
+
+/**
+ * Fournisseur par défaut : `navigator.getGamepads()` protégé (Node, contexte non sécurisé, erreurs) + les manettes
+ * « extra » enregistrées. Sans extra (ou si tous retournent null), la liste du navigateur est renvoyée telle quelle
+ * (aucune allocation supplémentaire). Les manettes sont identifiées par leur propriété `.index`, pas par leur position.
+ */
 export const defaultGamepadProvider: GamepadProvider = () => {
+  let real: ArrayLike<GamepadLike | null> = [];
   try {
     if (typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
-      return navigator.getGamepads() as unknown as ArrayLike<GamepadLike | null>;
+      real = navigator.getGamepads() as unknown as ArrayLike<GamepadLike | null>;
     }
   } catch {
     /* SecurityError (Permissions-Policy) ou API absente : aucune manette */
   }
-  return [];
+  if (extraGamepads.length === 0) return real;
+  let out: Array<GamepadLike | null> | null = null;
+  for (const getter of extraGamepads) {
+    let extra: GamepadLike | null = null;
+    try {
+      extra = getter();
+    } catch {
+      /* une manette extra défaillante ne doit pas masquer les vraies */
+    }
+    if (!extra) continue;
+    if (!out) out = Array.from(real);
+    out.push(extra);
+  }
+  return out ?? real;
 };
 
 /** Liste des manettes connectées, triées par indice. Ne lève jamais. */

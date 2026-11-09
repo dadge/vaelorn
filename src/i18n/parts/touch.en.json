@@ -1,0 +1,13 @@
+{
+  "touch.a": "A, action",
+  "touch.b": "B, interact or revive",
+  "touch.call": "Call your allies",
+  "touch.game.disconnected": "Player {n}'s virtual gamepad is hidden — turn the phone to landscape",
+  "touch.group": "Touch controls",
+  "touch.hidden": "Virtual gamepad hidden: turn the screen to landscape.",
+  "touch.padName": "Virtual gamepad",
+  "touch.pause": "Pause",
+  "touch.stick": "Movement stick",
+  "touch.x": "X, attack",
+  "touch.y": "Y, special attack"
+}

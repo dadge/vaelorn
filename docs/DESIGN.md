@@ -141,7 +141,7 @@ Palettes (`src/render/palettes.ts`) : une palette cohérente par thème de donjo
 ## 5. Entrées (src/input)
 
 - `ActionFrame` par joueur (voir types.ts). Couche d'abstraction : `InputSource` (interface) → `poll(): ActionFrame` ;
-  `KeyboardSource`, `GamepadSource` implémentent l'interface ; plus tard `TouchSource`, `NetworkSource`.
+  `KeyboardSource`, `GamepadSource` implémentent l'interface ; la **manette virtuelle** tactile (`VirtualPad`, `src/mobile/touchControls.ts`) est une manette standard injectée via `registerExtraGamepad` (pas de `TouchSource`) ; plus tard `NetworkSource`.
 - Bindings **remappables** (`Bindings` = objet JSON : action → liste d'entrées), valeurs par défaut dans `src/input/defaultBindings.ts`,
   persistance optionnelle dans `localStorage` (try/catch).
 - Clavier J1 : flèches = déplacement, `Espace` = action (déclenche attack + interact + revive en même temps ; la simulation

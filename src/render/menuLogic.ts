@@ -12,6 +12,7 @@ import { CHARACTERS, CHARACTER_IDS } from '../core/characters';
 import { MAX_PLAYERS } from '../core/constants';
 import type { CharacterDef, CharacterId, Difficulty, PlayerId, PlayerSetup } from '../core/types';
 import { deviceFromId } from '../input/actions';
+import { VIRTUAL_PAD_INDEX } from '../input/VirtualPad';
 import type { DeviceAssignment, DeviceId } from '../input/actions';
 import { inputManager } from '../input/InputManager';
 import type { PlayerAssignment } from '../input/InputManager';
@@ -385,6 +386,12 @@ export function describeAssignment(a: PlayerAssignment, player1Gamepad = false):
   if (a.anyDevice) return { labelKey: 'select.input.anyDevice', connected: true };
   if (a.label === 'keyboard') return { labelKey: 'select.input.keyboard', connected: true };
   if (a.label === 'gamepad') {
+    // Manette virtuelle tactile : un téléphone n'a qu'une manette, on n'expose pas son indice technique.
+    if (a.gamepadIndex === VIRTUAL_PAD_INDEX) {
+      const v: AssignmentView = { labelKey: 'touch.padName', connected: a.connected };
+      if (!a.connected) v.warnKey = 'touch.hidden';
+      return v;
+    }
     const n = a.gamepadIndex !== undefined ? a.gamepadIndex + 1 : Math.max(1, a.playerId + (player1Gamepad ? 1 : 0));
     const view: AssignmentView = { labelKey: 'select.input.gamepad', labelParams: { n }, connected: a.connected };
     if (a.nonStandard) view.infoKey = 'pad.nonStandard';
@@ -561,6 +568,10 @@ export function describeSlotDevice(owner: DeviceId | null, pads: readonly PadInf
   if (!dev) return { labelKey: 'pad.slot.empty', ...none };
   if (dev.kind === 'keyboard') return { labelKey: 'pad.slot.keyboard', claimed: true, missing: false, nonStandard: false };
   const pad = pads.find((p) => p.index === dev.index);
+  if (dev.index === VIRTUAL_PAD_INDEX) {
+    // Manette virtuelle tactile : libellé sans numéro (l'indice 4 est technique).
+    return { labelKey: 'touch.padName', claimed: true, missing: !pad, nonStandard: false };
+  }
   const name = shortPadName(pad?.name);
   return {
     labelKey: name ? 'pad.slot.gamepad' : 'pad.slot.gamepadNoName',

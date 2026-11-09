@@ -28,7 +28,7 @@ import type { ViewContext } from '../entities/common';
 import { MAX_STEPS_PER_FRAME, mergeTickInputs, planSteps } from '../entities/loopLogic';
 import { effectivePauseOwner, pauseIntentAllowed, pauseOwnerForPad, resolvePauseBack, resolvePauseConfirm } from '../entities/pauseLogic';
 import { t, onLanguageChange } from '../i18n/i18n';
-import { MenuNavigator, inputManager, listGamepads } from '../input';
+import { MenuNavigator, VIRTUAL_PAD_INDEX, inputManager, listGamepads } from '../input';
 import { getLevelByIndex } from '../levels';
 import { ViewRig } from '../render/camera';
 import { DEPTH_LABELS, FxManager, damageNumberColor, ensureFxTextures } from '../render/fx';
@@ -799,7 +799,12 @@ export class GameScene extends Phaser.Scene {
       const text = hudText(this.ctx, cx, cy + 20, '', { size: 22, originX: 0.5, originY: 0.5, color: 0xffd0c0, depth: HUD_DEPTH.pause + 6, wrap: GAME_WIDTH - 220, align: 'center' });
       this.padMsg = { text, back };
     }
-    this.padMsg.text.setText(t('pad.game.disconnected', { n: lost.map((p) => p + 1).join(', ') }));
+    // Manette virtuelle masquée (téléphone en portrait…) : pas d'Échap sur un téléphone, le message dit quoi faire.
+    const virtual = lost.some((p) => {
+      const d = inputManager.getAssignedDevice(p);
+      return d !== null && d.kind === 'gamepad' && d.index === VIRTUAL_PAD_INDEX;
+    });
+    this.padMsg.text.setText(t(virtual ? 'touch.game.disconnected' : 'pad.game.disconnected', { n: lost.map((p) => p + 1).join(', ') }));
   }
 
   /** Détecte un front montant du bouton Start d'une manette (ouvre / ferme la pause). */

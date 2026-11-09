@@ -20,7 +20,7 @@ import { GAME_HEIGHT, GAME_WIDTH } from '../core/constants';
 import type { CharacterId } from '../core/types';
 import { SUPPORTED_LANGUAGES, getLanguage, setLanguage, t } from '../i18n/i18n';
 import { CHARACTERS } from '../core/characters';
-import { MenuNavigator, inputManager, isNonStandardPad, listGamepads } from '../input';
+import { MenuNavigator, VIRTUAL_PAD_INDEX, inputManager, isNonStandardPad, listGamepads } from '../input';
 import type { MenuAction } from '../input';
 import { ATLAS_KEY } from '../render/art';
 import { LEVELS, getLevelByIndex } from '../levels';
@@ -792,7 +792,8 @@ export class MenuScene extends Phaser.Scene {
     for (const pad of pads.slice(0, 4)) {
       const nonStd = isNonStandardPad(pad);
       add(this.add.image(px + 38, y + 9, ATLAS_KEY, 'ui_check').setScale(2));
-      add(createText(this, px + 58, y - 3, t('pad.controls.padLine', { n: pad.index + 1, name: shortPadName(pad.id, 40) || '?' }), { size: 'sm', color: UI_THEME.text }));
+      const padLine = pad.index === VIRTUAL_PAD_INDEX ? t('touch.padName') : t('pad.controls.padLine', { n: pad.index + 1, name: shortPadName(pad.id, 40) || '?' });
+      add(createText(this, px + 58, y - 3, padLine, { size: 'sm', color: UI_THEME.text }));
       add(createText(this, px + 620, y - 3, nonStd ? t('pad.controls.nonStandard') : t('pad.controls.standard'), { size: 'sm', color: nonStd ? UI_THEME.accent : UI_THEME.good }));
       y += 22;
     }

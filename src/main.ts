@@ -9,7 +9,8 @@
  *   - diff     : une valeur pour tous, ou une liste par joueur (1 facile / 2 normal / 3 difficile) ;
  *   - level    : niveau de départ (1-based) ; room : indice 0-based de la salle de départ → `session.startRoomIndex` ;
  *   - lang     : fr | en (appliquée avant le démarrage ; persistée comme tout changement de langue) ;
- *   - p1pad=1  : J1 à la manette ; debug=1 : expose `window.__vaelorn` hors mode dev.
+ *   - p1pad=1  : J1 à la manette ; debug=1 : expose `window.__vaelorn` hors mode dev ;
+ *   - touch=1|0 : force l'affichage / le masquage de la manette virtuelle tactile (src/mobile/touchControls.ts).
  * `window.__vaelorn = { game }` est exposé en mode dev (import.meta.env.DEV), avec ?debug=1 ou ?quick=1 ;
  * en démarrage rapide un événement `vaelorn:quickstart` (detail = GameSession) est émis sur `window`.
  */
@@ -20,6 +21,7 @@ import { inputManager } from './input';
 import { LEVELS } from './levels';
 import { parseQuickParams, setQuickParams } from './render/menuLogic';
 import { installMobileUi } from './mobile/mobileUi';
+import { installTouchControls } from './mobile/touchControls';
 import { registerServiceWorker } from './pwa/register';
 import { isSmoothRendering } from './render/smoothing';
 import { BootScene } from './scenes/BootScene';
@@ -79,6 +81,9 @@ function start(): void {
 
   // Mobile : invite de rotation, plein écran, recalage du canvas à chaque rotation / barre d'adresse.
   installMobileUi(game);
+  // Mobile : manette virtuelle (stick + A B X Y + appel + pause), vue par le code d'entrées comme une manette d'indice 4.
+  // ?touch=1 l'affiche sur PC (test), ?touch=0 la masque ; elle se masque seule dès qu'une vraie manette est branchée.
+  installTouchControls();
 
   if (import.meta.env.DEV || quick.debug) window.__vaelorn = { game };
 }

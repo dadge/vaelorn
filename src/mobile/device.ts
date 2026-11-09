@@ -48,3 +48,41 @@ export function computeMobileUi(env: MobileEnvironment): MobileUiState {
     showFullscreenButton: touch && env.fullscreenSupported && !env.fullscreen && !env.installed,
   };
 }
+
+/** Forçage de la manette virtuelle par l'URL : `?touch=1` = affichée, `?touch=0` = masquée, absent/autre = automatique. */
+export type TouchParam = 'on' | 'off' | null;
+
+/** Lit le paramètre `touch` de la chaîne de requête (`window.location.search`). */
+export function parseTouchParam(search: string): TouchParam {
+  let value: string | null = null;
+  try {
+    value = new URLSearchParams(search).get('touch');
+  } catch {
+    return null;
+  }
+  if (value === '1') return 'on';
+  if (value === '0') return 'off';
+  return null;
+}
+
+/** Ce qui décide de l'affichage de la manette virtuelle. */
+export interface VirtualPadVisibilityInput {
+  /** Appareil tactile (`computeMobileUi(...).touch`, pas de seconde détection). */
+  touch: boolean;
+  /** Fenêtre en paysage (pas en portrait). */
+  landscape: boolean;
+  /** Forçage par l'URL. */
+  param: TouchParam;
+  /** Une vraie manette (indice < 4) est connectée. */
+  realGamepad: boolean;
+}
+
+/**
+ * La manette virtuelle est-elle affichée ? Jamais avec une vraie manette connectée (elle prend le pas) ni avec
+ * `?touch=0` ; sinon `?touch=1` l'affiche partout (test sur PC), et automatiquement : appareil tactile ET paysage.
+ */
+export function shouldShowVirtualPad(input: VirtualPadVisibilityInput): boolean {
+  if (input.realGamepad || input.param === 'off') return false;
+  if (input.param === 'on') return true;
+  return input.touch && input.landscape;
+}

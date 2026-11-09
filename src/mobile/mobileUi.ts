@@ -18,7 +18,7 @@ export interface ScaleHost {
 /** Délai (ms) après un changement de taille avant de recaler : les navigateurs mobiles stabilisent leur fenêtre après coup. */
 const REFRESH_DELAYS_MS = [0, 300];
 
-function readEnvironment(): MobileEnvironment {
+export function readEnvironment(): MobileEnvironment {
   const media = (q: string): boolean => {
     try {
       return typeof window.matchMedia === 'function' && window.matchMedia(q).matches;

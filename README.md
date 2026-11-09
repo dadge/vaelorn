@@ -51,7 +51,11 @@ Le jeu s'adapte à l'écran (canvas 16:9 centré, `Scale.FIT`) et se joue en **p
 - **Portrait** : sur un appareil tactile (pointeur principal grossier), un écran « Tourne ton téléphone » remplace le jeu (`src/mobile/`).
 - **Plein écran** : bouton en haut à droite (appareil tactile seulement, absent si l'application est installée ou déjà en plein écran) ; il cache la barre d'adresse et tente de verrouiller le paysage. Sur iPhone/Safari l'API n'existe pas : installer la PWA (*Sur l'écran d'accueil*).
 - **Gestes du navigateur désactivés** pendant le jeu : zoom par pincement, rafraîchir en tirant vers le bas, sélection de texte, menu contextuel. L'écran reste allumé (Screen Wake Lock) tant que la page est visible.
-- **Limites** : les textes du HUD sont petits sur un téléphone (le canvas logique 1280×720 est réduit à ~0,6) et le jeu à 3-4 joueurs en écran divisé n'y est pas lisible ; les contrôles tactiles (manette virtuelle) arrivent dans une étape suivante.
+- **Manette virtuelle** (`src/input/VirtualPad.ts` pour la logique pure, `src/mobile/touchControls.ts` pour le DOM) : affichée sur un appareil tactile **en paysage**. À gauche, un **stick analogique** (déplacement) ; à droite, **A** (action, le plus gros), **B**, **X**, **Y** en losange comme une manette, un petit bouton **appel** (icône d'onde « signal », = LB) et, en haut au centre, un petit bouton **pause** (= Start). Elle est translucide au repos (~45 %), s'éclaire et grossit quand on appuie, fait vibrer brièvement (là où le navigateur le permet), suit plusieurs doigts à la fois (stick + plusieurs boutons) ; glisser un doigt hors d'un bouton le relâche. Les tailles sont relatives à l'écran (utilisable de 360 à 900 px de large, ≤ ~35 % de la largeur de chaque côté) et respectent les marges de sécurité (encoches). Il n'y a **aucune règle propre au tactile** : c'est une **manette standard virtuelle** (indice `VIRTUAL_PAD_INDEX` = 4, libellé « Manette virtuelle ») injectée dans le fournisseur de manettes (`registerExtraGamepad`), donc rejoindre la partie (A), naviguer dans les menus, la pause, l'attaque, le spécial, l'appel et l'interaction fonctionnent comme avec une vraie manette, sans toucher à `InputManager`, aux menus ni aux scènes.
+  - **Avec une vraie manette** (Bluetooth/USB, indice 0 à 3) : la manette virtuelle se **masque** automatiquement (et se déconnecte, tous les appuis remis à zéro) ; elle réapparaît quand la vraie manette disparaît. Le joueur inscrit avec la manette virtuelle **reprend automatiquement la vraie manette** (la première que personne n'utilise), et inversement : si la vraie manette inscrite disparaît (batterie, veille), l'overlay revient et le joueur reprend la manette virtuelle (`src/input/virtualPadHandover.ts`). Sans vraie manette libre, il reste signalé « manette déconnectée » (pause, message adapté au tactile) jusqu'au retour de l'overlay ; elle est aussi masquée en portrait (invite de rotation). En **plein écran**, l'overlay suit l'élément plein écran de Phaser (il y est rattaché puis revient dans la page à la sortie).
+  - **Forcer** : `?touch=1` l'affiche partout (pour tester sur PC, à la souris ; elle se masque toujours si une vraie manette est branchée), `?touch=0` la masque (même sur téléphone).
+  - **Limites de la manette virtuelle** : **1 joueur par téléphone** (la manette virtuelle occupe une seule place ; pas d'écran divisé à plusieurs sur un seul téléphone : pour jouer à plusieurs, brancher d'autres manettes ou utiliser plusieurs appareils) ; à plusieurs joueurs, la manette virtuelle n'est utilisable qu'après l'inscription par bouton à l'écran de sélection (les attributions par défaut visent les manettes 0 à 3) ; **avec la seule manette virtuelle, choisir 1 joueur** au menu (à 2-4 joueurs, la sélection attend les autres places et ne démarre pas ; B pour revenir) ; les boutons ne « glissent » pas d'un bouton à l'autre (relever le doigt puis réappuyer) ; aucun retour haptique sur iPhone (l'API `vibrate` n'y existe pas).
+- **Limites de l'affichage mobile** : les textes du HUD sont petits sur un téléphone (le canvas logique 1280×720 est réduit à ~0,6) et le jeu à 3-4 joueurs en écran divisé n'y est pas lisible.
 
 Diagnostic des manettes : ouvrir `/gamepad-test.html` (liste les manettes détectées, boutons et axes en direct).
 
@@ -59,15 +63,15 @@ Diagnostic des manettes : ouvrir `/gamepad-test.html` (liste les manettes détec
 
 Chaque joueur **rejoint** sa place à l'écran de sélection en appuyant sur **A** (manette) ou **Entrée/Espace** (clavier) : tout le monde peut jouer à la manette, sans clavier. Un appareil = un joueur. Le clavier peut occuper n'importe quelle place.
 
-| Action | Clavier | Manette |
-|---|---|---|
-| Se déplacer | Flèches (ou ZQSD/WASD) | Stick gauche / croix |
-| **Action** (relever un allié > interagir > attaquer, selon le contexte) | Espace (ou E) | **A** |
-| Attaque seule | — (Espace fait l'action contextuelle) | **X** |
-| Interagir / relever seulement | — | **B** |
-| **Attaque spéciale** (rechargeable) | **F** ou **X** | **Y**, **RB** ou **RT** |
-| **Appeler** (signal vers les alliés) | **C** | **LB** ou **LT** |
-| Pause | Échap | Start |
+| Action | Clavier | Manette | Tactile (manette virtuelle) |
+|---|---|---|---|
+| Se déplacer | Flèches (ou ZQSD/WASD) | Stick gauche / croix | Stick à gauche |
+| **Action** (relever un allié > interagir > attaquer, selon le contexte) | Espace (ou E) | **A** | Bouton **A** (le plus gros) |
+| Attaque seule | — (Espace fait l'action contextuelle) | **X** | Bouton **X** |
+| Interagir / relever seulement | — | **B** | Bouton **B** |
+| **Attaque spéciale** (rechargeable) | **F** ou **X** | **Y**, **RB** ou **RT** | Bouton **Y** |
+| **Appeler** (signal vers les alliés) | **C** | **LB** ou **LT** | Petit bouton « signal » (= LB) |
+| Pause | Échap | Start | Petit bouton pause en haut au centre (= Start) |
 
 Les menus se pilotent aux mêmes entrées (flèches/croix, Entrée/A, Échap/B). Les boutons sont remappables côté code (`src/input/defaultBindings.ts`, persistance `localStorage`). Le rappel des commandes (dont le spécial et l'appel) est affiché dans le menu **Contrôles** et dans le menu **pause**.
 
@@ -83,7 +87,7 @@ Un bouton dédié (**C** au clavier, **LB** ou **LT** à la manette) fait « app
   - appelant **hors de leur vue** : au bord de leur vue, dans sa direction (coins compris), un **point collé au bord** (côté de l'appelant) et **3 arcs concentriques de 90°** (rayons ≈ 10 / 18 / 26 px × échelle du HUD) qui partent de ce point **vers l'intérieur de l'écran, vers celui qui entend l'appel** (comme l'icône « signal »). Ils s'allument **chacun à leur tour du plus petit au plus grand**, en boucle (cycle 900 ms, 300 ms par arc), comme une onde sonore, à la **couleur du joueur appelant**. Même placement que les flèches vers les alliés à terre et les ennemis restants (qui ne changent pas) ; si deux indicateurs tomberaient au même endroit (moins de la largeur du grand arc le long du bord, ≈ 43 px × échelle), celui de l'appel glisse le long du bord. Le signal s'estompe sur ses 150 dernières ms. Les arcs sont dessinés **sous** les textes du HUD (nom, PV, objectif) : ils peuvent passer derrière un texte vers un coin de la vue, jamais devant ;
   - appelant **visible dans leur vue** : pas d'indicateur de bord, mais des **anneaux concentriques** qui s'étendent autour de lui dans le monde (vus par tous les joueurs dont la vue le contient, l'appelant compris). Ces anneaux se voient aussi dans une salle sombre.
 - **Son** : l'événement de simulation `callStarted` déclenche un son placeholder (`src/entities/sfx.ts`).
-- **Choix et limites** : rien ne change dans la difficulté, les ennemis, les niveaux ni le format de sauvegarde (la sauvegarde ne contient aucun état de simulation) ; l'appel n'attire ni n'éloigne les ennemis ; en solo il fonctionne (aucun indicateur n'est alors visible, mais les anneaux du monde le sont) ; le dessin (point au bord + arcs vers l'intérieur) et les durées ressenties sont à valider en jeu (voir `TODO.md`). Le cœur ne contient rien de spécifique au clavier ou à la manette : un futur bouton tactile n'aura qu'à fournir `call: true` dans son `ActionFrame`.
+- **Choix et limites** : rien ne change dans la difficulté, les ennemis, les niveaux ni le format de sauvegarde (la sauvegarde ne contient aucun état de simulation) ; l'appel n'attire ni n'éloigne les ennemis ; en solo il fonctionne (aucun indicateur n'est alors visible, mais les anneaux du monde le sont) ; le dessin (point au bord + arcs vers l'intérieur) et les durées ressenties sont à valider en jeu (voir `TODO.md`). Le cœur ne contient rien de spécifique au clavier ou à la manette : le bouton tactile « appel » n'est qu'un LB virtuel (manette virtuelle).
 
 ## Règles du jeu
 
@@ -243,8 +247,8 @@ Tous les sprites sont des **placeholders** générés par code (`src/render/art/
 
 ## Portage futur (Android)
 
-**Prêt** : logique de jeu totalement séparée du rendu et des entrées (`src/core`) ; entrées abstraites en `ActionFrame` (un `TouchSource` se branche comme les autres sources) ; build statique à chemins relatifs (`base: './'`), compatible Capacitor ; aucune dépendance à des API de bureau côté `core`.
-**Reste à faire** : contrôles tactiles (stick virtuel + boutons action/spécial/appeler) ; packaging Capacitor (Android Studio, icônes, écran de démarrage) ; orientation paysage verrouillée ; adaptation aux tailles d'écran et densités (le canvas est en 1280×720 avec `Phaser.Scale.FIT`) ; HUD et splitscreen pensés pour un petit écran (probablement 1–2 joueurs sur téléphone, plus sur tablette/TV) ; test de performances sur appareils modestes ; manettes Bluetooth via la Gamepad API du WebView.
+**Prêt** : logique de jeu totalement séparée du rendu et des entrées (`src/core`) ; entrées abstraites en `ActionFrame` (les contrôles tactiles sont livrés : une **manette virtuelle** injectée comme manette « extra », voir « Sur téléphone / tablette ») ; build statique à chemins relatifs (`base: './'`), compatible Capacitor ; aucune dépendance à des API de bureau côté `core`.
+**Reste à faire** : réglages tactiles (stick flottant, mode gaucher, tailles) ; packaging Capacitor (Android Studio, icônes, écran de démarrage) ; orientation paysage verrouillée ; adaptation aux tailles d'écran et densités (le canvas est en 1280×720 avec `Phaser.Scale.FIT`) ; HUD et splitscreen pensés pour un petit écran (probablement 1–2 joueurs sur téléphone, plus sur tablette/TV) ; test de performances sur appareils modestes ; manettes Bluetooth via la Gamepad API du WebView.
 
 ## Multijoueur en ligne futur
 
