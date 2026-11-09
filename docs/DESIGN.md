@@ -41,6 +41,7 @@ Si un contrat de `types.ts` est insuffisant ou ambigu, tu peux faire une modific
 | `src/core/{ai,bosses}.ts` + tests | ai |
 | `src/main.ts`, `src/scenes/{Boot,Menu,CharacterSelect,Dialogue,Result}Scene.ts`, `src/render/{session,ui}.ts` | scenes-ui |
 | `src/scenes/GameScene.ts`, `src/entities/**`, `src/render/{camera,splitscreen,hud,fx}.ts` | scenes-game |
+| `src/audio/**`, `src/testing/fakeAudioContext.ts` | audio (musique de fond ; `src/entities/sfx.ts` y emprunte le contexte audio partagé) |
 | `src/levels/index.ts` | level1 (le premier à finir ; les autres n'y touchent pas — l'intégrateur le finalise) |
 
 Les agents n'éditent PAS les fichiers des autres. Ils lisent librement. Les erreurs `tsc` dans des fichiers qui
@@ -246,6 +247,18 @@ entrée humaine dans la simulation, ni sauvegarde ni pause) → `Menu` (`afterDe
 la logique de `src/attract/` est PURE (horloge et hasard injectés, aucun accès à Phaser / DOM sauf `ActivityWatcher`, couche fine) ; le
 coeur (`src/core`) n'est pas modifié et ne voit jamais `Math.random` : seule `MenuScene` tire au hasard (`buildDemoSession(Math.random)`).
 Détail, durées et paramètres d'URL : README « Mode démo (attract mode) ».
+
+## 8 quater. Musique de fond
+
+Flux : `GameScene.create` → `getMusic().start({ level })` (jamais en démo ; `level` = 0,5 en tutoriel) → fondu d'entrée ; pause → `setDucked(true)` (35 %, la musique continue) ; M → `setMuted` (aussi les effets) ; `leaveTo` → `stop(fadeMs)` (fondu synchrone du fondu d'écran) ; `cleanup` (shutdown) → `stop(0,25)` sans effet si déjà en fondu. Le menu n'appelle la musique qu'en **aperçu** (`start` / `stop` selon la ligne sélectionnée « Musique » / « Volume musique »).
+
+Couches (`src/audio/`, **aucune dépendance de `src/core` vers l'audio**, ni de l'audio vers Phaser) :
+- `theme.ts` (données typées du thème « Cavalcade du Cristal », variante D1 150 BPM, la mineur) → `sequencer.ts` (PUR, déterministe : `buildLoopSequence(theme, { transpose, bpm })` → événements triés d'UNE boucle, temps en secondes) ;
+- `musicSynth.ts` : port du synthé de référence (WebAudio) ; `musicPlayer.ts` : machine d'états (`idle` → `playing` → `fadingOut` → `idle`), planification en lookahead sur l'horloge **audio** (jamais `Date`), boucle `t0 + n × loopSeconds` (aucune dérive), contexte / minuteurs / visibilité injectés (testé sans WebAudio : `src/testing/fakeAudioContext.ts`) ;
+- `audioContext.ts` : **un seul `AudioContext`** pour `sfx.ts` et la musique, créé paresseusement, débloqué au premier geste (`installAudioUnlock`, appelé par `main.ts`) ; absence de WebAudio = `null` = silence ;
+- `musicSettings.ts` : réglage persistant `vaelorn.music.v1` (lecture tolérante) et forçage `?music=0|1` ; `music.ts` : instance unique.
+
+Choix : décisions par écran dans le README (« Musique ») ; Phaser `audio.noAudio: true` (son géré hors Phaser) ; `Sfx.destroy()` ne ferme plus le contexte (partagé) ; la touche M existante (effets) coupe désormais aussi la musique ; le menu pause n'a pas d'options, le réglage est donc dans le menu principal seulement ; la musique ne démarre qu'au premier geste utilisateur (autoplay).
 
 ## 9. Déviations
 

@@ -15,6 +15,9 @@
  * (`ActivityWatcher` → `DemoFlow`). Ni sauvegarde, ni pause, ni son, ni bannières ; bandeau « DÉMO » et invite clignotants ; retour au
  * menu (avec fondu) quand la durée est écoulée ou dès que le joueur fait quelque chose. Tous les ajouts sont gardés par `if (this.demoFlow)`.
  *
+ * MUSIQUE (src/audio/) : jouée pendant le jeu (fondu d'entrée), jamais en démo, à moitié volume en tutoriel ; la pause la baisse (ducking, elle
+ * continue) ; M coupe / remet tout le son (effets + musique) ; départ de la scène (fin de niveau, résultat, menu) : arrêt en fondu.
+ *
  * Cycle de vie : à chaque événement `roomEntered`, la salle précédente est DÉTRUITE proprement (RoomView, pools
  * d'ennemis et de projectiles, FX) puis reconstruite. Au `shutdown`, tout est libéré (écouteurs, caméras, objets).
  */
@@ -39,6 +42,7 @@ import { DarkRoomView, torchLightPos } from '../entities/DarkRoomView';
 import { forceDarkLevel, isDevDarkAllowed } from '../entities/devDark';
 import { buildDevTestLevel, devTestKind } from '../entities/devRooms';
 import { GameOverlay, PauseMenu } from '../entities/overlay';
+import { getMusic, TUTORIAL_MUSIC_LEVEL } from '../audio/music';
 import { Sfx, sfxForEvent } from '../entities/sfx';
 import type { ViewContext } from '../entities/common';
 import { MAX_STEPS_PER_FRAME, mergeTickInputs, planSteps } from '../entities/loopLogic';
@@ -72,6 +76,8 @@ import { computeLayout, type SplitLayout } from '../render/splitscreen';
 const CELEBRATION_MS = 3200;
 /** Durée (ms) du fondu de sortie vers une autre scène. */
 const LEAVE_FADE_MS = 320;
+/** Période (ms) des tentatives de reprise du contexte audio (musique : politique d'autoplay, manettes). */
+const MUSIC_NUDGE_MS = 500;
 /** Bouton « Start » des manettes (mapping standard). */
 const PAD_START_BUTTON = 9;
 /** Boutons « Select / Back » (saut du tutoriel) et « A » (confirmer la carte de fin) des manettes (mapping standard). */
@@ -122,6 +128,10 @@ export class GameScene extends Phaser.Scene {
   /** Indice de la manette dont le front montant Start a été détecté le plus récemment. */
   private lastStartPad = 0;
   private sfx = new Sfx();
+  /** Musique de fond demandée par CETTE scène (jamais en démo) : à relâcher au départ / à la fermeture. */
+  private musicStarted = false;
+  /** Cumul (ms) avant la prochaine tentative de reprise du contexte audio (politique d'autoplay, manettes). */
+  private musicNudgeMs = 0;
 
   private accumulatorMs = 0;
   private latched: TickInputs | null = null;
@@ -178,8 +188,11 @@ export class GameScene extends Phaser.Scene {
   private readonly onAnyKey = (): void => {
     this.tutorial?.noteKeyboard();
   };
+  /** M : coupe / remet TOUT le son (effets ET musique) pour la durée de la partie ; le réglage mémorisé du menu n'est pas modifié. */
   private readonly onMute = (): void => {
-    this.sfx.setMuted(!this.sfx.isMuted);
+    const muted = !this.sfx.isMuted;
+    this.sfx.setMuted(muted);
+    getMusic().setMuted(muted);
   };
   private readonly onWindowBlur = (): void => {
     inputManager.reset();
@@ -251,6 +264,8 @@ export class GameScene extends Phaser.Scene {
     this.tutorialDeviceAccumMs = TUTORIAL_DEVICE_REFRESH_MS;
     this.padEdgeDown = {};
     this.sfx = new Sfx();
+    this.musicStarted = false;
+    this.musicNudgeMs = 0;
   }
 
   create(): void {
@@ -372,6 +387,14 @@ export class GameScene extends Phaser.Scene {
       this.input.keyboard?.on('keydown-SPACE', this.onSpaceEnd);
       this.input.keyboard?.on('keydown', this.onAnyKey);
     }
+    // Musique de fond : jamais en démo (arcade : on attire l'œil, pas l'oreille) ; basse pendant le tutoriel ; fondu d'entrée.
+    if (!demo) {
+      const music = getMusic();
+      music.setMuted(false); // comme les effets sonores : la coupure (M) vaut pour la durée d'une partie (remise aussi à zéro par stop())
+      music.setDucked(false);
+      music.start({ level: tut ? TUTORIAL_MUSIC_LEVEL : 1 });
+      this.musicStarted = true;
+    }
     window.addEventListener('blur', this.onWindowBlur);
     this.game.events.on(Phaser.Core.Events.HIDDEN, this.onGameHidden);
     this.offLanguage = onLanguageChange(() => this.retranslate());
@@ -426,6 +449,12 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (this.failed) return;
     const dt = delta > 0 && Number.isFinite(delta) ? Math.min(delta, 250) : 0;
+    // Autoplay : une manette ne compte pas toujours comme un geste, on retente régulièrement de reprendre le contexte audio.
+    this.musicNudgeMs += dt;
+    if (this.musicNudgeMs >= MUSIC_NUDGE_MS) {
+      this.musicNudgeMs = 0;
+      if (this.musicStarted) getMusic().nudge();
+    }
 
     if (this.leaving) {
       this.leaving.elapsedMs += dt;
@@ -1012,6 +1041,8 @@ export class GameScene extends Phaser.Scene {
     if (this.leaving) return;
     this.leaving = { key, data, elapsedMs: 0, fadeMs: Math.max(1, fadeMs) };
     inputManager.reset();
+    // Fin de partie, résultat, dialogue de fin de niveau, retour au menu : la musique s'arrête en fondu, en même temps que l'écran.
+    if (this.musicStarted) getMusic().stop(Math.max(1, fadeMs) / 1000);
   }
 
   /**
@@ -1030,6 +1061,7 @@ export class GameScene extends Phaser.Scene {
     if (this.paused || this.failed || this.demoFlow) return; // jamais de pause en démo
     this.paused = true;
     this.pauseOwner = owner;
+    if (this.musicStarted) getMusic().setDucked(true); // la musique continue, volume baissé (~35 %)
     inputManager.reset();
     this.latched = null;
     this.accumulatorMs = 0;
@@ -1037,9 +1069,11 @@ export class GameScene extends Phaser.Scene {
     this.pauseMenu.show();
   }
 
-  private closePause(): void {
+  /** `restoreMusic = false` : la partie se quitte, la musique reste baissée jusqu'à son fondu de sortie (lancé par `leaveTo`). */
+  private closePause(restoreMusic: boolean = true): void {
     if (!this.paused) return;
     this.paused = false;
+    if (restoreMusic && this.musicStarted) getMusic().setDucked(false);
     this.pauseNav = null;
     this.pauseOwner = null;
     this.pauseMenu.hide();
@@ -1080,7 +1114,8 @@ export class GameScene extends Phaser.Scene {
             this.closePause();
             return;
           } else {
-            this.closePause();
+            // Quitter : pas de dé-ducking (la musique remonterait de 35 % vers 100 % pendant 0,15 s juste avant son fondu de sortie).
+            this.closePause(false);
             this.leaveTo(SCENE_KEYS.Menu);
             return;
           }
@@ -1213,6 +1248,12 @@ export class GameScene extends Phaser.Scene {
     this.fx?.destroy();
     this.rig?.destroy();
     this.sfx.destroy();
+    if (this.musicStarted) {
+      this.musicStarted = false;
+      const music = getMusic();
+      music.setDucked(false);
+      music.stop(0.25); // fermeture de la scène : arrêt propre (sans effet si le fondu de sortie est déjà lancé)
+    }
     this.pauseNav = null;
   }
 }

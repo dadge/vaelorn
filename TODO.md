@@ -7,7 +7,7 @@
 - [ ] **Vérifier la durée réelle** de chaque niveau (cible 5–10 min) avec de vrais joueurs ; ajuster le nombre/la taille des salles.
 - [x] **Lisibilité en splitscreen à 4 joueurs** sur une vraie télé : retour de David — l'écran divisé en 4 sur grande télé « marche bien ». À revérifier avec les salles sombres et les nouveaux niveaux 4-6 (HUD sablier, lanterne).
 - [ ] Remplacer les **sprites placeholder** par de vrais assets pixel art (liste : `docs/SPRITES.md`).
-- [ ] Ajouter **sons et musique** (seuls des appels de sons placeholder existent dans `src/entities/sfx.ts`).
+- [ ] Ajouter de vrais **sons** (seuls des bips placeholder existent dans `src/entities/sfx.ts`). La **musique de fond** existe (thème synthétisé « Cavalcade du Cristal », voir README « Musique » et la section « Musique de fond » ci-dessous : à valider à l'oreille).
 
 ## Gameplay / contenu
 
@@ -71,6 +71,23 @@
 - [ ] **Sprites définitifs de nourriture** (cœur de nourriture) et de cristal de soin : les dessins actuels sont **provisoires** (`src/render/art/loot.ts`, liste dans `docs/SPRITES.md`) ; **sons réels** (aujourd'hui trois bips synthétisés : `pickupDrop`, `pickup`, `crystalHeal` dans `src/entities/sfx.ts`).
 - [ ] Bots de calibrage : la brique `eat` n'est branchée que dans `attackUntilClear` et les comportements de fond (pas dans les actions `goTo` ni les boucles de combat propres aux niveaux 1, 2 et 5) ; quelques scripts se désynchronisent avec d'autres graines que celles des tests de niveau (3 parties sur 120 sans sources de vie, 0 avec, solo ; 5 sur 120 à 4 joueurs). Pour une calibration encore plus fidèle : un bot « joueur humain » avec esquive réelle, ou des scripts tolérants. Le calibrage complet se lance à la demande (`lootCalibration.long.test.ts`, voir README). Même limite pour la brique `pickGear` de l'équipement (calibrage `gearCalibration.long.test.ts`) : elle n'agit que dans les comportements de fond, les scripts passent une partie des ennemis aux niveaux 1-3 (0,4-0,7 objet par héros et par salle au lieu de ~1), les bots n'esquivent pas, n'appellent jamais (le cor n'est pas mesuré) et ne savent pas profiter de la portée de l'arc ; 2 parties sur 20 du niveau 2 à 4 joueurs avec équipement ne se terminent pas (script des runes).
 - [ ] Idées non faites : toast à la première nourriture vue, flèche vers le cristal le plus proche quand les PV sont bas, nourriture variée par ennemi (viande, pomme…), sauvegarde de l'état des cristaux (une défaite les recharge : voulu).
+
+## Musique de fond (voir README « Musique » ; prouvée par tests sur un faux AudioContext et par un rendu hors ligne mesuré, jamais ÉCOUTÉE en jeu réel ni sur un téléphone)
+
+- [ ] **Écouter en vrai** : le rendu temps réel dans le jeu (pas seulement la mesure hors ligne) a-t-il le timbre du rendu validé (`preview-D1.wav`) ? Boucle sans clic audible au raccord (mesure 16 → 1) ?
+- [ ] **Volume relatif aux effets sonores** : par défaut 60 % (gain maître 0,15, crête ≈ -23 dBFS, abaissé de 6 dB après la relecture : à 0,3 la musique égalait des effets fréquents, calcul et non écoute). Les effets (`sfx.ts`, placeholders de 0,025 à 0,10) restent-ils bien audibles par-dessus, à 1 et à 4 joueurs en plein combat ? Ajuster `MUSIC_BASE_GAIN` (`src/audio/musicPlayer.ts`) ou le défaut (`musicSettings.ts`).
+- [ ] **Ducking de la pause** (35 %) : assez bas pour lire le menu pause, assez haut pour garder l'ambiance ? La reprise est-elle propre ?
+- [ ] **Mobile réel** (iOS Safari, Android Chrome) : le **premier toucher** démarre-t-il la musique ? Mise en veille / retour d'onglet (`visibilitychange`) : reprise sans décalage ni double lecture ? Consommation / chauffe sur une longue partie (un oscillateur par note, ~20 notes/s) ?
+- [ ] **Manette seule** (sans clavier ni souris) : la musique démarre-t-elle sans aucun geste « classique » ? (nudge toutes les 500 ms ; certains navigateurs n'acceptent pas un bouton de manette comme geste.)
+- [ ] **Aperçu du menu** : confort de l'aperçu en fondu quand on parcourt les lignes « Musique » / « Volume musique » (au clavier et à la manette) ; la musique ne doit jamais déborder sur une autre scène.
+- [ ] **Fatigue d'écoute** : 25,6 s en boucle sur un niveau de 5 à 10 min ; faut-il un second thème (boss, salles sombres) ? Le thème redémarre à chaque niveau : voulu ?
+- [ ] **Tutoriel à demi-volume** et **démo muette** : confirmer ces choix à l'usage.
+- [ ] **Ressemblance** : thème original, sans emprunt délibéré à Zelda ou Bubble Bobble ; vérification de ressemblance faite de mémoire, **à confirmer à l'oreille**.
+- [ ] **Touche M** : couper tout le son (effets + musique) en jeu ; envisager une indication à l'écran et un bouton tactile / manette si besoin. **Décision de conception à trancher** (relecture UX) : aujourd'hui rien en jeu sur téléphone ni à la manette seule pour couper la musique ; il faudrait une ligne « Son » dans le menu pause (clavier / manette / tactile), ce qui contredit la décision « pas d'options dans la pause » (README « Musique »). L'aide du menu précise désormais que M est une touche de clavier ; M n'est pas dans le rappel des commandes de la pause (zone de 480 px de large, déjà dense).
+- [ ] **Ligne « Volume musique » quand la musique est « Désactivée »** : le volume reste réglable sans aucun retour sonore (aperçu silencieux). Options : griser la ligne, ou activer implicitement la musique ; non retenu (contredirait un choix explicite « Désactivée » et le forçage `?music=0`). À trancher à l'usage.
+- [ ] **Reprise de la musique** : couper puis remettre (M, volume 0 %, ligne « Musique ») relance le thème à la mesure 1 avec un fondu d'entrée ; acceptable ? Sinon, garder la position de boucle (nœuds actifs à gain 0 : coût en calcul).
+- [ ] **Fenêtre d'anticipation** (0,3 s) : mesurer sur un vrai appareil les blocages du fil principal au changement de salle (`roomEntered`) ; si la musique tombe encore à sec, l'allonger ou alléger la reconstruction.
+- [ ] **iOS « interrupted »** : la reprise après appel / verrouillage d'écran (`nudge`, `sfx.play`, ré-armement des écouteurs de geste sur `statechange`) est prouvée par tests sur faux contextes ; à vérifier sur un vrai iPhone. Idem le suivi des fondus côté JS (aucune dépendance au getter `AudioParam.value`, jamais vérifié sous Firefox / Safari).
 
 ## Technique
 

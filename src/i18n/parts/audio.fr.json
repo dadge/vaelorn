@@ -1,0 +1,8 @@
+{
+  "audio.hint": "Musique de fond pendant les parties (aperçu ici). Au clavier, la touche M coupe ou remet tout le son en jeu.",
+  "audio.music": "Musique",
+  "audio.music.off": "Désactivée",
+  "audio.music.on": "Activée",
+  "audio.volume": "Volume musique",
+  "audio.volume.value": "{percent} %"
+}

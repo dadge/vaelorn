@@ -1,0 +1,8 @@
+{
+  "audio.hint": "Background music during play (preview here). On a keyboard, the M key mutes or restores all sound in game.",
+  "audio.music": "Music",
+  "audio.music.off": "Off",
+  "audio.music.on": "On",
+  "audio.volume": "Music volume",
+  "audio.volume.value": "{percent}%"
+}

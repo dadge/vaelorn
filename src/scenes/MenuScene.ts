@@ -3,7 +3,9 @@
  *
  * Lignes : Jouer, Nombre de joueurs (1–4), Difficulté de CHAQUE joueur (1 facile / 2 normal / 3 difficile),
  * Niveau de départ, Langue (FR/EN, change tous les textes immédiatement), Plein écran, Contrôles (panneau : déplacement,
- * action, spécial, appeler, pause et menus au clavier et à la manette, manettes détectées). Chaque joueur choisit son appareil à l'écran de sélection
+ * action, spécial, appeler, pause et menus au clavier et à la manette, manettes détectées), Musique (activée / désactivée) et Volume de la
+ * musique (0-100 % par pas de 10, mémorisés : src/audio/musicSettings.ts). Le menu est SILENCIEUX ; la musique n'y est entendue qu'en
+ * APERÇU tant qu'une des deux lignes « Musique » est sélectionnée (fondu à l'entrée et à la sortie). Chaque joueur choisit son appareil à l'écran de sélection
  * (rejoindre par bouton) : l'ancienne option « J1 à la manette » n'est donc plus affichée.
  * 100 % utilisable à la manette seule : croix / stick = naviguer et modifier, A = valider, B = fermer le panneau.
  * La manette qui lance « Jouer » réclame automatiquement l'emplacement 1 de l'écran de sélection.
@@ -25,6 +27,8 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../core/constants';
 import type { CharacterId } from '../core/types';
+import { getMusic } from '../audio/music';
+import { musicSettings, stepVolume } from '../audio/musicSettings';
 import { SUPPORTED_LANGUAGES, getLanguage, setLanguage, t } from '../i18n/i18n';
 import { CHARACTERS } from '../core/characters';
 import { MenuNavigator, VIRTUAL_PAD_INDEX, inputManager, isNonStandardPad, listGamepads } from '../input';
@@ -96,6 +100,12 @@ const ROW_H = 34; // 12 lignes au plus (4 joueurs + Continuer + Effacer la sauve
 const ROW_H_COMPACT = 31;
 /** Nombre de lignes sélectionnables au-delà duquel on passe à `ROW_H_COMPACT`. */
 const COMPACT_ROWS_FROM = 12;
+/** Avec les lignes « Musique » et « Volume », 15 lignes sélectionnables au plus (sauvegarde + 4 joueurs) : lignes plus basses encore. */
+const ROW_H_TIGHT = 28;
+/** Nombre de lignes sélectionnables au-delà duquel on passe à `ROW_H_TIGHT`. */
+const TIGHT_ROWS_FROM = 13;
+/** Durée (s) du fondu de sortie de l'aperçu de la musique. */
+const MUSIC_PREVIEW_FADE_S = 0.3;
 const ROW_GAP = 3;
 const ROWS_TOP = 152;
 const VALUE_CX = 575;
@@ -202,6 +212,10 @@ export class MenuScene extends Phaser.Scene {
   private graceUntilMs: number | null = null;
   /** Cette instance de la scène est un retour de démo (la grâce est armée dans `create`, une fois le menu affiché). */
   private afterDemo = false;
+  /** Aperçu de la musique en cours (une ligne « Musique » est sélectionnée). */
+  private musicPreview = false;
+  /** Prochain instant (ms de scène) où retenter la reprise du contexte audio pendant l'aperçu. */
+  private nextAudioNudgeAt = 0;
 
   constructor() {
     super(SCENE_KEYS.Menu);
@@ -227,6 +241,8 @@ export class MenuScene extends Phaser.Scene {
     this.demoLaunching = false;
     this.attract = null;
     this.graceUntilMs = null;
+    this.musicPreview = false;
+    this.nextAudioNudgeAt = 0;
   }
 
   create(): void {
@@ -264,6 +280,10 @@ export class MenuScene extends Phaser.Scene {
     this.events.once('shutdown', () => {
       this.scale.off('enterfullscreen', onFullscreen);
       this.scale.off('leavefullscreen', onFullscreen);
+      if (this.musicPreview) {
+        this.musicPreview = false;
+        getMusic().stop(MUSIC_PREVIEW_FADE_S); // l'aperçu ne déborde jamais sur une autre scène
+      }
       this.rows = [];
       this.controls = null;
       this.dialog = null;
@@ -292,6 +312,11 @@ export class MenuScene extends Phaser.Scene {
     this.bg.update(time);
     this.title.setY(50 + Math.round(Math.sin(time / 700) * 3));
     this.updateAttract();
+    // Aperçu musical à la manette seule : un bouton de manette n'est pas toujours un geste qui débloque l'audio ; on retente périodiquement.
+    if (this.musicPreview && time >= this.nextAudioNudgeAt) {
+      this.nextAudioNudgeAt = time + 500;
+      getMusic().nudge();
+    }
     if (this.starting) return;
     const swallow = this.inGrace();
     for (const intent of this.nav.pollMenu()) {
@@ -520,6 +545,33 @@ export class MenuScene extends Phaser.Scene {
       right: toggleFs,
       confirm: toggleFs,
     });
+    const toggleMusic = (): void => {
+      musicSettings.update({ enabled: !musicSettings.effective().enabled });
+      this.refreshValues();
+      this.syncMusicPreview(); // l'action du joueur lance l'aperçu même si la ligne n'avait été que survolée
+    };
+    specs.push({
+      id: 'music',
+      kind: 'choice',
+      label: () => t('audio.music'),
+      value: () => (musicSettings.effective().enabled ? t('audio.music.on') : t('audio.music.off')),
+      left: toggleMusic,
+      right: toggleMusic,
+      confirm: toggleMusic,
+    });
+    const stepMusicVolume = (direction: 1 | -1): void => {
+      musicSettings.update({ volume: stepVolume(musicSettings.get().volume, direction) });
+      this.refreshValues();
+      this.syncMusicPreview();
+    };
+    specs.push({
+      id: 'musicVolume',
+      kind: 'choice',
+      label: () => t('audio.volume'),
+      value: () => t('audio.volume.value', { percent: musicSettings.get().volume }),
+      left: () => stepMusicVolume(-1),
+      right: () => stepMusicVolume(1),
+    });
     specs.push({ id: 'controls', kind: 'action', label: () => t('menu.controls'), confirm: () => this.openControls() });
     if (layout.showErase) {
       specs.push({ id: 'erase', kind: 'action', label: () => t('save.erase'), confirm: () => this.onErase() });
@@ -538,7 +590,8 @@ export class MenuScene extends Phaser.Scene {
     let y = ROWS_TOP;
     const specs = this.specs();
     // 13 lignes sélectionnables au plus (avec « Tutoriel ») : lignes un peu plus basses pour tout tenir au-dessus de la ligne d'aide
-    this.rowH = specs.filter((x) => x.kind !== 'note').length > COMPACT_ROWS_FROM ? ROW_H_COMPACT : ROW_H;
+    const selectableCount = specs.filter((x) => x.kind !== 'note').length;
+    this.rowH = selectableCount > TIGHT_ROWS_FROM ? ROW_H_TIGHT : selectableCount > COMPACT_ROWS_FROM ? ROW_H_COMPACT : ROW_H;
     for (const spec of specs) {
       const view = this.createRowView(spec, y);
       this.rows.push(view);
@@ -589,7 +642,7 @@ export class MenuScene extends Phaser.Scene {
     zone.on('pointerover', () => {
       if (this.controls || this.dialog || this.starting) return;
       this.selectedId = spec.id;
-      this.applySelection();
+      this.applySelection(false); // le simple survol ne lance pas l'aperçu musical (ni ne crée un contexte audio avant tout geste)
     });
     zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.controls || this.dialog || this.starting || this.inGrace()) return;
@@ -607,7 +660,7 @@ export class MenuScene extends Phaser.Scene {
     return { spec, container, normal, selected, label, value, height: h };
   }
 
-  private applySelection(): void {
+  private applySelection(startPreview: boolean = true): void {
     for (const r of this.rows) {
       if (!r.normal || !r.selected) continue;
       const on = r.spec.id === this.selectedId;
@@ -616,6 +669,20 @@ export class MenuScene extends Phaser.Scene {
       r.label.setColor(css(r.spec.color ?? (on ? UI_THEME.accent : UI_THEME.text)));
     }
     this.refreshInfo();
+    this.syncMusicPreview(startPreview);
+  }
+
+  /**
+   * Aperçu de la musique : joue (fondu d'entrée) tant qu'une ligne « Musique » est sélectionnée AU CLAVIER, À LA MANETTE OU AU CLIC (un geste de
+   * l'utilisateur), s'arrête (fondu) sinon. `allowStart = false` (survol à la souris) ne lance jamais l'aperçu, mais l'arrête si besoin.
+   */
+  private syncMusicPreview(allowStart: boolean = true): void {
+    const want = this.selectedId === 'music' || this.selectedId === 'musicVolume';
+    if (want === this.musicPreview) return;
+    if (want && !allowStart) return;
+    this.musicPreview = want;
+    if (want) getMusic().start();
+    else getMusic().stop(MUSIC_PREVIEW_FADE_S);
   }
 
   private refreshInfo(): void {
@@ -627,6 +694,8 @@ export class MenuScene extends Phaser.Scene {
       this.info.setText(t('save.continue.team', { names }));
     } else if (sel === 'tutorial') {
       this.info.setText(t('menu.tutorial.hint'));
+    } else if (sel === 'music' || sel === 'musicVolume') {
+      this.info.setText(t('audio.hint'));
     } else if (sel.startsWith('diff')) {
       const i = Number(sel.slice(4));
       this.info.setText(t(`menu.difficulty.${this.choices.difficulties[i]}.desc`));

@@ -14,12 +14,15 @@
  *   - attract=0|1 : mode démo (« attract mode », src/attract/) désactivé / forcé (même en mode de test : quick, tutorial, nosave…) ;
  *     attractIdle=<secondes> : inactivité avant la démo (défaut 60) ; attractDemo=<secondes> : durée de la démo (défaut 30)
  *     (ex. `?attractIdle=5&attractDemo=10`).
+ *   - music=0|1 : force la musique de fond désactivée / activée SANS toucher au réglage mémorisé (src/audio/musicSettings.ts).
  * `window.__vaelorn = { game }` est exposé en mode dev (import.meta.env.DEV), avec ?debug=1 ou ?quick=1 ;
  * en démarrage rapide un événement `vaelorn:quickstart` (detail = GameSession) est émis sur `window`.
  */
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from './core/constants';
 import { parseAttractParams, setAttractConfig } from './attract/config';
+import { installAudioUnlock } from './audio/audioContext';
+import { musicSettings, parseMusicParam } from './audio/musicSettings';
 import { onLanguageChange, setLanguage, t } from './i18n/i18n';
 import { inputManager } from './input';
 import { LEVELS } from './levels';
@@ -48,6 +51,10 @@ function start(): void {
   // Mode démo : durées et activation (désactivé par défaut en mode de test, sauf `?attract=1`).
   setAttractConfig(parseAttractParams(window.location.search, { quick: quick.quick, tutorial: quick.tutorial }));
   if (quick.language) setLanguage(quick.language);
+  // Musique de fond : forçage éventuel `?music=0|1` (sans toucher au stockage) ; l'audio se débloque au premier geste de l'utilisateur
+  // (politique d'autoplay des navigateurs, y compris le premier toucher sur mobile).
+  musicSettings.setOverride(parseMusicParam(window.location.search));
+  installAudioUnlock();
 
   // Écoute clavier / manettes dès le départ (les menus et le jeu s'appuient sur ce singleton).
   inputManager.attach();
@@ -73,6 +80,9 @@ function start(): void {
     roundPixels: !smooth,
     antialias: smooth,
     disableContextMenu: true,
+    // Le gestionnaire audio de Phaser n'est PAS utilisé (sons et musique : src/audio et src/entities/sfx.ts, contexte partagé) : on évite
+    // un second AudioContext et ses avertissements d'autoplay.
+    audio: { noAudio: true },
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,

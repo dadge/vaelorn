@@ -4,6 +4,7 @@
  *
  * `sfxForEvent` est pur (testé) : il associe un SimEvent à un nom de son.
  */
+import { getAudioContext } from '../audio/audioContext';
 import type { SimEvent, SpecialKind } from '../core/types';
 import { spriteTier } from '../render/art/enemyTiers';
 
@@ -232,7 +233,10 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
   }
 }
 
-/** Lecteur de sons placeholder (WebAudio). Créé paresseusement ; ne lève jamais. */
+/**
+ * Lecteur de sons placeholder (WebAudio). Créé paresseusement ; ne lève jamais. Utilise le contexte audio PARTAGÉ de l'application
+ * (`audio/audioContext.ts`, aussi utilisé par la musique de fond) : il n'est jamais fermé ici.
+ */
 export class Sfx {
   private ctx: AudioContext | null = null;
   private failed = false;
@@ -251,18 +255,12 @@ export class Sfx {
   private ensure(): AudioContext | null {
     if (this.failed) return null;
     if (this.ctx) return this.ctx;
-    try {
-      const Ctor = (globalThis as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext ??
-        (globalThis as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctor) {
-        this.failed = true;
-        return null;
-      }
-      this.ctx = new Ctor();
-    } catch {
+    const ctx = getAudioContext();
+    if (!ctx) {
       this.failed = true;
       return null;
     }
+    this.ctx = ctx;
     return this.ctx;
   }
 
@@ -275,7 +273,7 @@ export class Sfx {
     const ctx = this.ensure();
     if (!ctx) return;
     try {
-      if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
+      if (ctx.state !== 'running') void ctx.resume().catch(() => undefined); // « suspended » (autoplay) ou « interrupted » (iOS)
       const spec = SPECS[name];
       this.tone(ctx, spec.f0, spec.f1, spec.durMs, spec.type, spec.vol, 0);
       if (spec.then) this.tone(ctx, spec.then.f0, spec.then.f1, spec.durMs, spec.type, spec.vol, spec.then.delayMs);
@@ -301,13 +299,8 @@ export class Sfx {
     osc.stop(t1 + 0.02);
   }
 
-  /** Ferme le contexte audio. */
+  /** Libère la référence au contexte audio (le contexte partagé reste ouvert : la musique et les prochains sons l'utilisent). */
   destroy(): void {
-    try {
-      void this.ctx?.close();
-    } catch {
-      /* déjà fermé */
-    }
     this.ctx = null;
   }
 }
