@@ -10,6 +10,7 @@ import {
   MAX_HEARTS,
   SIGN_RANGE,
   bossBarRatio,
+  boundsOverlap,
   colorNameKey,
   computeContextPrompt,
   computeExitOpen,
@@ -97,10 +98,11 @@ describe('describeObjective', () => {
   const mech: ObjectiveDef = { id: 'm', slot: 0, roomId: 'r1', kind: 'mechanism', labelKey: 'hud.objective', mechanismId: 'p1' };
   const st = (progress: number, done = false): ObjectiveState => ({ id: 'x', ownerId: 0, done, progress });
 
-  it('kills : compteur n/total et pourcentage', () => {
+  it('kills : « Coups fatals portés : n/total », sans pourcentage redondant', () => {
     const l = describeObjective(kills, st(0.4));
     expect(l.detail).toBe(t('hud.kills', { count: 2, total: 5 }));
-    expect(l.percent).toBe('40%');
+    expect(l.counter).toBe('2/5');
+    expect(l.percent).toBe('');
     expect(l.label).toBe(t('hud.objective'));
     expect(l.done).toBe(false);
   });
@@ -125,7 +127,8 @@ describe('describeObjective', () => {
   });
 
   it('progression invalide (NaN, >1) : jamais NaN', () => {
-    expect(describeObjective(kills, st(Number.NaN)).percent).toBe('0%');
+    expect(describeObjective(kills, st(Number.NaN)).detail).toBe(t('hud.kills', { count: 0, total: 5 }));
+    expect(describeObjective(zone, st(Number.NaN)).percent).toBe('0%');
     expect(describeObjective(kills, st(9)).detail).toBe(t('hud.kills', { count: 5, total: 5 }));
   });
 });
@@ -154,6 +157,13 @@ describe('objectifs visibles et totaux', () => {
     sim.state.objectives.find((o) => o.id === 'a')!.done = true;
     expect(visibleObjectives(sim.state, level, 0, r2).map((l) => l.id)).toEqual(['b']);
     sim.state.objectives.find((o) => o.id === 'a')!.done = false;
+  });
+
+  it("objectif d'une salle passée non accompli : porte le nom de sa salle (`where`), pas celui de la salle courante", () => {
+    const inR2 = visibleObjectives(sim.state, level, 0, r2);
+    expect(inR2.find((l) => l.id === 'a')?.where).toBe(t(r1.nameKey));
+    expect(inR2.find((l) => l.id === 'b')?.where).toBe('');
+    expect(visibleObjectives(sim.state, level, 0, r1)[0].where).toBe('');
   });
 
   it('totaux accomplis / total sur tout le niveau', () => {
@@ -353,10 +363,20 @@ describe('computeContextPrompt', () => {
   });
 });
 
+describe('boundsOverlap', () => {
+  const r = { x0: 10, y0: 10, x1: 20, y1: 20 };
+  it('détecte un recouvrement, pas deux rectangles qui se touchent seulement', () => {
+    expect(boundsOverlap(r, { x0: 15, y0: 15, x1: 30, y1: 30 })).toBe(true);
+    expect(boundsOverlap(r, { x0: 20, y0: 10, x1: 30, y1: 20 })).toBe(false);
+    expect(boundsOverlap(r, { x0: 0, y0: 25, x1: 100, y1: 40 })).toBe(false);
+  });
+});
+
 describe('computeExitOpen', () => {
   it('suit les exigences de sortie (plaque)', () => {
     const room = makeTestRoom();
     const sim = makeSim(room, 1);
+    for (const o of sim.state.objectives) o.done = true; // salle unique = salle finale : les objectifs sont exigés aussi
     expect(computeExitOpen(sim.state, sim.level, room)).toBe(false);
     const plate = sim.state.room.mechanisms.find((m) => m.id === 'p1')!;
     plate.active = true;
@@ -366,9 +386,21 @@ describe('computeExitOpen', () => {
   it('exigence « clear » : ennemis vivants bloquent', () => {
     const room = makeTestRoom({ exit: { rect: { x: 9, y: 5, w: 2, h: 2 }, requires: ['clear'] }, enemies: [{ kind: 'slime', tile: [8, 2] }] });
     const sim = makeSim(room, 1);
+    for (const o of sim.state.objectives) o.done = true;
     expect(computeExitOpen(sim.state, sim.level, room)).toBe(false);
     for (const e of sim.state.room.enemies) e.dead = true;
     expect(computeExitOpen(sim.state, sim.level, room)).toBe(true);
+  });
+
+  it('salle finale : miroir de GameSimulation.isExitOpen (objectifs du niveau exigés)', () => {
+    const room = makeTestRoom({ exit: { rect: { x: 9, y: 5, w: 2, h: 2 }, requires: [] } });
+    const sim = makeSim(room, 1);
+    expect(sim.state.objectives.length).toBeGreaterThan(0);
+    expect(computeExitOpen(sim.state, sim.level, room)).toBe(sim.isExitOpen());
+    expect(computeExitOpen(sim.state, sim.level, room)).toBe(false);
+    for (const o of sim.state.objectives) o.done = true;
+    expect(computeExitOpen(sim.state, sim.level, room)).toBe(true);
+    expect(sim.isExitOpen()).toBe(true);
   });
 });
 

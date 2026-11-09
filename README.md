@@ -62,6 +62,19 @@ Les menus se pilotent aux mêmes entrées (flèches/croix, Entrée/A, Échap/B).
 - **Mécanismes coopératifs** : plaques de pression simultanées, leviers séparés à fenêtre de temps, clés personnelles (une clé = une porte = un joueur), blocs 2×2 poussés à deux vers un socle, vision partagée (un joueur voit une séquence de runes que les autres doivent saisir), braseros, et les trois mécanismes inédits des niveaux 4 à 6 (statue jumelle, sablier partagé, pont de lumière — voir « Niveaux 4 à 6 »).
 - **Torches** : certaines salles sont **sombres**. Chaque joueur porte une torche dont le combustible s'use (75 s) ; il faut la recharger aux **braseros allumés** (action à côté), sinon on ne voit presque rien. Des braseros éteints peuvent être allumés avec sa torche.
 
+### Lire les objectifs à l'écran
+
+Deux blocs distincts dans la vue de chaque joueur (`src/render/roomGoals.ts` pour la logique pure, `src/render/hud.ts` pour le dessin) :
+
+- **« Objectif de la salle »** (haut à droite, **identique pour tous**) : ce qu'il faut faire pour ouvrir la sortie, une ligne cochable par exigence de `room.exit.requires`.
+  - *Vaincre tous les ennemis* (ou *le boss* / *le boss et ses sbires* si un boss ou demi-boss est vivant ou en attente), suivi de « (N restants) ». Le libellé est déduit de la salle (boss, escorte) : il ne change pas pendant le combat.
+  - *Ouvrir : porte / herse / grille* (avec « (1/2) » quand elle a plusieurs prérequis et qu'elle est encore fermée) ou *Activer : levier, plaque, brasero, sablier…*.
+  - *Objectifs personnels accomplis : x/y* : **une seule ligne** pour tous les objectifs de la sortie ; elle nomme les joueurs en attente (2 au plus, sinon leur nombre) — la sortie attend **tout le monde**. Dans la salle finale, les objectifs de tout le niveau sont comptés.
+  - Tout satisfait : **« Sortie ouverte : rejoins-la ! »** (en évidence) ; aucune exigence : « Rejoins la sortie ».
+- **« Ton objectif » / « Tes objectifs »** (haut gauche, **propre au joueur**) : le libellé de ton objectif, puis sa progression — « Coups fatals portés : 1/3 » (les **tiens**), « Tiens la zone : 4 s (50 %) », « Accompli ». Un objectif d'une salle passée non accompli rappelle sa salle. Le bloc n'apparaît que s'il y a au moins une ligne ; « 1/4 accomplis » (en toutes lettres, avec le pluriel « Tes objectifs ») n'est ajouté que si tu as plusieurs objectifs sur le niveau. L'écran de résultat compte les objectifs personnels des **niveaux joués** (« 6/12 accomplis »). Dans le panneau d'équipe (3 joueurs) : une ligne par joueur, « Pas d'objectif perso ici » quand son objectif est ailleurs.
+
+**Compteur d'ennemis et vagues** : « (N restants) » est affiché quand N ≤ 5, ou quand plus aucune apparition n'est en attente ; sinon seul le libellé apparaît (on garde la surprise des vagues suivantes). Un boss seul n'a pas de compteur. Les flèches rouges vers les 3 derniers ennemis restent inchangées. Le bloc est masqué quand le joueur est à terre, les bandeaux sablier/lanterne se placent sous lui et les notifications se décalent à sa gauche. À l'arrivée dans une salle, le bloc s'efface tant que le bandeau de nom de salle / d'indice (centré sur tout l'écran) passerait dessus, puis réapparaît.
+
 ## Personnages
 
 8 personnages jouables (chacun unique dans une partie), force et résistance différentes, plus une attaque spéciale. Les quatre premiers sont inspirés de la famille (stylisés heroic fantasy, pas des portraits).

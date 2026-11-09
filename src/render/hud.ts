@@ -10,14 +10,7 @@
 import type Phaser from 'phaser';
 import { INTERACT_RANGE, PLAYER_COLORS, PLAYER_COLOR_NAMES, REVIVE_RANGE, ROOM_CLEAR_DELAY_MS, TILE, TORCH_MAX_MS, WIPE_RESTART_DELAY_MS } from '../core/constants';
 import { CHARACTERS, specialFraction } from '../core/characters';
-import {
-  areAllRequirementsMet,
-  hourglassLeverIndex,
-  requiredPushers,
-  statueRotationTarget,
-  type RequirementContext,
-} from '../core/mechanisms';
-import { isObjectiveDone, isZoneOccupied, objectivesForPlayer } from '../core/objectives';
+import { hourglassLeverIndex, requiredPushers, statueRotationTarget } from '../core/mechanisms';
 import { reviveDurationFor } from '../core/players';
 import { resolveSlot } from '../core/slots';
 import type {
@@ -27,8 +20,6 @@ import type {
   GameState,
   KeyDef,
   LevelDef,
-  ObjectiveDef,
-  ObjectiveState,
   PlayerId,
   PlayerState,
   RoomDef,
@@ -49,6 +40,18 @@ import {
 } from './mechHud';
 import { edgeIndicator } from './camera';
 import { hex } from './palettes';
+import {
+  MAX_GOAL_LINES,
+  computeExitOpen,
+  describePersonalObjectives,
+  describeRoomGoals,
+  enemiesRemaining,
+  goalLineText,
+  objectiveLineText,
+  roomIndexOf,
+  teamObjectiveText,
+  type GoalLine,
+} from './roomGoals';
 import { mixColor as mixHex } from './specialFx';
 import { SEPARATOR_COLOR, type ScreenRect, type SplitLayout } from './splitscreen';
 import { showTorchHud, torchBarColor, torchBarWidth, torchBlinkAlpha, torchFraction, torchLevel, type TorchLevel } from './torchHud';
@@ -80,71 +83,6 @@ export function heartFrames(hp: number, maxHp: number): string[] {
   return out;
 }
 
-/** « 40% » à partir d'une progression 0..1 (bornée, arrondie, jamais NaN). */
-export function formatPercent(progress: number): string {
-  const p = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
-  return `${Math.round(p * 100)}%`;
-}
-
-/** Ligne d'objectif prête à afficher. */
-export interface ObjectiveLine {
-  id: string;
-  done: boolean;
-  /** Libellé traduit (t(labelKey)). */
-  label: string;
-  /** Détail de progression traduit (zone/kills) ou chaîne vide (mécanisme / accompli). */
-  detail: string;
-  /** Pourcentage « 40% » pour zone/kills en cours, sinon chaîne vide. */
-  percent: string;
-  progress: number;
-}
-
-/** Décrit un objectif personnel : libellé, détail et pourcentage (progression % pour zone / kills). */
-export function describeObjective(def: ObjectiveDef, state: ObjectiveState): ObjectiveLine {
-  const progress = Number.isFinite(state.progress) ? Math.max(0, Math.min(1, state.progress)) : 0;
-  let detail = '';
-  let percent = '';
-  if (!state.done) {
-    if (def.kind === 'kills') {
-      const total = Math.max(1, def.count ?? 1);
-      detail = t('hud.kills', { count: Math.min(total, Math.round(progress * total)), total });
-      percent = formatPercent(progress);
-    } else if (def.kind === 'zone') {
-      const seconds = Math.max(0, def.seconds ?? 0);
-      detail = t('hud.zoneHold', { seconds: Math.max(0, Math.ceil(seconds * (1 - progress))) });
-      percent = formatPercent(progress);
-    }
-  }
-  return { id: def.id, done: state.done, label: t(def.labelKey), detail, percent, progress };
-}
-
-function roomIndexOf(level: LevelDef, roomId: string): number {
-  for (let i = 0; i < level.rooms.length; i++) if (level.rooms[i].id === roomId) return i;
-  return -1;
-}
-
-/** Objectifs d'un joueur à afficher : ceux de la salle courante + ceux des salles passées non accomplis. */
-export function visibleObjectives(state: GameState, level: LevelDef, playerId: PlayerId, room: RoomDef): ObjectiveLine[] {
-  const current = roomIndexOf(level, room.id);
-  const out: ObjectiveLine[] = [];
-  for (const e of objectivesForPlayer(state.objectives, level, playerId)) {
-    const idx = roomIndexOf(level, e.def.roomId);
-    if (e.def.roomId === room.id || (idx >= 0 && idx < current && !e.state.done)) out.push(describeObjective(e.def, e.state));
-  }
-  return out;
-}
-
-/** Nombre d'objectifs accomplis / total d'un joueur sur tout le niveau. */
-export function objectiveTotals(state: GameState, level: LevelDef, playerId: PlayerId): { done: number; total: number } {
-  let done = 0;
-  let total = 0;
-  for (const e of objectivesForPlayer(state.objectives, level, playerId)) {
-    total++;
-    if (e.state.done) done++;
-  }
-  return { done, total };
-}
-
 /** Progression 0..1 du relevage SUR `target` (0 si personne ne le relève). */
 export function reviveRatioFor(target: PlayerState, players: readonly PlayerState[]): number {
   if (target.status !== 'down' || target.reviverId === null || !(target.reviveProgressMs > 0)) return 0;
@@ -160,45 +98,21 @@ export function bossBarRatio(e: Pick<EnemyState, 'hp' | 'maxHp'>): number {
   return Math.max(0, Math.min(1, e.hp / e.maxHp));
 }
 
-/** La sortie de la salle est-elle ouverte (toutes les exigences `room.exit.requires` satisfaites) ? */
-export function computeExitOpen(state: GameState, level: LevelDef, room: RoomDef): boolean {
-  let alive = 0;
-  for (const e of state.room.enemies) if (!e.dead) alive++;
-  const ctx: RequirementContext = {
-    mechanisms: state.room.mechanisms,
-    aliveEnemyCount: alive,
-    objectiveDone: (id) => isObjectiveDone(state.objectives, id),
-    zoneOccupied: (id) => isZoneOccupied(state.objectives, level, room, state.players, id),
-  };
-  return areAllRequirementsMet(room.exit.requires, ctx);
-}
+// Aides d'objectifs (sortie ouverte, ennemis restants, objectifs visibles…) : voir `roomGoals.ts` (ré-exportées ici).
+export {
+  ENEMY_COUNTER_MAX,
+  computeExitOpen,
+  describeObjective,
+  enemiesRemaining,
+  formatPercent,
+  objectiveTotals,
+  pendingSpawnCount,
+  visibleObjectives,
+  type ObjectiveLine,
+} from './roomGoals';
 
-/** Le compteur « Ennemis restants » n'apparaît qu'à partir de ce nombre (garde la surprise des vagues). */
-export const ENEMY_COUNTER_MAX = 5;
 /** Les flèches de bord vers les derniers ennemis apparaissent à partir de ce nombre. */
 export const ENEMY_ARROW_MAX = 3;
-
-/** Apparitions de la salle applicables à ce nombre de joueurs qui n'ont pas encore eu lieu (miroir de la simulation). */
-export function pendingSpawnCount(state: GameState, room: RoomDef): number {
-  const spawned = state.room.spawnedSpawnIdx;
-  let n = 0;
-  room.enemies.forEach((def, i) => {
-    if ((def.minPlayers ?? 1) <= state.playerCount && !spawned.includes(i)) n++;
-  });
-  return n;
-}
-
-/**
- * Ennemis restants (vivants + apparitions en attente) tant que la sortie exige `clear` et que ce n'est pas satisfait ;
- * null si la sortie n'exige pas `clear` ou si plus aucun ennemi ne reste. (Constat 18.)
- */
-export function enemiesRemaining(state: GameState, room: RoomDef): number | null {
-  if (!room.exit.requires.includes('clear')) return null;
-  let alive = 0;
-  for (const e of state.room.enemies) if (!e.dead) alive++;
-  const n = alive + pendingSpawnCount(state, room);
-  return n > 0 ? n : null;
-}
 
 /** Positions des ennemis vivants, du plus proche de `from` au plus éloigné (au plus `max`). */
 export function nearestEnemyPositions(state: GameState, from: Vec2, max: number): Vec2[] {
@@ -598,8 +512,23 @@ export interface HudEnv {
   specialHint?: (playerId: PlayerId) => string;
 }
 
+/** Rectangle en coordonnées écran. */
+export interface ScreenBounds {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** Deux rectangles se recouvrent-ils (bords qui se touchent = non) ? Pur. */
+export function boundsOverlap(a: ScreenBounds, b: ScreenBounds): boolean {
+  return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+}
+
 /** Données passées à chaque mise à jour du HUD d'un joueur. */
 export interface PlayerHudUpdate {
+  /** Rectangles écran des bandeaux d'arrivée de salle / de sortie affichés (le bloc d'objectif de salle s'efface dessous). */
+  banners?: readonly ScreenBounds[];
   state: GameState;
   room: RoomDef;
   dtMs: number;
@@ -643,9 +572,22 @@ export class PlayerHud {
   private readonly toastText: Text;
   private readonly arrows: Img[] = [];
   private readonly enemyArrows: Img[] = [];
-  private readonly enemyBg: Rect;
-  private readonly enemyText: Text;
-  private enemySig = '';
+  // bloc « Objectif de la salle » (haut à droite) : fond, en-tête, lignes cochables (icône + texte)
+  private readonly goalBg: Rect;
+  private readonly goalHeader: Text;
+  private readonly goalIcons: Img[] = [];
+  private readonly goalTexts: Text[] = [];
+  private readonly goalRight: number;
+  private readonly goalTop: number;
+  private readonly goalIconCol: number;
+  private goalSig = '';
+  private goalShown = false;
+  /** Bord bas (écran) du bloc d'objectif de salle, ou son bord haut s'il est masqué : les bandeaux et notifications se placent en dessous. */
+  private goalBottom: number;
+  private goalLeft: number;
+  /** Bloc masqué parce qu'un bandeau d'arrivée de salle passerait dessus (il réapparaît quand le bandeau s'efface). */
+  private goalBlocked = false;
+  private readonly goalRect: ScreenBounds = { x0: 0, y0: 0, x1: 0, y1: 0 };
   private enemyLeft: number | null = null;
   private readonly frameGfx: Phaser.GameObjects.Graphics;
   private readonly torchIcon: Img;
@@ -673,7 +615,7 @@ export class PlayerHud {
   private readonly lanText: Text;
   private readonly hgBarW: number;
   private readonly puzRight: number;
-  private readonly puzTop: number;
+  private puzTop: number;
   private hgShown = false;
   private hgLevel: HourglassLevel = 'ok';
   private hgRatio = 0;
@@ -767,7 +709,8 @@ export class PlayerHud {
     this.objBg = hudRect(ctx, vx + m - 4, oy - 3, 10, 10, 0x0b0912, 0.55);
     this.objBg.setOrigin(0, 0).setVisible(false);
     this.objHeader = hudText(ctx, vx + m, oy, '', { size: this.fs - 1, color: 0xf0e2b0 });
-    const wrapW = Math.min(Math.floor(vw * 0.62), 460);
+    // largeur réduite : le bloc « Objectif de la salle » occupe le haut à droite (jusqu'à 40 % de la vue)
+    const wrapW = Math.min(Math.floor(vw * 0.45), 460);
     for (let i = 0; i < 4; i++) {
       const ly = oy + this.fs + 6 + i * (this.fs + 8);
       const ic = hudIcon(ctx, vx + m, ly + 1, 'ui_cross', Math.max(1, u - 1));
@@ -820,15 +763,30 @@ export class PlayerHud {
       a.setOrigin(0.5, 0.5).setTint(0xff5a4a).setVisible(false);
       this.enemyArrows.push(a);
     }
-    // compteur « Ennemis restants : n » (haut à droite de la vue)
-    this.enemyBg = hudRect(ctx, vx + vw - m, vy + m, 10, 10, 0x0b0912, 0.62);
-    this.enemyBg.setStrokeStyle(2, 0xff5a4a, 0.8).setVisible(false);
-    this.enemyText = hudText(ctx, vx + vw - m - 7, vy + m + 4, '', { size: this.fs - 1, originX: 1, color: 0xffb0a0 });
-    this.enemyText.setVisible(false);
+    // bloc « Objectif de la salle » (haut à droite de la vue) : fusionne l'ancien compteur d'ennemis restants
+    this.goalRight = vx + vw - m - 6;
+    this.goalTop = vy + m;
+    this.goalLeft = this.goalRight;
+    this.goalBottom = this.goalTop;
+    const goalScale = Math.max(1, u - 1);
+    this.goalIconCol = 8 * goalScale + 6;
+    const goalWrap = Math.max(120, Math.min(420, Math.floor(vw * 0.4)) - this.goalIconCol);
+    this.goalBg = hudRect(ctx, this.goalRight, this.goalTop, 10, 10, 0x0b0912, 0.66);
+    this.goalBg.setOrigin(0, 0).setStrokeStyle(2, 0xf0e2b0, 0.7).setVisible(false);
+    this.goalHeader = hudText(ctx, this.goalRight, this.goalTop, '', { size: this.fs - 1, color: 0xf0e2b0 });
+    this.goalHeader.setVisible(false);
+    for (let i = 0; i < MAX_GOAL_LINES; i++) {
+      const ic = hudIcon(ctx, this.goalRight, this.goalTop, 'ui_cross', goalScale);
+      ic.setVisible(false);
+      this.goalIcons.push(ic);
+      const tx = hudText(ctx, this.goalRight, this.goalTop, '', { size: this.fs - 1, color: 0xffffff, wrap: goalWrap });
+      tx.setVisible(false);
+      this.goalTexts.push(tx);
+    }
 
-    // bandeaux « sablier » et « lanterne » : sous le compteur d'ennemis, alignés à droite
+    // bandeaux « sablier » et « lanterne » : sous le bloc d'objectif de salle, alignés à droite (repositionnés dynamiquement)
     this.puzRight = vx + vw - m;
-    this.puzTop = vy + m + 32;
+    this.puzTop = vy + m + 4;
     this.hgBarW = Math.max(70, Math.min(120, Math.floor(vw * 0.18)));
     this.puzBg = hudRect(ctx, this.puzRight + 4, this.puzTop - 4, 10, 10, 0x0b0912, 0.62);
     this.puzBg.setOrigin(1, 0).setStrokeStyle(2, 0xe8b44a, 0.8).setVisible(false);
@@ -858,6 +816,7 @@ export class PlayerHud {
     this.hgSig = '';
     this.lanSig = '';
     this.objSig = '';
+    this.goalSig = '';
     this.promptSig = '';
     this.signSig = '';
     this.refreshAccum = REFRESH_MS;
@@ -865,11 +824,38 @@ export class PlayerHud {
 
   /** Affiche une notification brève dans la vue du joueur. */
   showToast(text: string, color = 0xffffff, durationMs = 2600): void {
+    // largeur disponible : à gauche du bloc d'objectif de salle et des bandeaux sablier/lanterne (jamais par-dessus ni sous eux)
+    const avail = Math.max(80, Math.min(Math.floor(this.vp.w * 0.7), this.toastRightLimit() - this.vp.x - 8) - 24);
+    this.toastText.setWordWrapWidth(avail, true);
     this.toastText.setText(text).setColor(hex(color));
     fitBg(this.toastBg, this.toastText, 12, 6);
     this.toastText.setVisible(true);
     this.toastBg.setVisible(true);
     this.toastLeftMs = durationMs;
+    this.placeToast();
+  }
+
+  /** Bord droit (écran) que la notification ne doit pas dépasser : bord gauche du bloc d'objectif de salle / des bandeaux sablier-lanterne. */
+  private toastRightLimit(): number {
+    let limit = this.vp.x + this.vp.w;
+    if (this.goalShown) limit = Math.min(limit, this.goalLeft - 8);
+    if (this.puzBg.visible) limit = Math.min(limit, this.puzBg.x - this.puzBg.width - 8);
+    if (this.lanBg.visible) limit = Math.min(limit, this.lanBg.x - this.lanBg.width - 8);
+    return limit;
+  }
+
+  /** Place la notification au centre haut de la vue, décalée vers la gauche pour ne pas recouvrir le bloc d'objectif de salle ni les bandeaux. */
+  private placeToast(): void {
+    const { x: vx, y: vy, w: vw, h: vh } = this.vp;
+    const y = vy + Math.round(vh * 0.24);
+    const w = this.toastBg.width;
+    let cx = vx + vw / 2;
+    const limit = this.toastRightLimit();
+    if (cx + w / 2 > limit) cx = Math.max(vx + 4 + w / 2, limit - w / 2);
+    if (this.toastBg.y !== y || this.toastBg.x !== cx) {
+      this.toastBg.setPosition(cx, y);
+      this.toastText.setPosition(cx, y);
+    }
   }
 
   /** Flash de l'indicateur de spécial (il vient de redevenir prêt). */
@@ -958,8 +944,10 @@ export class PlayerHud {
     const { state, room } = a;
     const { level } = this.env;
     const down = p.status === 'down';
+    this.refreshGoals(a, down);
     this.refreshTorch(p, room);
     this.refreshPuzzles(p, a);
+    if (this.toastLeftMs > 0) this.placeToast();
 
     // PV
     const hpStr = `${t('hud.hp')} ${Math.max(0, Math.ceil(p.hp))}/${p.maxHp}`;
@@ -989,12 +977,12 @@ export class PlayerHud {
       }
     }
 
-    // objectifs
-    const lines = visibleObjectives(state, level, p.id, room);
-    const totals = objectiveTotals(state, level, p.id);
-    const header = totals.total > 0 ? `${t('hud.objective.personal')} ${t('hud.objective.progress', { done: totals.done, total: totals.total })}` : '';
+    // objectifs personnels (en-tête et lignes seulement s'il y a au moins une ligne à montrer)
+    const pv = describePersonalObjectives(state, level, p.id, room);
+    const header = pv.header;
+    const lines = pv.lines;
     let sig = header;
-    for (const l of lines) sig += `|${l.id}:${l.done ? 1 : 0}:${l.detail}:${l.percent}`;
+    for (const l of lines) sig += `|${l.id}:${l.done ? 1 : 0}:${l.detail}:${l.percent}:${l.where}`;
     if (sig !== this.objSig) {
       this.objSig = sig;
       this.objHeader.setText(header).setVisible(header !== '');
@@ -1009,8 +997,7 @@ export class PlayerHud {
           ic.setVisible(false);
           continue;
         }
-        const detail = l.done ? t('hud.done') : l.detail ? `${l.detail} (${l.percent})` : '';
-        tx.setText(detail ? `${l.label}\n${detail}` : l.label);
+        tx.setText(objectiveLineText(l));
         tx.setColor(l.done ? '#8dffa8' : '#ffffff');
         tx.setVisible(true);
         ic.setFrame(l.done ? 'ui_check' : 'ui_cross').setVisible(true);
@@ -1032,22 +1019,6 @@ export class PlayerHud {
       if (showBg) {
         this.objBg.setPosition(this.objHeader.x - 6, this.objHeader.y - 4);
         this.objBg.setSize(maxW + 14, bottom - this.objHeader.y + 6);
-      }
-    }
-
-    // ennemis restants (sortie « clear »)
-    const left = enemiesRemaining(state, room);
-    this.enemyLeft = left;
-    const showEnemies = left !== null && left <= ENEMY_COUNTER_MAX;
-    const enemyStr = showEnemies ? t('hud.enemiesLeft', { count: left }) : '';
-    if (enemyStr !== this.enemySig) {
-      this.enemySig = enemyStr;
-      this.enemyText.setVisible(showEnemies);
-      this.enemyBg.setVisible(showEnemies);
-      if (showEnemies) {
-        this.enemyText.setText(enemyStr);
-        fitBg(this.enemyBg, this.enemyText, 7, 4);
-        this.enemyBg.setPosition(this.enemyText.x - this.enemyText.width / 2, this.enemyText.y + this.enemyText.height / 2);
       }
     }
 
@@ -1095,6 +1066,103 @@ export class PlayerHud {
       setTextIfChanged(this.downSub, sub);
       if (ratio > 0) this.barFill.setSize(Math.max(1, (this.barBg.width - 4) * ratio), 8);
     }
+  }
+
+  /**
+   * Bloc « Objectif de la salle » (haut à droite) : ce qu'il faut faire pour ouvrir la sortie, une ligne cochable par exigence
+   * (ennemis restants fusionnés dedans). Masqué quand le joueur est à terre. Repositionne ensuite les bandeaux sablier/lanterne
+   * sous le bloc. Re-dessiné seulement quand sa signature change.
+   */
+  private refreshGoals(a: PlayerHudUpdate, down: boolean): void {
+    const { state, room } = a;
+    const { level } = this.env;
+    this.enemyLeft = enemiesRemaining(state, room);
+    // le bandeau de nom de salle / d'indice est centré sur tout l'écran : il recouvrirait le bloc de la vue de gauche
+    let blocked = false;
+    if (this.goalShown && a.banners) {
+      const r = this.goalRect;
+      r.x0 = this.goalLeft;
+      r.x1 = this.goalRight;
+      r.y0 = this.goalTop;
+      r.y1 = this.goalBottom;
+      for (let i = 0; i < a.banners.length && !blocked; i++) blocked = boundsOverlap(r, a.banners[i]);
+    }
+    if (blocked !== this.goalBlocked) {
+      this.goalBlocked = blocked;
+      this.goalSig = '';
+    }
+    const lines: readonly GoalLine[] = down ? [] : describeRoomGoals(state, level, room);
+    let sig = '';
+    for (const l of lines) sig += `|${l.id}:${l.done ? 1 : 0}${l.highlight ? 1 : 0}:${l.label}:${l.detail}`;
+    if (sig !== this.goalSig) {
+      this.goalSig = sig;
+      this.layoutGoals(lines);
+    }
+    this.applyPuzTop(this.goalShown ? this.goalBottom + 12 : this.goalTop + 4);
+  }
+
+  /** Remplit et dispose le bloc d'objectif de salle (largeur ajustée au contenu, aligné à droite). */
+  private layoutGoals(lines: readonly GoalLine[]): void {
+    const show = lines.length > 0;
+    this.goalShown = show;
+    const vis = show && !this.goalBlocked;
+    this.goalBg.setVisible(vis);
+    this.goalHeader.setVisible(vis);
+    if (!show) {
+      for (let i = 0; i < this.goalTexts.length; i++) {
+        this.goalTexts[i].setVisible(false);
+        this.goalIcons[i].setVisible(false);
+      }
+      this.goalBottom = this.goalTop;
+      this.goalLeft = this.goalRight;
+      return;
+    }
+    const pad = 5;
+    const gap = 3;
+    this.goalHeader.setText(t(lines.length > 1 ? 'goal.header.other' : 'goal.header.one'));
+    let maxW = this.goalHeader.width;
+    let highlight = false;
+    for (let i = 0; i < this.goalTexts.length; i++) {
+      const tx = this.goalTexts[i];
+      const ic = this.goalIcons[i];
+      const l = lines[i];
+      if (!l) {
+        tx.setVisible(false);
+        ic.setVisible(false);
+        continue;
+      }
+      if (l.highlight) highlight = true;
+      tx.setText(goalLineText(l));
+      tx.setColor(l.highlight ? '#ffe08a' : l.done ? '#8dffa8' : '#ffffff');
+      tx.setVisible(vis);
+      ic.setFrame(l.done || l.highlight ? 'ui_check' : 'ui_cross').setVisible(vis);
+      maxW = Math.max(maxW, this.goalIconCol + tx.width);
+    }
+    const x0 = this.goalRight - maxW;
+    let y = this.goalTop + pad;
+    this.goalHeader.setPosition(x0, y);
+    y += this.goalHeader.height + gap;
+    for (let i = 0; i < this.goalTexts.length; i++) {
+      const tx = this.goalTexts[i];
+      if (!lines[i]) continue;
+      tx.setPosition(x0 + this.goalIconCol, y);
+      this.goalIcons[i].setPosition(x0, y + 1);
+      y += tx.height + gap;
+    }
+    const h = y - gap + pad - this.goalTop;
+    this.goalBg.setPosition(x0 - pad, this.goalTop);
+    this.goalBg.setSize(maxW + 2 * pad, h);
+    this.goalBg.setStrokeStyle(2, highlight ? 0x8dffa8 : 0xf0e2b0, highlight ? 0.9 : 0.7);
+    this.goalLeft = x0 - pad;
+    this.goalBottom = this.goalTop + h;
+  }
+
+  /** Décale les bandeaux sablier/lanterne pour que leur bord haut soit à `top` (écran). */
+  private applyPuzTop(top: number): void {
+    const dy = top - this.puzTop;
+    if (dy === 0) return;
+    this.puzTop = top;
+    for (const o of [this.puzBg, this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText]) o.setY(o.y + dy);
   }
 
   /** Sablier (temps de sable restant) et lanterne (porteur) : bandeaux de la vue, rafraîchis à ~16 Hz. */
@@ -1261,7 +1329,7 @@ export class PlayerHud {
     const all: Phaser.GameObjects.GameObject[] = [
       this.frameGfx, this.name, this.hp, ...this.hearts, ...this.keyIcons, this.objHeader, ...this.objIcons, ...this.objTexts, this.objBg,
       this.promptBg, this.promptText, this.signBg, this.signText, this.downOverlay, this.downIcon, this.downTitle, this.downSub,
-      this.barBg, this.barFill, this.toastBg, this.toastText, ...this.arrows, ...this.enemyArrows, this.enemyBg, this.enemyText, this.torchIcon, this.torchBarBg, this.torchBarFill, this.spIcon, this.spBarBg, this.spBarFill, this.spText,
+      this.barBg, this.barFill, this.toastBg, this.toastText, ...this.arrows, ...this.enemyArrows, this.goalBg, this.goalHeader, ...this.goalIcons, ...this.goalTexts, this.torchIcon, this.torchBarBg, this.torchBarFill, this.spIcon, this.spBarBg, this.spBarFill, this.spText,
       this.puzBg, this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText, this.lanBg, this.lanIcon, this.lanText,
     ];
     for (const o of all) o.destroy();
@@ -1271,6 +1339,8 @@ export class PlayerHud {
     this.objTexts.length = 0;
     this.arrows.length = 0;
     this.enemyArrows.length = 0;
+    this.goalIcons.length = 0;
+    this.goalTexts.length = 0;
   }
 }
 
@@ -1409,11 +1479,7 @@ export class TeamPanelHud {
         if (k < keySlots.length) row.keys[k].setFrame(uiKeyFrame(keySlots[k])).setVisible(true);
         else row.keys[k].setVisible(false);
       }
-      const lines = visibleObjectives(state, level, p.id, room);
-      const totals = objectiveTotals(state, level, p.id);
-      const first = lines.find((l) => !l.done) ?? lines[0];
-      let objStr = totals.total > 0 ? t('hud.objective.progress', { done: totals.done, total: totals.total }) : '';
-      if (first) objStr += `  ${first.done ? '✓' : '✗'} ${first.label}${first.percent ? ` ${first.percent}` : ''}`;
+      const objStr = teamObjectiveText(state, level, p.id, room);
       setTextIfChanged(row.obj, objStr);
     }
   }

@@ -7,7 +7,7 @@ import type Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../core/constants';
 import type { GamePhase, LevelDef, RoomDef } from '../core/types';
 import { t } from '../i18n/i18n';
-import { HUD_DEPTH, fadeAlpha, hudRect, hudText, setTextIfChanged } from '../render/hud';
+import { HUD_DEPTH, fadeAlpha, hudRect, hudText, setTextIfChanged, type ScreenBounds } from '../render/hud';
 import { MAX_BOSS_BARS, bossBarColor, bossBarFrameColor, type BossBarEntry } from '../render/bossBars';
 import type { ViewContext } from './common';
 
@@ -35,6 +35,8 @@ class BannerSlot {
   private elapsed = 0;
   private dur = 0;
   private active = false;
+  /** Rectangle écran occupé par la bannière (réutilisé : pas d'allocation par frame). */
+  private readonly rect: ScreenBounds = { x0: 0, y0: 0, x1: 0, y1: 0 };
 
   constructor(
     ctx: ViewContext,
@@ -79,6 +81,11 @@ class BannerSlot {
     return this.active;
   }
 
+  /** Rectangle écran de la bannière tant qu'elle est visible (sinon null). */
+  get bounds(): ScreenBounds | null {
+    return this.active ? this.rect : null;
+  }
+
   private layout(): void {
     const pad = 14;
     const hasSub = this.sub.text !== '';
@@ -88,6 +95,10 @@ class BannerSlot {
     const w = Math.max(this.title.width, hasSub ? this.sub.width : 0) + pad * 4;
     this.bg.setSize(w, h);
     this.bg.setPosition(this.title.x, this.y + h / 2);
+    this.rect.x0 = this.title.x - w / 2;
+    this.rect.x1 = this.title.x + w / 2;
+    this.rect.y0 = this.y;
+    this.rect.y1 = this.y + h;
     this.sub.setVisible(hasSub);
   }
 
@@ -204,6 +215,8 @@ export class GameOverlay {
   private readonly fade: Rect;
   private readonly flashRect: Rect;
   private readonly bossBars: BossBarSlot[] = [];
+  private readonly bannerOut: ScreenBounds[] = [];
+  private readonly entrySlots: BannerSlot[] = [];
   private extraFade = 0;
   private flashLeftMs = 0;
   private flashTotalMs = 1;
@@ -222,6 +235,7 @@ export class GameOverlay {
     this.hintBanner = new BannerSlot(ctx, cx, 120, 18, 14, 860);
     this.exitBanner = new BannerSlot(ctx, cx, 24, 20, 14, 800);
     this.bigBanner = new BannerSlot(ctx, cx, GAME_HEIGHT * 0.3, 44, 20, 1000);
+    this.entrySlots.push(this.roomBanner, this.hintBanner, this.exitBanner);
     this.flashRect = hudRect(ctx, cx, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0xffffff, 0, HUD_DEPTH.fade - 1);
     this.flashRect.setVisible(false);
     this.fade = hudRect(ctx, cx, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0, HUD_DEPTH.fade);
@@ -241,6 +255,19 @@ export class GameOverlay {
     this.exitBanner.hide();
     this.lastExitOpen = false;
     this.exitPending = false;
+  }
+
+  /**
+   * Rectangles écran des bannières d'arrivée de salle / d'annonce de sortie actuellement affichées (centre haut de l'écran).
+   * Le HUD de chaque joueur y masque son bloc « Objectif de la salle » s'il passerait dessous. Tableau réutilisé.
+   */
+  activeBanners(): readonly ScreenBounds[] {
+    this.bannerOut.length = 0;
+    for (const b of this.entrySlots) {
+      const r = b.bounds;
+      if (r) this.bannerOut.push(r);
+    }
+    return this.bannerOut;
   }
 
   /** Fondu au noir supplémentaire (0..1), combiné par maximum au fondu de salle (sortie de scène). */

@@ -683,17 +683,19 @@ export function resultTotals(rows: readonly ResultRow[]): { downs: number; kills
 }
 
 /**
- * Objectifs accomplis / total. `objectiveCounts[i]` = nombre d'objectifs du niveau i.
- * Victoire : tous les niveaux sont terminés (tout est accompli). Défaite : les niveaux AVANT le niveau courant seulement.
+ * Objectifs personnels accomplis / total, sur les niveaux JOUÉS (du premier au niveau courant inclus) ; `objectiveCounts[i]` =
+ * nombre d'objectifs du niveau i. Victoire : le niveau courant est terminé, donc tout est accompli (la salle finale exige tous
+ * les objectifs). Défaite : seuls les niveaux AVANT le niveau courant comptent comme accomplis.
  */
 export function objectivesSummary(
   session: Pick<GameSession, 'levelIndex'>,
   outcome: 'victory' | 'defeat',
   objectiveCounts: readonly number[],
 ): { done: number; total: number } {
-  const total = objectiveCounts.reduce((a, b) => a + b, 0);
+  const idx = Math.max(0, session.levelIndex);
+  const total = objectiveCounts.slice(0, idx + 1).reduce((a, b) => a + b, 0);
   if (outcome === 'victory') return { done: total, total };
-  const done = objectiveCounts.slice(0, Math.max(0, session.levelIndex)).reduce((a, b) => a + b, 0);
+  const done = objectiveCounts.slice(0, idx).reduce((a, b) => a + b, 0);
   return { done, total };
 }
 

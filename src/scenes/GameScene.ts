@@ -376,8 +376,9 @@ export class GameScene extends Phaser.Scene {
     this.fx.update(dtMs);
     this.specialFx.update(dtMs);
 
+    const banners = this.overlay.activeBanners();
     for (let i = 0; i < this.huds.length; i++) {
-      this.huds[i].update({ state: s, room: this.sim.room, dtMs, timeMs, exitOpen, camCenter: this.rig.centerOf(i) });
+      this.huds[i].update({ state: s, room: this.sim.room, dtMs, timeMs, exitOpen, camCenter: this.rig.centerOf(i), banners });
     }
     this.teamPanel?.update(s, this.sim.room, dtMs);
     this.overlay.update({

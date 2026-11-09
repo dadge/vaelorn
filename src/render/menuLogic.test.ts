@@ -463,11 +463,13 @@ describe('résultats', () => {
     expect(resultTotals([])).toEqual({ downs: 0, kills: 0 });
   });
 
-  it('objectivesSummary : victoire = tout, défaite = niveaux précédents', () => {
+  it('objectivesSummary : niveaux joués seulement (victoire = tout accompli, défaite = niveaux précédents)', () => {
     const counts = [4, 5, 6];
     expect(objectivesSummary({ levelIndex: 2 }, 'victory', counts)).toEqual({ done: 15, total: 15 });
+    expect(objectivesSummary({ levelIndex: 0 }, 'victory', counts)).toEqual({ done: 4, total: 4 });
     expect(objectivesSummary({ levelIndex: 2 }, 'defeat', counts)).toEqual({ done: 9, total: 15 });
-    expect(objectivesSummary({ levelIndex: 0 }, 'defeat', counts)).toEqual({ done: 0, total: 15 });
+    expect(objectivesSummary({ levelIndex: 1 }, 'defeat', counts)).toEqual({ done: 4, total: 9 });
+    expect(objectivesSummary({ levelIndex: 0 }, 'defeat', counts)).toEqual({ done: 0, total: 4 });
   });
 
   it('isFinalVictory : seulement une victoire au dernier niveau', () => {

@@ -370,10 +370,12 @@ export class ResultScene extends Phaser.Scene {
     const counts = LEVELS.map((l) => l.objectives.length);
     const obj = objectivesSummary(this.session, this.outcome, counts);
     add(createText(this, px + 30, py + 22, t('result.stats'), { size: 'sm', color: UI_THEME.textDim }));
+    // le « x/y accomplis » porte sur les objectifs personnels des niveaux joués (libellé « Objectifs perso (niveaux joués) »)
+    const valueX = px + 520;
     add(createText(this, px + 30, py + 50, t('result.time'), { size: 'md', color: UI_THEME.textDim }));
-    add(createText(this, px + 330, py + 50, formatTime(this.session.stats.timeMs), { size: 'md', color: UI_THEME.text }));
+    add(createText(this, valueX, py + 50, formatTime(this.session.stats.timeMs), { size: 'md', color: UI_THEME.text }));
     add(createText(this, px + 30, py + 82, t('result.objectives'), { size: 'md', color: UI_THEME.textDim }));
-    add(createText(this, px + 330, py + 82, t('hud.objective.progress', { done: obj.done, total: obj.total }), { size: 'md', color: obj.done >= obj.total ? UI_THEME.good : UI_THEME.text }));
+    add(createText(this, valueX, py + 82, t('result.objectives.value', { done: obj.done, total: obj.total }), { size: 'md', color: obj.done >= obj.total ? UI_THEME.good : UI_THEME.text }));
 
     // En-têtes de colonnes
     const colDowns = px + pw - 330;

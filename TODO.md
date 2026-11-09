@@ -18,7 +18,7 @@
 - [ ] Sélecteur de niveau selon la progression (niveaux débloqués = `completedLevelIds`) ; aujourd'hui : « niveau de départ » libre dans le menu.
 - [ ] Carte/mini-carte et flèche vers la sortie dans les grandes salles.
 - [ ] Salles sombres supplémentaires et variantes du système de torches (ennemis sensibles à la lumière, braseros à entretenir…).
-- [ ] Les jetons d'exigence `enter:<zone>` ne sont pas évalués dans le HUD (`src/render/hud.ts`) ni dans les bots (`src/testing/botKit.ts`) : à brancher si un niveau s'en sert pour une porte ou une sortie.
+- [ ] Le jeton d'exigence `enter:<zone>` est maintenant évalué et décrit par le HUD (`src/render/roomGoals.ts`, « Rejoindre la zone »), mais pas par les bots (`src/testing/botKit.ts`) : à brancher si un niveau s'en sert pour une porte ou une sortie.
 - [ ] Le brasero est solide et bloque aussi les projectiles (limitation du moteur : une seule liste de solides).
 - [ ] Texte d'aide du menu pause en jeu (`src/entities/overlay.ts`) : n'indique pas encore le bouton spécial.
 
@@ -26,6 +26,9 @@
 - [ ] Boss final en solo (niveau 3) : pic de difficulté ; équilibrer selon le nombre de joueurs si besoin (les spéciaux sont plafonnés à 20 % des PV du boss par fenêtre de 2 s).
 - [ ] Bibliothèque de bots (`src/testing`) : bug connu `engageRanged` qui se fige contre un pilier (un test est mis de côté avec `it.skip`).
 - [ ] Indicateur HUD de la fenêtre restante des leviers à fenêtre (niveaux 1 et 2).
+- [ ] **À vérifier à la main sur la télé** : lisibilité du nouveau bloc « Objectif de la salle » à 4 joueurs (vues 640×360 : jusqu'à 7 lignes dans les salles à 4 portes + ennemis + objectifs, par ex. niveau 5 salle 8), chevauchement avec le bloc d'objectif perso (haut gauche), les bandeaux sablier/lanterne et les notifications ; le bloc s'efface ~4 à 7 s à l'arrivée dans une salle (bandeaux de nom de salle / d'indice, vues de gauche) : trop long ? les flèches rouges vers les derniers ennemis peuvent encore passer sur l'en-tête du bloc ; envisager de replier les lignes déjà cochées si c'est trop encombrant.
+- [ ] Panneau d'équipe (3 joueurs) : il pourrait aussi afficher l'objectif de la salle (place disponible) ; pas fait.
+- [ ] Objectifs perso : la clé `hud.objective.progress` (« {done}/{total} ») ne sert plus qu'à l'écran de résultats, sous le libellé « Objectifs personnels accomplis ».
 
 ## Niveaux 4 à 6 (voir README, « Niveaux 4 à 6 »)
 
