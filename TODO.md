@@ -50,6 +50,7 @@
 - [ ] Reprise automatique d'une manette qui change d'indice navigateur à la reconnexion.
 - [ ] Manettes non « standard » : mappage de repli fourni mais peu testé.
 - [ ] Les appuis de manette plus courts qu'une frame ne sont pas rattrapés dans les menus.
+- [ ] **Affichage mobile** (vérifié seulement en émulation) : sur le vrai téléphone, dans Chrome : le jeu remplit la zone visible en paysage sans bande ni coupure sous la barre d'adresse, l'invite de rotation apparaît en portrait puis disparaît à la rotation, le bouton plein écran (haut droite) fonctionne et verrouille le paysage, l'écran ne s'éteint pas, pas de zoom/rafraîchissement accidentel. Lisibilité des textes du HUD sur petit écran (envisager une échelle de police minimale ou un HUD « mobile »).
 - [ ] **PWA** : vérifié dans Chrome sur PC (installation du service worker, mise à jour du cache, lancement hors ligne). À vérifier sur le téléphone : installation depuis Chrome Android (*Installer l'application*), icône, plein écran paysage, lancement hors ligne, iPhone/Safari (ajout à l'écran d'accueil). Possible : bouton « Installer » dans le menu (événement `beforeinstallprompt`), invite de mise à jour.
 - [ ] Taille du bundle (~1,5 Mo) : découpage en chunks, chargement paresseux des scènes.
 - [ ] Sauvegarde automatique des réglages (langue, bindings, difficulté) — la langue et les bindings sont déjà persistés.

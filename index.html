@@ -2,7 +2,7 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#0b0a14" />
     <meta name="description" content="Jeu d'aventure coopératif local (1 à 4 joueurs) : donjons, énigmes et boss." />
     <!-- PWA : manifeste, icônes ; le service worker est enregistré par src/pwa/register.ts (build de production seulement) -->
@@ -15,9 +15,44 @@
     <meta name="apple-mobile-web-app-title" content="Fragments" />
     <title>Les Fragments de l'Aube</title>
     <style>
-      html, body { margin: 0; padding: 0; height: 100%; background: #0b0a14; overflow: hidden; }
-      #game { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+      /* Plein cadre, sans défilement ni geste du navigateur (zoom, rafraîchir en tirant, sélection, menu contextuel). */
+      html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%; background: #0b0a14; overflow: hidden;
+        overscroll-behavior: none; touch-action: none;
+        -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+      }
+      /* #game suit la zone réellement visible (la barre d'adresse mobile fait varier la hauteur : 100vh serait trop grand)
+         et respecte les encoches / barres système (safe-area). Phaser (Scale.FIT) s'y ajuste. */
+      #game {
+        position: fixed; display: flex; align-items: center; justify-content: center;
+        top: env(safe-area-inset-top, 0px); right: env(safe-area-inset-right, 0px);
+        bottom: env(safe-area-inset-bottom, 0px); left: env(safe-area-inset-left, 0px);
+      }
       html.pixel canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+      /* Interface mobile (src/mobile/mobileUi.ts) */
+      [hidden] { display: none !important; }
+      #rotate-prompt {
+        position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 14px; padding: 24px; box-sizing: border-box; text-align: center; background: #0b0a14; color: #f0e2b0;
+        font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+      }
+      #rotate-prompt h2 { margin: 0; font-size: 22px; color: #ffd27a; }
+      #rotate-prompt p { margin: 0; font-size: 15px; line-height: 1.4; max-width: 28ch; color: #c9c2e6; }
+      .rotate-icon {
+        width: 46px; height: 80px; box-sizing: border-box; border: 4px solid #f0e2b0; border-radius: 10px; position: relative;
+        animation: rotate-hint 2.4s ease-in-out infinite;
+      }
+      .rotate-icon::after { content: ''; position: absolute; left: 50%; bottom: 5px; width: 10px; height: 3px; margin-left: -5px; border-radius: 2px; background: #f0e2b0; }
+      @keyframes rotate-hint { 0%, 25% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-90deg); } }
+      @media (prefers-reduced-motion: reduce) { .rotate-icon { animation: none; transform: rotate(-90deg); } }
+      #fullscreen-btn {
+        position: fixed; z-index: 900; width: 44px; height: 44px; padding: 0; border: 2px solid rgba(240, 226, 176, 0.7); border-radius: 10px;
+        top: calc(env(safe-area-inset-top, 0px) + 8px); right: calc(env(safe-area-inset-right, 0px) + 8px);
+        background: rgba(11, 10, 20, 0.55) center / 22px 22px no-repeat; opacity: 0.6; cursor: pointer;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f0e2b0' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'/%3E%3C/svg%3E");
+      }
+      #fullscreen-btn:active { opacity: 1; }
     </style>
   </head>
   <body>

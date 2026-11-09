@@ -19,6 +19,7 @@ import { onLanguageChange, setLanguage, t } from './i18n/i18n';
 import { inputManager } from './input';
 import { LEVELS } from './levels';
 import { parseQuickParams, setQuickParams } from './render/menuLogic';
+import { installMobileUi } from './mobile/mobileUi';
 import { registerServiceWorker } from './pwa/register';
 import { isSmoothRendering } from './render/smoothing';
 import { BootScene } from './scenes/BootScene';
@@ -75,6 +76,9 @@ function start(): void {
   };
 
   const game = new Phaser.Game(config);
+
+  // Mobile : invite de rotation, plein écran, recalage du canvas à chaque rotation / barre d'adresse.
+  installMobileUi(game);
 
   if (import.meta.env.DEV || quick.debug) window.__vaelorn = { game };
 }

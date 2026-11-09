@@ -43,6 +43,16 @@ Le jeu est une **PWA** (*Progressive Web App*) : on peut l'installer sur l'écra
 - **Réglages** : `public/manifest.webmanifest` (nom, couleurs, plein écran, orientation paysage). Les icônes (`public/icons/`) sont générées par `node scripts/make-icons.mjs` (soleil levant et fragments) ; refaire cette commande seulement pour changer le dessin.
 - Le service worker n'est **pas** enregistré en développement (`npm run dev`). Pour l'essayer : `npm run build && npm run preview`, puis ouvrir `http://localhost:4173` dans Chrome (le navigateur intégré à certains éditeurs ne gère pas les service workers).
 
+### Sur téléphone / tablette
+
+Le jeu s'adapte à l'écran (canvas 16:9 centré, `Scale.FIT`) et se joue en **paysage**.
+
+- **Zone visible** : `#game` occupe exactement la fenêtre visible (`position: fixed` + marges de sécurité `safe-area` pour encoches et barres système) au lieu de `100vh`, qui dépasse sous la barre d'adresse de Chrome Android. Le canvas est recalé (`scale.refresh()`) à chaque rotation, changement de taille, apparition/disparition de la barre d'adresse et passage en plein écran.
+- **Portrait** : sur un appareil tactile (pointeur principal grossier), un écran « Tourne ton téléphone » remplace le jeu (`src/mobile/`).
+- **Plein écran** : bouton en haut à droite (appareil tactile seulement, absent si l'application est installée ou déjà en plein écran) ; il cache la barre d'adresse et tente de verrouiller le paysage. Sur iPhone/Safari l'API n'existe pas : installer la PWA (*Sur l'écran d'accueil*).
+- **Gestes du navigateur désactivés** pendant le jeu : zoom par pincement, rafraîchir en tirant vers le bas, sélection de texte, menu contextuel. L'écran reste allumé (Screen Wake Lock) tant que la page est visible.
+- **Limites** : les textes du HUD sont petits sur un téléphone (le canvas logique 1280×720 est réduit à ~0,6) et le jeu à 3-4 joueurs en écran divisé n'y est pas lisible ; les contrôles tactiles (manette virtuelle) arrivent dans une étape suivante.
+
 Diagnostic des manettes : ouvrir `/gamepad-test.html` (liste les manettes détectées, boutons et axes en direct).
 
 ## Contrôles
