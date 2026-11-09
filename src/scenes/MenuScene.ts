@@ -9,6 +9,13 @@
  * La manette qui lance « Jouer » réclame automatiquement l'emplacement 1 de l'écran de sélection.
  * Les choix sont mémorisés (localStorage) et passés à CharacterSelect sous forme de GameSession.
  *
+ * MODE DÉMO (« attract mode », src/attract/) : sur l'écran-titre PRINCIPAL (ni panneau « Contrôles », ni dialogue, ni transition), une
+ * minuterie d'inactivité (`IdleTimer`, remise à zéro par toute activité : clavier, souris / toucher / molette, manette, langue ; en pause
+ * quand l'onglet est caché ; suspendue tant que l'invite de rotation d'un téléphone en portrait masque le jeu) lance, au bout de
+ * `ATTRACT_IDLE_MS`, une démo (`GameScene` + `session.demo`) : niveau, héros et salle aléatoires, pilote automatique, aucune
+ * sauvegarde. Au retour de la démo (`afterDemo`), les entrées sont AVALÉES pendant `ATTRACT_RETURN_GRACE_MS` : l'entrée qui a
+ * interrompu la démo ne valide aucun élément. Désactivable (`?attract=0`) ; voir `src/attract/config.ts`.
+ *
  * SAUVEGARDE (règles dans src/render/saveMenuLogic.ts, stockage dans src/core/saveRepository.ts) : « Continuer (Niveau X — Salle Y) »
  * en tête de liste UNIQUEMENT si une sauvegarde valide existe ; « Nouvelle partie » demande confirmation avant d'écraser une
  * sauvegarde ; « Effacer la sauvegarde » (en bas de liste) est toujours confirmé ; une sauvegarde illisible est signalée (alerte
@@ -41,6 +48,13 @@ import {
 } from '../render/menuLogic';
 import { SCENE_KEYS, type CharacterSelectSceneData, type GameSceneData, type MenuSceneData } from '../render/session';
 import { initialDeviceFromMenuSource } from '../tutorial/deviceHints';
+import { ActivityWatcher, carryActivity } from '../attract/activity';
+import { ATTRACT_RETURN_GRACE_MS, ATTRACT_START_FADE_MS, getAttractConfig } from '../attract/config';
+import { buildDemoSession } from '../attract/demoSession';
+import { graceActive, graceUntil } from '../attract/demoFlow';
+import { IdleTimer } from '../attract/idleTimer';
+import { computeMobileUi } from '../mobile/device';
+import { readEnvironment } from '../mobile/mobileUi';
 import {
   chooseInDialog,
   eraseAction,
@@ -92,6 +106,33 @@ const LABEL_MAX_W = 330;
 const NOTICE_MS = 3500;
 /** L'alerte « sauvegarde illisible » n'est affichée automatiquement qu'une fois par lancement du jeu. */
 let corruptNoticeShown = false;
+
+/** Période (ms) de relecture de l'environnement mobile (invite de rotation) pour le mode démo. */
+const ATTRACT_ENV_CHECK_MS = 500;
+
+/** Durée (ms) du fondu d'entrée de la scène (valeur par défaut de `beginScene`) : la fenêtre de grâce ne commence qu'une fois le menu visible. */
+const MENU_FADE_IN_MS = 250;
+
+/**
+ * Choix du menu et ligne sélectionnée mémorisés au lancement d'une démo, restitués au retour (`afterDemo`) : sans cela, un stockage
+ * local indisponible ferait perdre le nombre de joueurs, et la ligne sélectionnée reviendrait toujours à « Jouer ».
+ */
+let demoReturnMemory: { choices: MenuChoices; selectedId: string } | null = null;
+
+/** Horloge monotone (ms) du mode démo (minuterie d'inactivité et fenêtre de grâce). */
+function attractNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+/** Mode démo : minuterie d'inactivité + surveillant d'activité de CETTE instance de la scène. */
+interface AttractRuntime {
+  idle: IdleTimer;
+  watcher: ActivityWatcher;
+  /** Prochain instant (horloge `attractNow`) de relecture de l'environnement mobile. */
+  envCheckAt: number;
+  /** Le jeu est-il affichable (pas d'invite de rotation) ? */
+  displayable: boolean;
+}
 
 /** Écrit `content` dans `text` et le réduit si besoin pour tenir dans `maxWidth` (jamais agrandi). */
 function setFitted(text: Phaser.GameObjects.Text, content: string, maxWidth: number): void {
@@ -153,6 +194,14 @@ export class MenuScene extends Phaser.Scene {
   private dialogButtons: UiButton[] = [];
   /** Message d'information temporaire (affiché à la place de l'aide de la ligne). */
   private notice: { text: string; until: number } | null = null;
+  /** Mode démo (null si désactivé : `?attract=0`, mode de test). */
+  private attract: AttractRuntime | null = null;
+  /** true dès que la démo est lancée (fondu en cours) : on continue de surveiller le joueur pour ne pas perdre une action. */
+  private demoLaunching = false;
+  /** Retour d'une démo : les entrées sont avalées jusqu'à cet instant (horloge `attractNow`), null sinon. */
+  private graceUntilMs: number | null = null;
+  /** Cette instance de la scène est un retour de démo (la grâce est armée dans `create`, une fois le menu affiché). */
+  private afterDemo = false;
 
   constructor() {
     super(SCENE_KEYS.Menu);
@@ -160,10 +209,13 @@ export class MenuScene extends Phaser.Scene {
 
   init(data?: MenuSceneData): void {
     const stored = this.loadChoices();
-    this.choices = data?.session ? choicesFromSession(data.session, stored ?? defaultMenuChoices()) : (stored ?? defaultMenuChoices());
+    this.afterDemo = data?.afterDemo === true;
+    const memory = this.afterDemo ? demoReturnMemory : null;
+    demoReturnMemory = null;
+    this.choices = data?.session ? choicesFromSession(data.session, stored ?? defaultMenuChoices()) : (memory?.choices ?? stored ?? defaultMenuChoices());
     this.lastCharacters = data?.session ? data.session.players.map((p) => p.characterId) : [];
     this.saveState = this.loadSaveState();
-    this.selectedId = saveMenuLayout(this.saveState).defaultRow;
+    this.selectedId = memory?.selectedId ?? saveMenuLayout(this.saveState).defaultRow; // buildRows() retombe sur « Jouer » si la ligne n'existe plus
     this.rows = [];
     this.controls = null;
     this.dialog = null;
@@ -172,6 +224,9 @@ export class MenuScene extends Phaser.Scene {
     this.notice = null;
     this.lastSource = null;
     this.starting = false;
+    this.demoLaunching = false;
+    this.attract = null;
+    this.graceUntilMs = null;
   }
 
   create(): void {
@@ -216,6 +271,11 @@ export class MenuScene extends Phaser.Scene {
       this.dialogButtons = [];
     });
 
+    this.setupAttract();
+    // Retour de démo : grâce armée ICI (et non dans init) et décomptée après le fondu d'entrée, pour qu'elle couvre bien le moment où
+    // le menu devient visible, même sur une machine lente.
+    if (this.afterDemo) this.graceUntilMs = graceUntil(attractNow() + MENU_FADE_IN_MS, ATTRACT_RETURN_GRACE_MS);
+
     // Sauvegarde illisible : on prévient une fois par lancement (rien n'est supprimé sans confirmation).
     if (this.saveState.kind === 'corrupt' && !corruptNoticeShown) {
       corruptNoticeShown = true;
@@ -231,8 +291,11 @@ export class MenuScene extends Phaser.Scene {
     }
     this.bg.update(time);
     this.title.setY(50 + Math.round(Math.sin(time / 700) * 3));
+    this.updateAttract();
     if (this.starting) return;
+    const swallow = this.inGrace();
     for (const intent of this.nav.pollMenu()) {
+      if (swallow) continue; // retour de démo : l'entrée qui l'a interrompue (ou son répétiteur) ne valide rien
       this.lastSource = intent.source;
       this.onAction(intent.action);
     }
@@ -240,6 +303,86 @@ export class MenuScene extends Phaser.Scene {
       this.controls.refreshAt = time + 500;
       this.buildAssignments();
     }
+  }
+
+  // ───────────────────────────── Mode démo (attract) ─────────────────────────────
+
+  /** Fenêtre de grâce après un retour de démo : les entrées sont avalées. */
+  private inGrace(): boolean {
+    return graceActive(attractNow(), this.graceUntilMs);
+  }
+
+  /** Crée la minuterie d'inactivité et le surveillant d'activité (sauf si la démo est désactivée). Nettoyés à la fermeture de la scène. */
+  private setupAttract(): void {
+    const cfg = getAttractConfig();
+    if (!cfg.enabled) return;
+    const watcher = new ActivityWatcher();
+    watcher.start();
+    this.attract = {
+      idle: new IdleTimer({ thresholdMs: cfg.idleMs, clock: attractNow, active: false }),
+      watcher,
+      envCheckAt: 0,
+      displayable: true,
+    };
+    // Onglet caché : Phaser suspend sa boucle (aucun `update`), il faut donc mettre la minuterie en pause À L'ÉVÉNEMENT, sinon la durée
+    // passée en arrière-plan serait comptée comme de l'inactivité au retour.
+    const onVisibility = (): void => this.attract?.idle.setPaused(typeof document !== 'undefined' && document.hidden === true);
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
+    this.events.once('shutdown', () => {
+      watcher.stop();
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
+      this.attract = null;
+    });
+  }
+
+  /** Le jeu est-il affiché (pas d'invite « tourne ton téléphone » par-dessus) ? Relu toutes les 500 ms. */
+  private gameDisplayable(a: AttractRuntime): boolean {
+    const now = attractNow();
+    if (now >= a.envCheckAt) {
+      a.envCheckAt = now + ATTRACT_ENV_CHECK_MS;
+      try {
+        a.displayable = !computeMobileUi(readEnvironment()).showRotatePrompt;
+      } catch {
+        a.displayable = true;
+      }
+    }
+    return a.displayable;
+  }
+
+  /**
+   * À chaque image : surveille le joueur et fait avancer la minuterie. Armée UNIQUEMENT à l'écran-titre principal (ni panneau
+   * « Contrôles », ni dialogue, ni transition, ni invite de rotation) ; une activité la remet à zéro ; en pause onglet caché.
+   */
+  private updateAttract(): void {
+    const a = this.attract;
+    if (!a) return;
+    const active = a.watcher.poll();
+    if (this.demoLaunching) {
+      if (active) carryActivity(); // action pendant le fondu vers la démo : la démo s'arrêtera dès son démarrage
+      return;
+    }
+    if (active) a.idle.reset();
+    a.idle.setActive(!this.starting && !this.dialog && !this.controls && this.gameDisplayable(a));
+    a.idle.setPaused(typeof document !== 'undefined' && document.hidden === true);
+    if (a.idle.poll()) this.startDemo();
+  }
+
+  /**
+   * Lance la démo : session aléatoire (`Math.random` ICI, côté scène : le coeur n'en voit jamais), un seul joueur, aucune sauvegarde
+   * ni aucun choix du menu modifié. Les appareils sont remis à zéro (la démo ne lit aucune entrée humaine).
+   */
+  private startDemo(): void {
+    if (this.starting || this.demoLaunching) return;
+    this.starting = true;
+    this.demoLaunching = true;
+    demoReturnMemory = { choices: this.choices, selectedId: this.selectedId };
+    inputManager.attach();
+    inputManager.clearAssignments();
+    inputManager.setPlayer1Gamepad(false);
+    inputManager.setPlayerCount(1);
+    const session = buildDemoSession(Math.random, { durationMs: getAttractConfig().demoMs });
+    const data: GameSceneData = { session };
+    transitionTo(this, SCENE_KEYS.Game, data, ATTRACT_START_FADE_MS);
   }
 
   // ───────────────────────────── État / persistance ─────────────────────────────
@@ -449,7 +592,7 @@ export class MenuScene extends Phaser.Scene {
       this.applySelection();
     });
     zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.controls || this.dialog || this.starting) return;
+      if (this.controls || this.dialog || this.starting || this.inGrace()) return;
       this.lastSource = null;
       this.selectedId = spec.id;
       this.applySelection();
@@ -501,6 +644,7 @@ export class MenuScene extends Phaser.Scene {
 
   /** Changement de langue : tous les textes sont recalculés. */
   private relabel(): void {
+    this.attract?.watcher.notify(); // changer de langue est une activité : le compte à rebours de la démo repart
     this.title.setText(t('menu.title'));
     this.subtitle.setText(t('menu.subtitle'));
     this.hint.setText(t('pad.menu.hint'));

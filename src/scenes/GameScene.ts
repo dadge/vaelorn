@@ -10,6 +10,11 @@
  * par `TutorialRuntime`) pour UNE seule vue ; aucune sauvegarde (pas d'`AutoSaver`), graine fixe. Tous les ajouts sont gardés par
  * `if (this.tutorial)` : la campagne ne change pas d'un octet. Voir `src/tutorial/` (logique pure) et `render/tutorialHud.ts` (dessin).
  *
+ * DÉMO (`session.demo`, mode « attract » : src/attract/) : même scène, même simulation, mais les entrées viennent d'un PILOTE AUTOMATIQUE
+ * (`DemoPilot` : il ne produit que des `ActionFrame`) ; les entrées humaines sont IGNORÉES par la simulation et ne servent qu'à SORTIR
+ * (`ActivityWatcher` → `DemoFlow`). Ni sauvegarde, ni pause, ni son, ni bannières ; bandeau « DÉMO » et invite clignotants ; retour au
+ * menu (avec fondu) quand la durée est écoulée ou dès que le joueur fait quelque chose. Tous les ajouts sont gardés par `if (this.demoFlow)`.
+ *
  * Cycle de vie : à chaque événement `roomEntered`, la salle précédente est DÉTRUITE proprement (RoomView, pools
  * d'ennemis et de projectiles, FX) puis reconstruite. Au `shutdown`, tout est libéré (écouteurs, caméras, objets).
  */
@@ -18,6 +23,11 @@ import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS, SIM_STEP_MS } from '../core/con
 import { CHARACTERS } from '../core/characters';
 import { AutoSaver } from '../core/autoSave';
 import { createSimulation, type GameSimulation } from '../core/simulation';
+import { ActivityWatcher, takeCarriedActivity } from '../attract/activity';
+import { ATTRACT_TIMEOUT_FADE_MS } from '../attract/config';
+import { DemoFlow } from '../attract/demoFlow';
+import { DemoPilot } from '../attract/DemoPilot';
+import { DemoOverlay } from '../entities/demoOverlay';
 import type { GameState, LevelDef, PlayerId, SimEvent, TickInputs, Vec2 } from '../core/types';
 import { PlayerView } from '../entities/PlayerView';
 import { EnemyViews } from '../entities/EnemyView';
@@ -51,7 +61,7 @@ import { HUD_DEPTH, hudRect, hudText } from '../render/hud';
 import { isSavingAllowed } from '../render/saveMenuLogic';
 import { getSaveContext, getSaveRepository } from '../render/saveStore';
 import { getQuickParams } from '../render/menuLogic';
-import { SCENE_KEYS, type DialogueSceneData, type GameSceneData, type GameSession } from '../render/session';
+import { SCENE_KEYS, type DialogueSceneData, type GameSceneData, type GameSession, type MenuSceneData } from '../render/session';
 import { computeLayout, type SplitLayout } from '../render/splitscreen';
 
 /** Durée (ms) de la célébration avant d'enchaîner sur le dialogue de fin de niveau. */
@@ -123,8 +133,14 @@ export class GameScene extends Phaser.Scene {
   private downs: number[] = [];
   private finishing = false;
   private finishMs = 0;
-  private leaving: { key: string; data?: object; elapsedMs: number } | null = null;
+  private leaving: { key: string; data?: object; elapsedMs: number; fadeMs: number } | null = null;
   private failed = false;
+
+  // ── Démo « attract » (null hors démo) ──
+  private demoFlow: DemoFlow | null = null;
+  private demoPilot: DemoPilot | null = null;
+  private demoWatcher: ActivityWatcher | null = null;
+  private demoOverlay: DemoOverlay | null = null;
 
   // ── Tutoriel (null hors tutoriel) ──
   private tutorial: TutorialRuntime | null = null;
@@ -217,6 +233,10 @@ export class GameScene extends Phaser.Scene {
     this.finishMs = 0;
     this.leaving = null;
     this.failed = false;
+    this.demoFlow = null;
+    this.demoPilot = null;
+    this.demoWatcher = null;
+    this.demoOverlay = null;
     this.tutorial = null;
     this.tutorialHud = null;
     this.tutorialEnded = false;
@@ -231,7 +251,8 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown);
     // dev : `?dev=statues|hourglass|bridge|bosses` remplace le niveau par une salle de test (voir entities/devRooms.ts)
     const tut = this.session.tutorial;
-    const devKind = tut ? null : devTestKind(typeof window !== 'undefined' ? window.location.search : '', import.meta.env.DEV);
+    const demo = this.session.demo ?? null;
+    const devKind = tut || demo ? null : devTestKind(typeof window !== 'undefined' ? window.location.search : '', import.meta.env.DEV);
     const baseLevel = tut ? tutorialLevel : devKind ? buildDevTestLevel(devKind) : getLevelByIndex(this.session.levelIndex);
     if (!baseLevel || this.session.players.length === 0) {
       this.showFatalError();
@@ -239,7 +260,7 @@ export class GameScene extends Phaser.Scene {
     }
     // dev : `?dark=1` force toutes les salles sombres (clone du niveau ; brasero virtuel en mode DEV uniquement)
     const search = typeof window !== 'undefined' ? window.location.search : '';
-    const level = !tut && isDevDarkAllowed(search, import.meta.env.DEV) ? forceDarkLevel(baseLevel, import.meta.env.DEV) : baseLevel;
+    const level = !tut && !demo && isDevDarkAllowed(search, import.meta.env.DEV) ? forceDarkLevel(baseLevel, import.meta.env.DEV) : baseLevel;
     this.level = level;
     // Tutoriel : 2 joueurs simulés (le joueur + le partenaire scripté) mais UNE seule vue / UNE seule entrée humaine.
     const setups = tut ? tutorialPlayers(this.session.players[0]) : this.session.players;
@@ -250,14 +271,15 @@ export class GameScene extends Phaser.Scene {
 
     // simulation (graine dérivée d'un compteur + horloge : la scène peut utiliser Date.now, pas le core)
     sessionCounter++;
-    const seed = tut ? TUTORIAL_SEED : (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
+    const seed = tut ? TUTORIAL_SEED : demo ? demo.seed : (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
     // Salle de départ : reprise d'une sauvegarde ou dev `?room=N` (honorée par la simulation, voir SimConfig.startRoomIndex).
     const players = setups.slice(0, playerCount);
     this.sim = createSimulation({ levelId: level.id, players, seed, startRoomIndex: this.session.startRoomIndex }, level);
 
     // Sauvegarde automatique : désactivée en démarrage rapide, `?nosave=1` et paramètres de dev (la vraie sauvegarde n'est jamais écrasée).
     // Tutoriel : AUCUN AutoSaver (le niveau n'est pas dans le contexte de sauvegarde, et rien ne doit jamais être écrit).
-    if (!tut) {
+    // Démo : AUCUN AutoSaver non plus (`isSavingAllowed({ demo: true })` vaut false) : la démo n'écrit jamais rien.
+    if (!tut && !demo) {
       this.autoSaver = new AutoSaver({
         repository: getSaveRepository(),
         context: getSaveContext(),
@@ -302,6 +324,21 @@ export class GameScene extends Phaser.Scene {
     if (this.layout.teamPanel) this.teamPanel = new TeamPanelHud(env, this.layout.teamPanel, state.players);
     this.overlay = new GameOverlay(this.ctx, level);
     this.pauseMenu = new PauseMenu(this.ctx);
+    if (demo) {
+      // Démo : pilote automatique sur le joueur 0, aucun son, aucune bannière ; bandeau « DÉMO » + invite clignotants.
+      this.sfx.setMuted(true);
+      this.overlay.setQuiet(true);
+      for (const h of this.huds) h.setDemoQuiet(true); // pas de notifications ni d'invites « Appuie sur… » : elles s'adressent à un humain
+      this.demoPilot = new DemoPilot(this.sim, { playerId: 0, seed: demo.seed ^ 0x5bd1e995 });
+      this.demoFlow = new DemoFlow(demo.durationMs);
+      this.demoOverlay = new DemoOverlay(this.ctx);
+      this.demoWatcher = new ActivityWatcher();
+      this.demoWatcher.start();
+      // une action pendant le fondu du menu vers la démo : on s'arrête tout de suite
+      if (takeCarriedActivity()) this.demoFlow.interrupt();
+      const exit = this.demoFlow.exit;
+      if (exit) this.leaveDemo(exit.fadeMs);
+    }
     if (tut) {
       this.pauseMenu.setTutorial(true); // confirmation de sortie propre au tutoriel (rien n'est sauvegardé ni perdu)
       this.tutorial = new TutorialRuntime(level, { initialDevice: tut.initialDevice, startRoomIndex: this.session.startRoomIndex });
@@ -313,8 +350,10 @@ export class GameScene extends Phaser.Scene {
     this.buildRoom('start');
 
     // écouteurs
-    this.input.keyboard?.on('keydown-ESC', this.onEscape);
-    this.input.keyboard?.on('keydown-M', this.onMute);
+    if (!demo) {
+      this.input.keyboard?.on('keydown-ESC', this.onEscape);
+      this.input.keyboard?.on('keydown-M', this.onMute);
+    }
     if (tut) {
       this.input.keyboard?.on('keydown-ENTER', this.onEnter);
       this.input.keyboard?.on('keydown-SPACE', this.onSpaceEnd);
@@ -335,7 +374,8 @@ export class GameScene extends Phaser.Scene {
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, t('game.error.level'), { fontFamily: 'monospace', fontSize: '24px', color: '#ff8a8a', align: 'center' })
       .setOrigin(0.5);
-    this.time.delayedCall(2200, () => this.scene.start(SCENE_KEYS.Menu));
+    const back: MenuSceneData | undefined = this.session.demo ? { afterDemo: true } : undefined;
+    this.time.delayedCall(2200, () => this.scene.start(SCENE_KEYS.Menu, back));
   }
 
   // ───────────────────────────── Construction de salle ─────────────────────────────
@@ -375,8 +415,8 @@ export class GameScene extends Phaser.Scene {
 
     if (this.leaving) {
       this.leaving.elapsedMs += dt;
-      this.overlay.setExtraFade(Math.min(1, this.leaving.elapsedMs / LEAVE_FADE_MS));
-      if (this.leaving.elapsedMs >= LEAVE_FADE_MS) {
+      this.overlay.setExtraFade(Math.min(1, this.leaving.elapsedMs / this.leaving.fadeMs));
+      if (this.leaving.elapsedMs >= this.leaving.fadeMs) {
         const { key, data } = this.leaving;
         this.leaving = null;
         this.scene.start(key, data);
@@ -384,12 +424,19 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    if (this.pollPadStart() && !this.leaving) {
-      if (this.paused) this.closePause();
-      else this.openPause(pauseOwnerForPad(this.lastStartPad));
-    }
+    // Démo : chronomètre en temps réel + détection d'activité (toute action du joueur interrompt la démo).
+    const demoFlow = this.demoFlow;
+    if (demoFlow) {
+      const exit = demoFlow.update(dt, this.demoWatcher?.poll() ?? false);
+      if (exit) this.leaveDemo(exit.fadeMs);
+    } else {
+      if (this.pollPadStart() && !this.leaving) {
+        if (this.paused) this.closePause();
+        else this.openPause(pauseOwnerForPad(this.lastStartPad));
+      }
 
-    this.updatePadDisconnect();
+      this.updatePadDisconnect();
+    }
 
     if (this.paused) {
       this.updatePause();
@@ -398,7 +445,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     const state = this.sim.state;
-    const cur = inputManager.poll();
+    // Démo : les entrées humaines ne sont JAMAIS lues (le pilote automatique joue seul) ; elles ne servent qu'à sortir.
+    const cur: TickInputs = demoFlow ? {} : inputManager.poll();
     this.lastPolled = cur;
     this.latched = mergeTickInputs(this.latched, cur);
     const plan = planSteps(this.accumulatorMs, dt, SIM_STEP_MS, MAX_STEPS_PER_FRAME);
@@ -413,6 +461,7 @@ export class GameScene extends Phaser.Scene {
         let inputs = i === 0 ? (this.latched ?? cur) : cur;
         // Tutoriel : le partenaire scripté est le joueur 1 (entrées posées À CHAQUE pas, jamais fusionnées ni mémorisées).
         if (tutorial) inputs = tutorial.decorate(inputs, state);
+        if (this.demoPilot) inputs = { 0: this.demoPilot.decide(state) };
         const events = this.sim.step(SIM_STEP_MS, inputs);
         if (i === 0) this.latched = null;
         stepped = true;
@@ -426,11 +475,13 @@ export class GameScene extends Phaser.Scene {
     }
     if (state.roomIndex !== this.viewRoomIndex || this.forceRebuild) this.buildRoom(this.pendingReason);
     this.syncViews(dt, stepped, plan.alpha);
+    this.demoOverlay?.update(demoFlow?.elapsedMs ?? 0);
 
     if (this.finishing && !this.leaving) {
       this.finishMs += dt;
       if (this.finishMs >= CELEBRATION_MS) {
         if (this.tutorial) this.showTutorialEnd();
+        else if (demoFlow) this.leaveDemo(ATTRACT_TIMEOUT_FADE_MS); // niveau terminé pendant la démo : retour au menu, rien n'est enregistré
         else this.finishLevel();
       }
     }
@@ -873,16 +924,26 @@ export class GameScene extends Phaser.Scene {
     this.leaveTo(SCENE_KEYS.Dialogue, data);
   }
 
-  private leaveTo(key: string, data?: object): void {
+  private leaveTo(key: string, data?: object, fadeMs: number = LEAVE_FADE_MS): void {
     if (this.leaving) return;
-    this.leaving = { key, data, elapsedMs: 0 };
+    this.leaving = { key, data, elapsedMs: 0, fadeMs: Math.max(1, fadeMs) };
     inputManager.reset();
+  }
+
+  /**
+   * Fin de la démo (durée écoulée, ou action du joueur) : fondu au noir puis retour au menu, qui avale les entrées pendant une courte
+   * fenêtre de grâce (`afterDemo`) pour que l'entrée qui a interrompu la démo ne valide aucun élément. Aucune session n'est renvoyée :
+   * la démo ne touche ni aux choix du menu ni à la sauvegarde.
+   */
+  private leaveDemo(fadeMs: number): void {
+    const data: MenuSceneData = { afterDemo: true };
+    this.leaveTo(SCENE_KEYS.Menu, data, fadeMs);
   }
 
   // ───────────────────────────── Pause ─────────────────────────────
 
   private openPause(owner: string | null): void {
-    if (this.paused || this.failed) return;
+    if (this.paused || this.failed || this.demoFlow) return; // jamais de pause en démo
     this.paused = true;
     this.pauseOwner = owner;
     inputManager.reset();
@@ -1019,12 +1080,19 @@ export class GameScene extends Phaser.Scene {
     this.huds.forEach((h, i) => h.retranslate(players[i]));
     this.teamPanel?.retranslate(players);
     this.overlay.retranslate();
+    this.demoOverlay?.retranslate();
     this.pauseMenu.retranslate();
     this.tutorialLabels = null;
     this.tutorialHud?.retranslate(this.tutorialEnded ? this.tutorialEndLabels() : undefined);
   }
 
   private cleanup(): void {
+    this.demoWatcher?.stop();
+    this.demoWatcher = null;
+    this.demoOverlay?.destroy();
+    this.demoOverlay = null;
+    this.demoPilot = null;
+    this.demoFlow = null;
     this.offLanguage?.();
     this.offLanguage = null;
     this.input.keyboard?.off('keydown-ESC', this.onEscape);

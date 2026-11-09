@@ -256,12 +256,14 @@ export function isNoSaveRequested(search: string): boolean {
 
 /**
  * La partie en cours a-t-elle le droit d'écrire la sauvegarde ? NON pour : le démarrage rapide (`?quick=1`),
- * `?nosave=1`, les paramètres de dev qui modifient le jeu (`?dark=1`) et le TUTORIEL (`tutorial: true` ou `?tutorial=1`). Ces parties
+ * `?nosave=1`, les paramètres de dev qui modifient le jeu (`?dark=1`), le TUTORIEL (`tutorial: true` ou `?tutorial=1`) et la DÉMO
+ * (`demo: true`, mode « attract »). Ces parties
  * ne touchent JAMAIS à la vraie sauvegarde.
  */
-export function isSavingAllowed(opts: { quick: boolean; search: string; tutorial?: boolean }): boolean {
+export function isSavingAllowed(opts: { quick: boolean; search: string; tutorial?: boolean; demo?: boolean }): boolean {
   if (opts.quick) return false;
   if (opts.tutorial === true) return false;
+  if (opts.demo === true) return false;
   if (isNoSaveRequested(opts.search)) return false;
   try {
     const params = new URLSearchParams(opts.search);

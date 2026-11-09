@@ -74,6 +74,20 @@
 - [ ] Sauvegarde automatique des réglages (langue, bindings, difficulté) — la langue et les bindings sont déjà persistés.
 - [ ] Intégration continue : le workflow GitHub Pages lance déjà `npm test` et `npm run build`.
 
+## Mode démo / attract mode (voir README « Mode démo (attract mode) » ; prouvé par simulation headless, jamais vérifié dans un vrai navigateur ni sur un téléphone)
+
+À vérifier à la main :
+
+- [ ] `npm run dev` puis `http://localhost:5173/?attractIdle=5&attractDemo=10` : sur l'écran-titre, ne rien toucher 5 s → fondu, démo (bandeau « DÉMO » et invite clignotants, héros qui avance et se bat), retour au menu après 10 s, puis la démo se relance 5 s plus tard (boucle). `?attract=0` : jamais de démo. `?quick=1` / `?tutorial=1` / `?nosave=1` : pas de démo, sauf avec `&attract=1`.
+- [ ] **Interruption** : pendant la démo, appuyer sur une touche, cliquer, bouger franchement la souris, tourner la molette, appuyer sur un bouton de manette, pousser un stick, toucher l'écran (téléphone), toucher la manette virtuelle : retour immédiat au menu (fondu court) et **aucun élément du menu n'est validé** par l'entrée qui a interrompu (essayer Entrée, Espace, A, clic, toucher d'une ligne du menu ; la fenêtre de grâce est de 400 ms : trop court / trop long ?).
+- [ ] **Sous-écrans** : ouvrir « Contrôles » ou une confirmation (« Nouvelle partie » avec une sauvegarde, « Effacer la sauvegarde ») et attendre plus que le délai : la démo ne doit PAS se lancer ; en revenir, le compte à rebours repart de zéro. Changer de langue relance le compte à rebours.
+- [ ] **Onglet caché** : changer d'onglet pendant le compte à rebours (puis revenir) : le temps passé caché ne compte pas ; téléphone en **portrait** (invite de rotation) : pas de démo ; repasser en paysage : le compte à rebours repart.
+- [ ] **Lisibilité** : le bandeau « DÉMO » (haut centre) et l'invite (bas centre, 28 px logiques ; critère : ≥ 12 px physiques et lisible sur 800×360) ne recouvrent pas le HUD (objectif en haut, barres de PV / spécial, barre de boss en bas) en 1920×1080, sur téléphone en paysage 800×360, en français et en anglais ; le clignotement (1 s, visible 65 %) est-il agréable ? Les bannières de salle sont volontairement masquées pendant la démo.
+- [ ] **Retour de démo** : le nombre de joueurs et la ligne sélectionnée sont conservés ; stick tenu pendant le retour puis relâché : la démo repart bien après le délai ; avec `prefers-reduced-motion` activé, bandeau et invite ne clignotent pas ; sur téléphone, l'invite dit « Touche l'écran pour jouer ».
+- [ ] **Sauvegarde intacte** : avec une sauvegarde existante, laisser tourner plusieurs démos ; observer le Local Storage (`vaelorn.save`, `vaelorn.menu.v1`) : rien ne change ; « Continuer » propose toujours la même reprise.
+- [ ] **Variété et intérêt** : laisser tourner 10 à 15 démos : niveaux / héros / salles variés ? Le héros combat-il et bouge-t-il vraiment (pas de longue immobilité dans une salle à énigme, pas de collision bizarre contre un décor) ? Certains héros lents (Grok, Brokk) ou fragiles (Sandrine) sont-ils trop souvent à terre ? (en simulation : 0 mort d'équipe sur 96 runs de 30 s).
+- [ ] **Durées** : 60 s d'attente et 30 s de démo sont les valeurs d'arcade retenues ; à ajuster dans `src/attract/config.ts` si cela paraît trop court / long sur la télé du salon. Idées : démo à plusieurs joueurs (coop) ou énigmes simples (levier, plaque) résolues par le pilote ; esquive des projectiles ; musique d'ambiance (aujourd'hui aucun son en démo) ; masquer vraiment la manette virtuelle (elle est seulement inopérante) ; démo à relancer aussi depuis l'écran des résultats.
+
 ## Sauvegarde (voir README, « Sauvegarde de la progression »)
 
 À vérifier sur PC (rien de tout cela n'a été testé dans un vrai navigateur) :

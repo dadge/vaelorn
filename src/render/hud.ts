@@ -644,6 +644,18 @@ export class PlayerHud {
   private promptSig = '';
   private signSig = '';
   private heartsN: number;
+  /** Mode démo (attract) : ni notifications, ni invite contextuelle, ni bulle de panneau (elles s'adressent à un joueur humain). */
+  private demoQuiet = false;
+
+  /** Active / désactive le mode silencieux de la démo (notifications et invites masquées). */
+  setDemoQuiet(on: boolean): void {
+    this.demoQuiet = on;
+    if (on) {
+      this.toastLeftMs = 0;
+      this.toastText.setVisible(false);
+      this.toastBg.setVisible(false);
+    }
+  }
 
   constructor(env: HudEnv, readonly playerId: PlayerId, p: PlayerState) {
     this.env = env;
@@ -860,6 +872,7 @@ export class PlayerHud {
 
   /** Affiche une notification brève dans la vue du joueur. */
   showToast(text: string, color = 0xffffff, durationMs = 2600): void {
+    if (this.demoQuiet) return;
     // largeur disponible : à gauche du bloc d'objectif de salle et des bandeaux sablier/lanterne (jamais par-dessus ni sous eux)
     const avail = Math.max(80, Math.min(Math.floor(this.vp.w * 0.7), this.toastRightLimit() - this.vp.x - 8) - 24);
     this.toastText.setWordWrapWidth(avail, true);
@@ -1060,7 +1073,7 @@ export class PlayerHud {
     }
 
     // invite contextuelle
-    const prompt = down ? null : computeContextPrompt(state, level, room, p.id);
+    const prompt = down || this.demoQuiet ? null : computeContextPrompt(state, level, room, p.id);
     const promptStr = prompt ? t(prompt.key, prompt.params) : '';
     if (promptStr !== this.promptSig) {
       this.promptSig = promptStr;
@@ -1076,7 +1089,7 @@ export class PlayerHud {
     }
 
     // bulle de panneau
-    const sign = down ? null : nearestSign(room, p);
+    const sign = down || this.demoQuiet ? null : nearestSign(room, p);
     const signStr = sign ? t(sign.textKey) : '';
     if (signStr !== this.signSig) {
       this.signSig = signStr;

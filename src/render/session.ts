@@ -49,11 +49,22 @@ export interface GameSession {
    * `campaignPlayers` : nombre de joueurs choisi au menu (la carte de fin précise l'effet en partie solo).
    */
   tutorial?: { initialDevice?: DeviceKind; campaignPlayers?: number };
+  /**
+   * Mode DÉMO (« attract mode », src/attract/) : `GameScene` joue la partie toute seule (pilote automatique), sans sauvegarde, sans
+   * pause, sans son, pendant `durationMs` ms de temps réel, puis revient au menu. `seed` = graine de la simulation (tirée par la
+   * scène de menu avec `Math.random`, jamais par le coeur). JSON pur.
+   */
+  demo?: { seed: number; durationMs: number };
 }
 
 /** Données de MenuScene : session précédente (pour restaurer les choix en revenant au menu). */
 export interface MenuSceneData {
   session?: GameSession;
+  /**
+   * true quand on revient d'une démo (mode « attract ») : le menu avale les entrées pendant `ATTRACT_RETURN_GRACE_MS` (l'entrée qui
+   * a interrompu la démo ne doit pas valider un élément) et n'applique aucune session (la démo ne modifie pas les choix du joueur).
+   */
+  afterDemo?: boolean;
 }
 
 /** Données de CharacterSelectScene : session construite par le menu (joueurs, difficultés, niveau de départ). */

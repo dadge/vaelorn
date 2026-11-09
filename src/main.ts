@@ -10,12 +10,16 @@
  *   - level    : niveau de départ (1-based) ; room : indice 0-based de la salle de départ → `session.startRoomIndex` ;
  *   - lang     : fr | en (appliquée avant le démarrage ; persistée comme tout changement de langue) ;
  *   - p1pad=1  : J1 à la manette ; debug=1 : expose `window.__vaelorn` hors mode dev ;
- *   - touch=1|0 : force l'affichage / le masquage de la manette virtuelle tactile (src/mobile/touchControls.ts).
+ *   - touch=1|0 : force l'affichage / le masquage de la manette virtuelle tactile (src/mobile/touchControls.ts) ;
+ *   - attract=0|1 : mode démo (« attract mode », src/attract/) désactivé / forcé (même en mode de test : quick, tutorial, nosave…) ;
+ *     attractIdle=<secondes> : inactivité avant la démo (défaut 60) ; attractDemo=<secondes> : durée de la démo (défaut 30)
+ *     (ex. `?attractIdle=5&attractDemo=10`).
  * `window.__vaelorn = { game }` est exposé en mode dev (import.meta.env.DEV), avec ?debug=1 ou ?quick=1 ;
  * en démarrage rapide un événement `vaelorn:quickstart` (detail = GameSession) est émis sur `window`.
  */
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from './core/constants';
+import { parseAttractParams, setAttractConfig } from './attract/config';
 import { onLanguageChange, setLanguage, t } from './i18n/i18n';
 import { inputManager } from './input';
 import { LEVELS } from './levels';
@@ -41,6 +45,8 @@ declare global {
 function start(): void {
   const quick = parseQuickParams(window.location.search, LEVELS.length);
   setQuickParams(quick);
+  // Mode démo : durées et activation (désactivé par défaut en mode de test, sauf `?attract=1`).
+  setAttractConfig(parseAttractParams(window.location.search, { quick: quick.quick, tutorial: quick.tutorial }));
   if (quick.language) setLanguage(quick.language);
 
   // Écoute clavier / manettes dès le départ (les menus et le jeu s'appuient sur ce singleton).

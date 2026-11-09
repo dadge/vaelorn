@@ -237,6 +237,14 @@ Un tutoriel jouable (« La cour d'entraînement ») explique toutes les mécaniq
 - **Écarts assumés** : joué à 2 joueurs (en solo de campagne, plaque B / relevage / appel n'ont pas d'effet : la carte de fin le dit) ; bloc poussable à 1 héros (`playersRequired: 1`) ; une seule vue (zoom 3) donc le HUD enseigné est celui « 1 joueur » ; pas de vue du partenaire (le joueur voit l'indicateur réel quand il l'appelle) ; le partenaire ne combat pas ; pas de drapeau « tutoriel déjà vu » (rien n'est écrit).
 - **Saut** : par étape (Entrée / Select / puce) ; sur une étape de sortie ou après 45 s sans progrès : relance de la scène à `startRoomIndex = roomIndex + 1` (les salles et objectifs précédents sont considérés faits par `createSimulation`). Les opérations « essentielles » du partenaire des étapes sautées sont conservées (backlog).
 
+## 8 ter. Mode démo (attract mode)
+
+Flux : `Menu` (écran-titre principal, minuterie d'inactivité `IdleTimer`) → `Game` avec `session.demo` (pilote automatique `DemoPilot`, aucune
+entrée humaine dans la simulation, ni sauvegarde ni pause) → `Menu` (`afterDemo`, entrées avalées pendant une fenêtre de grâce). Toute
+la logique de `src/attract/` est PURE (horloge et hasard injectés, aucun accès à Phaser / DOM sauf `ActivityWatcher`, couche fine) ; le
+coeur (`src/core`) n'est pas modifié et ne voit jamais `Math.random` : seule `MenuScene` tire au hasard (`buildDemoSession(Math.random)`).
+Détail, durées et paramètres d'URL : README « Mode démo (attract mode) ».
+
 ## 9. Déviations
 
 - **Salles de boss sans mécanisme** : les deux salles de boss (niveau 2 « arene », niveau 3 « throne »/« arena » selon le cas) n'ont pas de

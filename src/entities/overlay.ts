@@ -227,6 +227,8 @@ export class GameOverlay {
   private room: RoomDef | null = null;
   private roomIndex = 0;
   private roomTotal = 1;
+  /** Mode démo : aucune bannière (nom de salle, indice, sortie, « tous à terre »…) ; seuls le fondu, le flash et les barres de boss restent. */
+  private quiet = false;
 
   constructor(ctx: ViewContext, private readonly level: LevelDef) {
     this.ctx = ctx;
@@ -244,11 +246,18 @@ export class GameOverlay {
     for (let i = 0; i < MAX_BOSS_BARS; i++) this.bossBars.push(new BossBarSlot(ctx, cx, GAME_HEIGHT - 34 - i * BOSS_BAR_STEP));
   }
 
+  /** Mode démo (« attract mode ») : supprime toutes les bannières, pour laisser la place au bandeau « DÉMO » et à l'invite. */
+  setQuiet(quiet: boolean): void {
+    this.quiet = quiet;
+    if (quiet) for (const b of [this.roomBanner, this.hintBanner, this.exitBanner, this.bigBanner]) b.hide();
+  }
+
   /** Nouvelle salle : bandeau de nom + indice d'introduction (sauf redémarrage après défaite : bandeau court). */
   onRoomEntered(room: RoomDef, roomIndex: number, reason: 'start' | 'next' | 'restart'): void {
     this.room = room;
     this.roomIndex = roomIndex;
     this.roomTotal = this.level.rooms.length;
+    if (this.quiet) return;
     this.roomBanner.show(t(room.nameKey), t('hud.room.number', { n: roomIndex + 1, total: this.roomTotal }), reason === 'restart' ? 2200 : 3800, 0xf0e2b0);
     if (room.introHintKey && reason !== 'restart') this.hintBanner.show(t(room.introHintKey), '', 7000, 0xffffff);
     else this.hintBanner.hide();
@@ -285,6 +294,10 @@ export class GameOverlay {
 
   /** Re-traduit les textes visibles (changement de langue). */
   retranslate(): void {
+    if (this.quiet) {
+      for (const b of this.bossBars) b.retranslate();
+      return;
+    }
     if (this.room) {
       this.roomBanner.retext(t(this.room.nameKey), t('hud.room.number', { n: this.roomIndex + 1, total: this.roomTotal }));
       if (this.room.introHintKey) this.hintBanner.retext(t(this.room.introHintKey), '');
@@ -294,6 +307,7 @@ export class GameOverlay {
   }
 
   private applyPhaseBanner(phase: GamePhase, retext = false): void {
+    if (this.quiet) return;
     switch (phase) {
       case 'wipe':
         if (retext) this.bigBanner.retext(t('hud.allDown'), t('hud.restartRoom'));
@@ -318,7 +332,7 @@ export class GameOverlay {
       this.lastPhase = a.phase;
       this.applyPhaseBanner(a.phase);
     }
-    if (a.exitOpen && !this.lastExitOpen && a.phase === 'playing') this.exitPending = true;
+    if (a.exitOpen && !this.lastExitOpen && a.phase === 'playing' && !this.quiet) this.exitPending = true;
     if (!a.exitOpen) this.exitPending = false;
     this.lastExitOpen = a.exitOpen;
     // l'annonce de sortie attend que les bandeaux d'arrivée de salle soient passés (pas de chevauchement)
