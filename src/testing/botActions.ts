@@ -20,7 +20,7 @@ import { canOccupy } from '../core/collision';
 import { dist } from '../core/geometry';
 import { requiredPushers } from '../core/mechanisms';
 import type { BlockState, Dir, EnemyKind, PlayerId, TileXY, Vec2 } from '../core/types';
-import { decideCombat, decideInPlace, decideRevive, moveVector, stepDistanceOf, type FollowGoal } from './botBrain';
+import { decideCombat, decideEat, decideInPlace, decideRevive, moveVector, stepDistanceOf, type FollowGoal } from './botBrain';
 import {
   makeAction,
   resolveTarget,
@@ -507,7 +507,8 @@ export interface AttackUntilClearOptions {
  * Chasse et attaque les ennemis vivants de la salle (n'importe quelle distance) jusqu'à ce qu'il n'en reste plus (et qu'aucune
  * apparition non conditionnée n'attende). Utilise le contrôleur de combat du personnage (mêlée au contact en regardant la cible,
  * distance en s'alignant sur la cible). Les cibles inatteignables sont ignorées 1,5 s puis retentées. Échecs : délai `maxMs`,
- * ou `stallMs` sans cible accessible (message listant les ennemis restants).
+ * ou `stallMs` sans cible accessible (message listant les ennemis restants). Si l'option de fond `eat` est active (calibrage des sources de vie),
+ * le joueur blessé ramasse d'abord la nourriture / le cristal proche (`decideEat`) : sans effet par défaut.
  */
 export function attackUntilClear(opts: AttackUntilClearOptions = {}): BotAction {
   const kinds = opts.kinds;
@@ -537,6 +538,13 @@ export function attackUntilClear(opts: AttackUntilClearOptions = {}): BotAction 
             ctx.set(r);
             return 'running';
           }
+        }
+        // Brique « ramasse la nourriture proche quand PV < 70 % » (option `eat`, désactivée par défaut : sans effet pour les bots existants).
+        const eat = ctx.bot.opts.eat ? decideEat(ctx.bot) : null;
+        if (eat) {
+          stallMs = 0;
+          ctx.set(eat);
+          return 'running';
         }
         const c = decideCombat(ctx.bot, { mode: 'chase', radius: Infinity, kinds });
         if (c) {

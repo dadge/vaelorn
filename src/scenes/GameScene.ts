@@ -32,6 +32,7 @@ import type { GameState, LevelDef, PlayerId, SimEvent, TickInputs, Vec2 } from '
 import { PlayerView } from '../entities/PlayerView';
 import { EnemyViews } from '../entities/EnemyView';
 import { ProjectileViews } from '../entities/ProjectileView';
+import { LifeViews } from '../entities/LifeViews';
 import { RoomView } from '../entities/RoomView';
 import { DarkRoomView, torchLightPos } from '../entities/DarkRoomView';
 import { forceDarkLevel, isDevDarkAllowed } from '../entities/devDark';
@@ -52,6 +53,7 @@ import type { ButtonName } from '../tutorial/types';
 import { ViewRig } from '../render/camera';
 import { DEPTH_LABELS, FxManager, damageNumberColor, ensureFxTextures } from '../render/fx';
 import { SpecialFx } from '../render/specialFx';
+import { CRYSTAL_HALO_COLOR, pickupHaloColor, pickupTextColor, pickupTextFor } from '../render/lifeFx';
 import { CallWorldFx } from '../render/callHud';
 import { heroFrame } from '../render/art/animations';
 import { spriteTier } from '../render/art/enemyTiers';
@@ -106,6 +108,8 @@ export class GameScene extends Phaser.Scene {
   private playerViews: PlayerView[] = [];
   private enemyViews!: EnemyViews;
   private projViews!: ProjectileViews;
+  /** Sources de vie : nourriture au sol et cristaux de soin (pur rendu de `room.pickups` / `room.healCrystals`). */
+  private lifeViews!: LifeViews;
   private huds: PlayerHud[] = [];
   private teamPanel: TeamPanelHud | null = null;
   private overlay!: GameOverlay;
@@ -308,6 +312,7 @@ export class GameScene extends Phaser.Scene {
     this.callFx = new CallWorldFx(this.ctx, DEPTH_LABELS - 0.25);
     this.enemyViews = new EnemyViews(this.ctx);
     this.projViews = new ProjectileViews(this.ctx);
+    this.lifeViews = new LifeViews(this.ctx);
 
     const state = this.sim.state;
     this.playerViews = state.players.map((p, i) => new PlayerView(this.ctx, i, p));
@@ -391,6 +396,7 @@ export class GameScene extends Phaser.Scene {
     this.darkRoom?.destroy();
     this.darkRoom = null;
     this.roomView = new RoomView(this.ctx, this.level, this.sim.room);
+    this.lifeViews.build(this.sim.room);
     // salle sombre : couche d'obscurité (au-dessus du monde, sous le HUD) ; message d'équipe à la première
     if (this.sim.room.dark) {
       this.darkRoom = new DarkRoomView(this, this.rig, this.sim.room, this.roomView.widthPx, this.roomView.heightPx);
@@ -505,6 +511,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.enemyViews.sync(s.room.enemies, timeMs, stepped, alpha, dtMs);
     this.projViews.sync(s.room.projectiles, stepped, alpha);
+    this.lifeViews.sync(s, timeMs);
 
     const exitOpen = this.sim.isExitOpen();
     this.roomView?.update(s, timeMs, exitOpen);
@@ -623,6 +630,27 @@ export class GameScene extends Phaser.Scene {
       case 'enemySpawned':
         fx.spawnPoof(e.pos.x, e.pos.y, 0xc8b0ff);
         break;
+      case 'pickupDropped':
+        // la nourriture apparaît dans un éclat doré (le halo permanent est dessiné par LifeViews)
+        fx.sparkles(e.pos.x, e.pos.y - 4, pickupHaloColor(e.kind), 7, 6);
+        break;
+      case 'pickupCollected': {
+        const pos = this.playerPos(e.playerId, state);
+        fx.sparkles(pos.x, pos.y - 6, 0xff8fa0, 9, 7);
+        fx.ring(pos.x, pos.y, 0xffe27a, 18, 360);
+        // « +½ ♥ » / « +♥ » si le soin est complet, « +N PV » quand il est plafonné au manque du joueur
+        const txt = pickupTextFor(e.kind, e.healed);
+        fx.floatText(pos.x, pos.y - 12, t(txt.key, txt.params), pickupTextColor(e.kind), 900, 16, 8);
+        break;
+      }
+      case 'crystalUsed': {
+        const pos = this.playerPos(e.playerId, state);
+        fx.burst(e.pos.x, e.pos.y - 6, 14, CRYSTAL_HALO_COLOR, 46, 520, -10);
+        fx.ring(e.pos.x, e.pos.y, CRYSTAL_HALO_COLOR, 30, 520);
+        fx.sparkles(pos.x, pos.y - 6, CRYSTAL_HALO_COLOR, 12, 8);
+        fx.floatText(pos.x, pos.y - 12, t('loot.crystal.heal', { n: e.healed }), CRYSTAL_HALO_COLOR, 1000, 18, 8);
+        break;
+      }
       case 'specialUsed': {
         const caster = state.players[e.playerId];
         const def = caster ? CHARACTERS[caster.characterId]?.special : undefined;
@@ -1077,6 +1105,7 @@ export class GameScene extends Phaser.Scene {
     if (this.failed) return;
     const players = this.sim.state.players;
     this.roomView?.retranslate();
+    this.lifeViews?.retranslate();
     this.huds.forEach((h, i) => h.retranslate(players[i]));
     this.teamPanel?.retranslate(players);
     this.overlay.retranslate();
@@ -1120,6 +1149,7 @@ export class GameScene extends Phaser.Scene {
     this.roomView = null;
     this.enemyViews?.destroy();
     this.projViews?.destroy();
+    this.lifeViews?.destroy();
     for (const pv of this.playerViews) pv.destroy();
     this.playerViews = [];
     this.specialFx?.destroy();

@@ -29,7 +29,10 @@
  *  (g) apparitions d'ennemis (vagues, `when`, `minPlayers`) ; chaque `EnemySpawnDef` n'apparaît qu'une fois ;
  *  (h) IA des ennemis (`updateEnemy`) ;
  *  (i) projectiles et impacts ;
- *  (j) morts d'ennemis (enemyDied, kills du tueur, retrait) ;
+ *  (i2) sources de vie (phase 'playing', sim créée avec `loot` vrai) : vieillissement et péremption de la nourriture au sol, ramassage
+ *      (`pickupCollected`) par le joueur vivant blessé le plus proche, usage des cristaux de soin (`crystalUsed`) ;
+ *  (j) morts d'ennemis (enemyDied, kills du tueur, retrait) ; BUTIN : chaque mort d'ennemi non invoqué tire son butin de vie avec le PRNG
+ *      DÉDIÉ (`lootRngState`, jamais `rngState`) → `pickupDropped` (voir `loot.ts`, `balance.ts` [B10]-[B17]) ;
  *  (k) objectifs personnels (`updateObjectives`) ;
  *  (l) sortie de salle : exigences de sortie satisfaites ET tous les joueurs vivants (≥ 1) dans `exit.rect` ⇒ phase
  *      'roomCleared' (événement roomCleared) puis, après ROOM_CLEAR_DELAY_MS, salle suivante (roomEntered 'next') ;
@@ -57,8 +60,12 @@
  *    avec les autres timers (a). Immobile tant que `callMs > CALL_DURATION_MS - CALL_FREEZE_MS`. Annulé si l'appelant tombe à terre ;
  *    tout (re)démarrage de salle (start / next / restart, donc défaite collective incluse) remet les deux à 0. Un joueur qui appelle reste
  *    vulnérable, sa torche continue de s'user et il compte normalement pour les zones d'objectif et de sortie.
+ *  - sources de vie : nourriture (`room.pickups`) et cristaux (`room.healCrystals`) sont remis à zéro / à neuf à chaque entrée de salle (start /
+ *    next / restart), comme le compteur anti-malchance (`lootDryKills`) ; leur flux aléatoire (`lootRngState`) et leurs ids (`nextPickupId`) sont
+ *    DISTINCTS de ceux du reste de la partie : sans ramassage, une partie est strictement identique à celle d'avant leur ajout ;
  *  - `knockDown(id)` (hors `IGameSimulation`, appelé ENTRE deux pas) : chute scénarisée du tutoriel, événement `playerDown` au pas suivant.
  */
+import { HEAL_CRYSTAL_HEAL, HEAL_CRYSTAL_RADIUS, LOOT_SEED_XOR, PICKUP_RADIUS, PICKUP_TTL_MS } from './balance';
 import {
   DOWNED_THREAT_RADIUS,
   INTERACT_RANGE,
@@ -67,6 +74,7 @@ import {
   REVIVE_RANGE,
   ROOM_CLEAR_DELAY_MS,
   SIM_STEP_MS,
+  SUMMON_WAVE,
   WIPE_RESTART_DELAY_MS,
 } from './constants';
 import { createEnemyState, knockEnemy, onEnemyHit, stunEnemy, updateEnemy } from './ai';
@@ -122,7 +130,8 @@ import {
   stepPlayerTorch,
   updateRevive,
 } from './players';
-import { nextRandom, seedToState } from './rng';
+import { agePickups, collectorFor, healAmountFor, isSummonedEnemy, mostWoundedFraction, pickupHealValue, rollLoot } from './loot';
+import { nextRandom, seedToState, type RngHolder } from './rng';
 import { resolveSlot } from './slots';
 import type {
   ActionFrame,
@@ -130,8 +139,10 @@ import type {
   EnemyKind,
   EnemyState,
   GameState,
+  HealCrystalState,
   IGameSimulation,
   LevelDef,
+  PickupState,
   PlayerId,
   PlayerSetup,
   PlayerState,
@@ -150,8 +161,8 @@ import type {
 export const MAX_ALIVE_ENEMIES = 40;
 /** Invulnérabilité (ms) accordée aux joueurs à l'arrivée dans une nouvelle salle ou après un redémarrage. */
 export const ROOM_ENTER_INVULN_MS = 600;
-/** Vague attribuée aux ennemis invoqués par l'IA (ne retardent pas les vagues suivantes, comptent pour 'clear'). */
-export const SUMMON_WAVE = -1;
+/** Vague attribuée aux ennemis invoqués par l'IA (ne retardent pas les vagues suivantes, comptent pour 'clear', ne laissent aucun butin de vie) : définie dans `constants.ts`. */
+export { SUMMON_WAVE };
 // Types d'ennemis volants (fosses non bloquantes, voir `collision.ts`) : `isFlyingKind` (enemies.ts).
 
 /** Durée maximale (ms) d'un pas : un `dtMs` plus grand est tronqué (le rendu doit appeler `step` plusieurs fois). */
@@ -191,7 +202,16 @@ function spawnPixels(room: RoomDef): Vec2[] {
   return out.length > 0 ? out : [tileCenter(1, 1)];
 }
 
-function newRoomState(room: RoomDef, playerCount: number): RoomState {
+/**
+ * États des cristaux de soin d'une salle : un par `HealCrystalDef` présent à ce nombre de joueurs (`minPlayers`), tous intacts ;
+ * aucun si les sources de vie sont désactivées (`loot` faux).
+ */
+export function createHealCrystalStates(room: RoomDef, playerCount: number, lootEnabled: boolean): HealCrystalState[] {
+  if (!lootEnabled) return [];
+  return (room.healCrystals ?? []).filter((c) => (c.minPlayers ?? 1) <= playerCount).map((c) => ({ id: c.id, used: false }));
+}
+
+function newRoomState(room: RoomDef, playerCount: number, lootEnabled = true): RoomState {
   return {
     roomId: room.id,
     enemies: [],
@@ -199,7 +219,27 @@ function newRoomState(room: RoomDef, playerCount: number): RoomState {
     mechanisms: createRoomMechanisms(room, playerCount),
     spawnedSpawnIdx: [],
     elapsedMs: 0,
+    pickups: [],
+    healCrystals: createHealCrystalStates(room, playerCount, lootEnabled),
   };
+}
+
+/**
+ * Compatibilité : pose les valeurs par défaut des champs de sources de vie absents (ancien snapshot, état construit à la main, saut de salle
+ * des bots) — `lootEnabled` vrai, flux de butin dérivé de `rngState`, compteur 0, prochain id 1, aucun objet au sol, cristaux de la salle intacts.
+ * N'écrase JAMAIS une valeur présente.
+ */
+function normalizeLootState(state: GameState, room: RoomDef | undefined): void {
+  if (typeof state.lootEnabled !== 'boolean') state.lootEnabled = true;
+  if (typeof state.lootRngState !== 'number' || !Number.isFinite(state.lootRngState)) {
+    state.lootRngState = seedToState((state.rngState | 0) ^ LOOT_SEED_XOR);
+  }
+  if (typeof state.lootDryKills !== 'number' || !Number.isFinite(state.lootDryKills)) state.lootDryKills = 0;
+  if (typeof state.nextPickupId !== 'number' || !Number.isFinite(state.nextPickupId)) state.nextPickupId = 1;
+  if (!Array.isArray(state.room.pickups)) state.room.pickups = [];
+  if (!Array.isArray(state.room.healCrystals)) {
+    state.room.healCrystals = room ? createHealCrystalStates(room, state.playerCount, state.lootEnabled) : [];
+  }
 }
 
 // ───────────────────────────── Simulation ─────────────────────────────
@@ -229,6 +269,8 @@ export class GameSimulation implements IGameSimulation {
   private roomGrid: RoomGrid;
   private pending: SimEvent[];
   private lastEvents: SimEvent[] = [];
+  /** Adaptateur du PRNG DÉDIÉ au butin (lit / écrit `state.lootRngState`) : `nextRandom(this.lootRng)` ne touche jamais `state.rngState`. */
+  private readonly lootRng: RngHolder;
 
   /** @internal Utiliser `createSimulation` ou `GameSimulation.restore`. */
   constructor(state: GameState, level: LevelDef, pendingEvents: SimEvent[] = []) {
@@ -236,6 +278,15 @@ export class GameSimulation implements IGameSimulation {
     this.level = level;
     this.roomGrid = new RoomGrid(level.rooms[state.roomIndex].layout);
     this.pending = pendingEvents;
+    normalizeLootState(state, level.rooms[state.roomIndex]);
+    this.lootRng = {
+      get rngState(): number {
+        return state.lootRngState as number;
+      },
+      set rngState(v: number) {
+        state.lootRngState = v;
+      },
+    };
   }
 
   /**
@@ -444,6 +495,9 @@ export class GameSimulation implements IGameSimulation {
 
     // (i) projectiles
     stepProjectiles(cctx, dt);
+
+    // (i2) sources de vie : nourriture au sol (vieillissement, ramassage) et cristaux de soin
+    if (s.phase === 'playing') this.stepLifeSources(dt, events);
 
     // (j) morts
     const deaths = this.collectDeaths(events, killers);
@@ -849,6 +903,7 @@ export class GameSimulation implements IGameSimulation {
       }
       const byPlayer = killers.get(e.id) ?? null;
       events.push({ type: 'enemyDied', enemyId: e.id, kind: e.kind, pos: { x: e.pos.x, y: e.pos.y }, byPlayer });
+      this.dropLoot(e, events);
       if (byPlayer !== null) {
         const killer = s.players.find((p) => p.id === byPlayer);
         if (killer) killer.kills += 1;
@@ -857,6 +912,90 @@ export class GameSimulation implements IGameSimulation {
     }
     s.room.enemies = remaining;
     return deaths;
+  }
+
+  // ── Sources de vie : butin des ennemis, ramassage, cristaux ──
+
+  /**
+   * Butin de vie d'un ennemi qui vient de mourir (voir `loot.ts`) : tire avec le PRNG dédié, met à jour le compteur anti-malchance et, le cas
+   * échéant, pose une nourriture au sol (`pickupDropped`). Sans effet hors phase 'playing' ou si les sources de vie sont désactivées.
+   * Les ennemis invoqués (vague `SUMMON_WAVE`) et les boss finaux ne laissent rien ; un demi-boss laisse toujours un cœur entier.
+   */
+  private dropLoot(e: EnemyState, events: SimEvent[]): void {
+    const s = this.state;
+    if (s.lootEnabled === false || s.phase !== 'playing') return;
+    const res = rollLoot({
+      kind: e.kind,
+      summoned: isSummonedEnemy(e),
+      hurtFraction: mostWoundedFraction(s.players),
+      dryKills: s.lootDryKills ?? 0,
+      random: () => nextRandom(this.lootRng),
+    });
+    s.lootDryKills = res.dryKills;
+    if (res.drop === null) return;
+    const id = s.nextPickupId ?? 1;
+    s.nextPickupId = id + 1;
+    const pos = this.findPickupSpot(e.pos);
+    (s.room.pickups as PickupState[]).push({ id, kind: res.drop, pos, ttlMs: PICKUP_TTL_MS });
+    events.push({ type: 'pickupDropped', pickupId: id, kind: res.drop, pos: { x: pos.x, y: pos.y } });
+  }
+
+  /**
+   * Position de pose d'une nourriture : celle de l'ennemi si un joueur peut y marcher, sinon la plus proche position praticable (anneaux
+   * croissants de 8 px : un ennemi volant qui meurt au-dessus d'une fosse ne laisse pas un objet inatteignable). Déterministe.
+   */
+  private findPickupSpot(pos: Vec2): Vec2 {
+    const solids = this.solidRects();
+    const grid = this.roomGrid;
+    const r = 4;
+    if (canOccupy(pos, r, grid, solids, false)) return { x: pos.x, y: pos.y };
+    for (let ring = 1; ring <= 16; ring++) {
+      for (let k = 0; k < 16; k++) {
+        const a = (k * Math.PI) / 8;
+        const cand = { x: pos.x + Math.cos(a) * ring * 8, y: pos.y + Math.sin(a) * ring * 8 };
+        if (canOccupy(cand, r, grid, solids, false)) return cand;
+      }
+    }
+    return { x: pos.x, y: pos.y };
+  }
+
+  /**
+   * Pas des sources de vie (phase 'playing') : les objets au sol vieillissent (périmés à `ttlMs` <= 0) puis, un par un, chaque objet est ramassé
+   * par le joueur VIVANT blessé le plus proche dans `PICKUP_RADIUS` (soin = min(valeur, manque), `pickupCollected`) ; un joueur aux PV pleins
+   * ou à terre ne ramasse rien (l'objet reste pour un allié). Puis chaque cristal de soin intact est utilisé par le joueur vivant blessé le plus
+   * proche dans `HEAL_CRYSTAL_RADIUS` (`HEAL_CRYSTAL_HEAL` PV plafonnés au manque, usage unique, `crystalUsed`).
+   */
+  private stepLifeSources(dt: number, events: SimEvent[]): void {
+    const s = this.state;
+    const pickups = s.room.pickups as PickupState[];
+    if (pickups.length > 0) {
+      agePickups(pickups, dt);
+      for (let i = 0; i < pickups.length; ) {
+        const pk = pickups[i];
+        const p = collectorFor(s.players, pk.pos, PICKUP_RADIUS);
+        if (!p) {
+          i++;
+          continue;
+        }
+        const healed = healAmountFor(p, pickupHealValue(pk.kind));
+        p.hp = Math.min(p.maxHp, p.hp + healed);
+        pickups.splice(i, 1);
+        events.push({ type: 'pickupCollected', pickupId: pk.id, playerId: p.id, kind: pk.kind, healed, pos: { x: pk.pos.x, y: pk.pos.y } });
+      }
+    }
+    const crystals = s.room.healCrystals as HealCrystalState[];
+    for (const cs of crystals) {
+      if (cs.used) continue;
+      const def = (this.room.healCrystals ?? []).find((c) => c.id === cs.id);
+      if (!def) continue;
+      const pos = tileCenter(def.tile[0], def.tile[1]);
+      const p = collectorFor(s.players, pos, HEAL_CRYSTAL_RADIUS);
+      if (!p) continue;
+      const healed = healAmountFor(p, HEAL_CRYSTAL_HEAL);
+      p.hp = Math.min(p.maxHp, p.hp + healed);
+      cs.used = true;
+      events.push({ type: 'crystalUsed', crystalId: cs.id, playerId: p.id, healed, pos: { x: pos.x, y: pos.y } });
+    }
   }
 
   // ── (l) Sortie ──
@@ -942,7 +1081,8 @@ export class GameSimulation implements IGameSimulation {
     }
     s.roomIndex = index;
     this.roomGrid = new RoomGrid(room.layout);
-    s.room = newRoomState(room, s.playerCount);
+    s.room = newRoomState(room, s.playerCount, s.lootEnabled !== false);
+    s.lootDryKills = 0; // compteur anti-malchance remis à zéro à chaque début de salle (start / next / restart)
     s.phase = 'playing';
     s.phaseTimerMs = 0;
     events.push({ type: 'roomEntered', roomId: room.id, roomIndex: index, reason });
@@ -987,9 +1127,13 @@ export function createSimulation(config: SimConfig, level: LevelDef): GameSimula
     roomIndex: startIndex,
     phase: 'playing',
     phaseTimerMs: 0,
-    room: newRoomState(first, players.length),
+    room: newRoomState(first, players.length, config.loot !== false),
     objectives: createObjectives(level, players.length),
     clearedRooms: level.rooms.slice(0, startIndex).map((r) => r.id),
+    lootEnabled: config.loot !== false,
+    lootRngState: seedToState((Number.isFinite(config.seed) ? Math.floor(config.seed) | 0 : 0) ^ LOOT_SEED_XOR),
+    lootDryKills: 0,
+    nextPickupId: 1,
   };
   // Reprise : les objectifs personnels des salles précédentes sont considérés accomplis (ils persistent entre salles).
   if (startIndex > 0) {

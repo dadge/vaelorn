@@ -77,7 +77,7 @@
   "tutorial.step.roomGoals": "Top right: the \"Room goals\" block (\"Room goal\" when there is only one line). It lists what you must do to open the exit: enemies to defeat, doors to open, personal goals completed (x/y).",
   "tutorial.step.attack": "A slime! Attack it with {attack} (hold to chain hits).",
   "tutorial.step.personalGoal": "Top left: \"Your goal\", specific to your hero. Here: defeat 2 enemies, the counter goes up with each finishing blow YOU deal. Keep fighting.",
-  "tutorial.step.hearts": "Your hearts are your life. At zero you fall down: this is not death, an ally can revive you.",
+  "tutorial.step.hearts": "Your hearts are your life. At zero you fall down: this is not death, an ally can revive you. Enemies sometimes drop food (half a heart or a heart): pick it up when you are hurt.",
   "tutorial.step.special": "Cast your special attack ({specialName}) with {special}: far stronger than a normal attack.",
   "tutorial.step.specialRecharge": "The gauge then recharges and shows READY. A special cannot be used non-stop: pick your moment.",
   "tutorial.step.clearYard": "Defeat all remaining enemies. The goals block tells you how many are left.",

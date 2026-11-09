@@ -34,6 +34,10 @@
  *   - `lightBridge` : ≥ 1 tuile de sol distinctes, `lanternSlot` entier 0..3, `radiusTiles` > 0 ; le pont est ÉTEINT au départ
  *     (aucun spawn/ennemi/levier dessus) et toutes ses tuiles doivent être atteignables (comptées franchissables).
  *   Les jetons d'exigence '<id>' vers ces mécanismes se valident comme les autres (id existant dans la salle).
+ *  Cristaux de soin (`RoomDef.healCrystals`, salles de boss / demi-boss) : ids uniques par salle, `minPlayers` entier 1..4, tuile de SOL (pas mur,
+ *   fosse, pilier), distincte d'un spawn joueur, d'un ennemi, d'une porte, d'un bloc, d'un brasero, d'une statue, d'une herse et d'un pont de lumière ;
+ *   « pas trivial » : à >= `HEAL_CRYSTAL_MIN_SPAWN_TILES` tuiles de tout point d'arrivée des joueurs ; « hors zones de danger de départ » : à >=
+ *   `HEAL_CRYSTAL_MIN_BOSS_TILES` tuiles de tout boss / demi-boss ; ACCESSIBLE depuis les spawns à chaque nombre de joueurs n >= minPlayers.
  *  i18n : si `opts.dictionaries` est fourni, toutes les clés requises (voir `collectRequiredI18nKeys`) doivent exister
  *  et être non vides dans CHAQUE dictionnaire.
  *
@@ -59,6 +63,7 @@
  *  porte), uniquement les cycles de dépendances et l'inatteignabilité géométrique.
  */
 
+import { HEAL_CRYSTAL_MIN_BOSS_TILES, HEAL_CRYSTAL_MIN_SPAWN_TILES } from './balance';
 import { LIGHT_FULL_TILES } from './constants';
 import { isAnyBossKind, isBossKind, isMiniBossKind } from './enemies';
 import type {
@@ -536,6 +541,59 @@ function validateRoomStatic(room: RoomDef, level: LevelDef, err: (m: string) => 
     }
   });
 
+  // cristaux de soin (sources de vie fixes)
+  const crystalIds = new Set<string>();
+  (room.healCrystals ?? []).forEach((c, i) => {
+    const L = `cristal de soin[${i}] "${c?.id}"`;
+    if (!hasText(c?.id)) err(`${P} : ${L} sans id`);
+    if (crystalIds.has(c.id)) err(`${P} : id de cristal de soin dupliqué "${c.id}"`);
+    crystalIds.add(c.id);
+    if (c.minPlayers !== undefined && (!isInt(c.minPlayers) || c.minPlayers < 1 || c.minPlayers > 4)) {
+      err(`${P} : ${L} minPlayers doit être un entier 1..4`);
+    }
+    if (!tile(c.tile, L)) return;
+    overlapCheck(c.tile, L, doorTiles, 'la porte');
+    overlapCheck(c.tile, L, blockTiles, 'le bloc');
+    overlapCheck(c.tile, L, brazierTiles, 'le brasero');
+    overlapCheck(c.tile, L, statueTiles, 'la statue');
+    overlapCheck(c.tile, L, gateTiles, 'la herse');
+    overlapCheck(c.tile, L, bridgeTiles, 'le pont de lumière');
+    // autres éléments de salle : plaque, levier, clé, socle (2×2), énigme de runes, sablier, panneau, rectangle de sortie
+    for (const m of room.mechanisms ?? []) {
+      const hit = (t: unknown, what: string): void => {
+        if (isTile(t) && t[0] === c.tile[0] && t[1] === c.tile[1]) err(`${P} : ${L} recouvre ${what} "${m.id}"`);
+      };
+      if (m.type === 'plate') hit(m.tile, 'la plaque');
+      else if (m.type === 'lever') hit(m.tile, 'le levier');
+      else if (m.type === 'key') hit(m.tile, 'la clé');
+      else if (m.type === 'socket' && isTile(m.tile) && c.tile[0] >= m.tile[0] && c.tile[0] <= m.tile[0] + 1 && c.tile[1] >= m.tile[1] && c.tile[1] <= m.tile[1] + 1) {
+        err(`${P} : ${L} recouvre le socle "${m.id}"`);
+      } else if (m.type === 'runePuzzle') {
+        hit(m.displayTile, "l'affichage de l'énigme");
+        (m.pedestals ?? []).forEach((pd) => hit(pd?.tile, "le piédestal de l'énigme"));
+      } else if (m.type === 'hourglass') (m.levers ?? []).forEach((lt) => hit(lt, 'un levier du sablier'));
+    }
+    for (const sg of room.signs ?? []) {
+      if (isTile(sg.tile) && sg.tile[0] === c.tile[0] && sg.tile[1] === c.tile[1]) err(`${P} : ${L} recouvre le panneau "${sg.id}"`);
+    }
+    if (room.exit?.rect && rectInBounds(room, room.exit.rect) && rectTiles(room.exit.rect).some((t) => t[0] === c.tile[0] && t[1] === c.tile[1])) {
+      err(`${P} : ${L} est dans le rectangle de sortie`);
+    }
+    (room.enemies ?? []).forEach((e, k) => {
+      if (isTile(e.tile) && e.tile[0] === c.tile[0] && e.tile[1] === c.tile[1]) err(`${P} : ${L} recouvre l'apparition de l'ennemi[${k}] (${e.kind})`);
+      else if (isAnyBossKind(e.kind) && isTile(e.tile) && Math.hypot(e.tile[0] - c.tile[0], e.tile[1] - c.tile[1]) < HEAL_CRYSTAL_MIN_BOSS_TILES) {
+        err(`${P} : ${L} à moins de ${HEAL_CRYSTAL_MIN_BOSS_TILES} tuiles du départ de ${e.kind} (zone de danger)`);
+      }
+    });
+    (room.playerSpawns ?? []).forEach((sp, k) => {
+      if (!isTile(sp)) return;
+      if (sp[0] === c.tile[0] && sp[1] === c.tile[1]) err(`${P} : ${L} recouvre playerSpawns[${k}]`);
+      else if (Math.hypot(sp[0] - c.tile[0], sp[1] - c.tile[1]) < HEAL_CRYSTAL_MIN_SPAWN_TILES) {
+        err(`${P} : ${L} à moins de ${HEAL_CRYSTAL_MIN_SPAWN_TILES} tuiles de playerSpawns[${k}] (trop facile à atteindre)`);
+      }
+    });
+  });
+
   // zones
   const zoneIds = new Set<string>();
   for (const z of room.zones ?? []) {
@@ -965,6 +1023,10 @@ function validateReachability(level: LevelDef, usable: Set<string>, err: (m: str
                 : 'inatteignable depuis les spawns';
           add(`${P} : ${m.type} "${m.id}" ${why}`, n);
         }
+      }
+      for (const c of room.healCrystals ?? []) {
+        if ((c.minPlayers ?? 1) > n || !isTile(c.tile)) continue;
+        if (!inSet(room, c.tile)) add(`${P} : cristal de soin "${c.id}" en [${c.tile}] inatteignable depuis les spawns`, n);
       }
       if (room.dark === true) {
         const refill = room.mechanisms.some(

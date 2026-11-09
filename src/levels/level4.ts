@@ -700,6 +700,12 @@ const warden1: RoomDef = (() => {
         .decor('statue', [14, 8], [14, 40], [62, 8], [62, 40])
         .decor('bones', [34, 24], [50, 14], [26, 38]).decor('crate', [8, 8], [68, 8], [8, 40], [68, 40]).decors,
     ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'warden1_heal1', tile: [24, 14] },
+      { id: 'warden1_heal2', tile: [22, 34] },
+      { id: 'warden1_heal3', tile: [38, 8], minPlayers: 3 },
+    ],
     exit: { rect: rect(64, 21, 4, 6), requires: ['clear', 'obj:slayer'] },
   };
 })();
@@ -1050,6 +1056,12 @@ const antechamber: RoomDef = (() => {
         .decor('statue', [40, 9], [40, 37], [68, 20], [68, 26])
         .decor('bones', [24, 24], [52, 20], [44, 30]).decor('crate', [2, 2], [77, 2], [2, 43], [77, 43]).decors,
     ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'antechamber_heal1', tile: [26, 14] },
+      { id: 'antechamber_heal2', tile: [26, 30] },
+      { id: 'antechamber_heal3', tile: [62, 7], minPlayers: 3 },
+    ],
     exit: { rect: rect(71, 20, 5, 6), requires: ['bossDoor', 'clear'] },
   };
 })();
@@ -1107,6 +1119,12 @@ const throne: RoomDef = (() => {
       ...p.decor('crystal', [28, 2], [35, 2], [31, 8], [33, 8], [5, 12], [59, 12], [5, 38], [59, 38])
         .decor('statue', [6, 10], [57, 10], [6, 40], [57, 40])
         .decor('bones', [16, 24], [36, 28], [44, 36]).decors,
+    ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'throne_heal1', tile: [20, 16] },
+      { id: 'throne_heal2', tile: [20, 34] },
+      { id: 'throne_heal3', tile: [30, 10], minPlayers: 3 },
     ],
     exit: {
       rect: rect(28, 1, 8, 3),

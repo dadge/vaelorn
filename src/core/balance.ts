@@ -13,6 +13,14 @@
  *  [B7] MIN_DAMAGE ................. plancher des dégâts effectivement appliqués (1)
  *  [B8] DIFFICULTY_TABLE ........... multiplicateurs PV/dégâts ennemis par difficulté (par JOUEUR)
  *  [B9] REVIVE_INVULN_MS ........... invulnérabilité après un relevage (1500 ms)
+ *  [B10] HP_PER_HEART .............. PV représentés par un cœur du HUD (10) ; LOOT_HALF_HEAL (5) / LOOT_FULL_HEAL (10) : valeur de la nourriture
+ *  [B11] LOOT_TIERS ................ table de butin des ennemis tués par palier de PV de base (faible / standard / costaud)
+ *  [B12] LOOT_NEED_POINTS .......... multiplicateur de probabilité selon les PV du joueur vivant le plus blessé (x0,5 / x1 / x2)
+ *  [B13] LOOT_MAX_CHANCE ........... plafond de la probabilité totale de butin (90 %)
+ *  [B14] LOOT_PITY_DRY_KILLS ....... garantie anti-malchance : morts sans butin (6) et seuil de PV (70 %) — LOOT_PITY_HP_FRACTION
+ *  [B15] PICKUP_TTL_MS / _BLINK_MS / _RADIUS . vie (12 s), clignotement (3 dernières s) et rayon de ramassage (14 px) de la nourriture au sol
+ *  [B16] LOOT_SEED_XOR ............. constante de dérivation de la graine du PRNG DÉDIÉ au butin (flux isolé)
+ *  [B17] HEAL_CRYSTAL_HEAL ......... soin d'un cristal de soin (50 PV, usage unique) ; HEAL_CRYSTAL_RADIUS (contact) et distances mini de placement
  *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
@@ -39,6 +47,91 @@ export const DAMAGE_PER_STRENGTH = 2.5;
 export const MIN_DAMAGE = 1;
 /** [B9] Invulnérabilité (ms) accordée à un joueur relevé. */
 export const REVIVE_INVULN_MS = 1500;
+
+// ───────────────────────── Sources de vie (butin, cristaux) ─────────────────────────
+
+/** [B10] PV représentés par un cœur entier du HUD (source de vérité ; `render/hud.ts` la réexporte). */
+export const HP_PER_HEART = 10;
+/** [B10] Soin d'un demi-cœur de nourriture (PV). */
+export const LOOT_HALF_HEAL = HP_PER_HEART / 2;
+/** [B10] Soin d'un cœur entier de nourriture (PV). */
+export const LOOT_FULL_HEAL = HP_PER_HEART;
+
+/** Palier de butin d'un ennemi ordinaire (les demi-boss et les boss finaux ont leurs règles propres, voir `loot.ts`). */
+export type LootTierId = 'weak' | 'standard' | 'tough';
+
+/** Ligne de la table de butin : plafond de PV de base du palier et chances de demi-cœur / cœur entier (à besoin neutre ×1). */
+export interface LootTierDef {
+  /** Palier applicable aux ennemis dont les PV de base (`EnemyDef.hp`) sont <= à cette valeur (après les paliers précédents). */
+  maxBaseHp: number;
+  /** Probabilité d'un demi-cœur (5 PV). */
+  half: number;
+  /** Probabilité d'un cœur entier (10 PV). */
+  full: number;
+}
+
+/**
+ * [B11] Table de butin des ennemis ordinaires tués (non invoqués), par PV de base :
+ *  - faible    (PV <= 25)       : rien 85 %, demi 12 %, entier 3 %  (slime, chauve-souris, feu follet)
+ *  - standard  (PV 26 à 40)     : rien 76 %, demi 18 %, entier 6 %  (squelette, archer, araignée)
+ *  - costaud   (PV > 40, hors boss) : rien 40 %, demi 40 %, entier 20 %  (chevalier)
+ * Les demi-boss (`isMiniBoss`) laissent TOUJOURS un cœur entier ; les boss finaux (`isBoss`) et les ennemis invoqués : rien.
+ * Gain moyen visé ≈ 1,5 PV par ennemi à besoin neutre.
+ */
+export const LOOT_TIERS: Readonly<Record<LootTierId, Readonly<LootTierDef>>> = {
+  weak: { maxBaseHp: 25, half: 0.12, full: 0.03 },
+  standard: { maxBaseHp: 40, half: 0.18, full: 0.06 },
+  tough: { maxBaseHp: Infinity, half: 0.4, full: 0.2 },
+};
+
+/** Point de la courbe de besoin : fraction de PV du joueur le plus blessé → multiplicateur de la probabilité de butin. */
+export interface LootNeedPoint {
+  hpFraction: number;
+  mult: number;
+}
+
+/**
+ * [B12] Courbe de besoin (interpolation linéaire par morceaux, plafonnée aux extrémités), points triés par fraction de PV DÉCROISSANTE :
+ * PV pleins (100 %) → ×0,5 ; 50 % → ×1 ; <= 30 % → ×2. S'applique à la SOMME des deux chances non nulles du palier ;
+ * la répartition demi / entier reste celle de la table.
+ */
+export const LOOT_NEED_POINTS: readonly LootNeedPoint[] = [
+  { hpFraction: 1, mult: 0.5 },
+  { hpFraction: 0.5, mult: 1 },
+  { hpFraction: 0.3, mult: 2 },
+];
+
+/** [B13] Plafond de la probabilité TOTALE de butin (après le multiplicateur de besoin). */
+export const LOOT_MAX_CHANCE = 0.9;
+
+/**
+ * [B14] Garantie anti-malchance : après `LOOT_PITY_DRY_KILLS` morts consécutives (non invoquées, ennemis ordinaires) sans butin dans la salle,
+ * la mort suivante laisse AU MOINS un demi-cœur si le joueur vivant le plus blessé est sous `LOOT_PITY_HP_FRACTION` de ses PV.
+ * (Le compteur repart de zéro à chaque butin et à chaque début de salle.)
+ * Interprétation de « au-delà de 6 » : le compteur ATTEINT 6 (6 morts sèches) ⇒ la 7e mort est garantie (`dryKills >= LOOT_PITY_DRY_KILLS`). La lecture
+ * stricte (> 6, soit la 8e mort) reste possible : changer la valeur à 7 suffit (à valider avec David, voir TODO.md).
+ */
+export const LOOT_PITY_DRY_KILLS = 6;
+export const LOOT_PITY_HP_FRACTION = 0.7;
+
+/** [B15] Durée de vie (ms) de la nourriture au sol. */
+export const PICKUP_TTL_MS = 12_000;
+/** [B15] Les `PICKUP_BLINK_MS` dernières millisecondes de vie, le rendu fait clignoter l'objet. */
+export const PICKUP_BLINK_MS = 3_000;
+/** [B15] Rayon de ramassage (px, centre à centre) de la nourriture. */
+export const PICKUP_RADIUS = 14;
+
+/** [B16] Constante XOR de la graine du PRNG de butin : `seedToState(seed ^ LOOT_SEED_XOR)` ("LOOT" en ASCII). */
+export const LOOT_SEED_XOR = 0x4c4f4f54;
+
+/** [B17] PV rendus par un cristal de soin (plafonnés au manque du joueur) = 5 cœurs. */
+export const HEAL_CRYSTAL_HEAL = 5 * HP_PER_HEART;
+/** [B17] Rayon de contact (px) d'un cristal de soin. */
+export const HEAL_CRYSTAL_RADIUS = 14;
+/** [B17] Validation des niveaux : un cristal est à au moins ce nombre de tuiles de TOUT point d'arrivée des joueurs (pas trivial à atteindre). */
+export const HEAL_CRYSTAL_MIN_SPAWN_TILES = 8;
+/** [B17] Validation des niveaux : un cristal est à au moins ce nombre de tuiles de la position de départ de tout boss / demi-boss (hors zones de danger de départ). */
+export const HEAL_CRYSTAL_MIN_BOSS_TILES = 17;
 
 /** Multiplicateurs de difficulté appliqués aux ENNEMIS (du point de vue d'un joueur donné). */
 export interface DifficultyMultipliers {

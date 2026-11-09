@@ -43,6 +43,8 @@ export interface BackgroundFlags {
   combat: boolean;
   revive: boolean;
   regroup: boolean;
+  /** Ramassage de la nourriture / des cristaux de soin proches quand les PV sont bas (ignoré si l'option `eat` du bot est fausse ; défaut : actif). */
+  eat?: boolean;
 }
 
 /**
@@ -122,6 +124,16 @@ export interface BackgroundOptions {
   regroupRadius: number;
   /** Distance minimale (px) que les tireurs essaient de garder avec les ennemis. */
   kiteDistance: number;
+  /**
+   * Brique « sources de vie » : quand ses PV sont sous `eatBelowFrac`, le bot va ramasser la nourriture au sol ou utiliser un cristal de soin intact
+   * situé à moins de `eatRadius` px (avant de combattre). Désactivée par défaut : les bots existants ne ramassent rien (leurs résultats sont inchangés) ;
+   * la calibration de l'équilibrage l'active.
+   */
+  eat: boolean;
+  /** Fraction de PV (0..1) sous laquelle le bot va chercher de la nourriture (défaut 0,7). */
+  eatBelowFrac: number;
+  /** Rayon (px) dans lequel le bot repère nourriture et cristaux (défaut 160). */
+  eatRadius: number;
 }
 
 /** Valeurs par défaut des comportements de fond (tous activés). */
@@ -136,6 +148,9 @@ export const DEFAULT_BACKGROUND: Readonly<BackgroundOptions> = Object.freeze({
   criticalHpFrac: 0.25,
   regroupRadius: 90,
   kiteDistance: 30,
+  eat: false,
+  eatBelowFrac: 0.7,
+  eatRadius: 160,
 });
 
 // ───────────────────────────── Statistiques ─────────────────────────────

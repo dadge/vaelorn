@@ -10,6 +10,7 @@
  */
 import type Phaser from 'phaser';
 import { INTERACT_RANGE, PLAYER_COLORS, PLAYER_COLOR_NAMES, REVIVE_RANGE, ROOM_CLEAR_DELAY_MS, TILE, TORCH_MAX_MS, WIPE_RESTART_DELAY_MS } from '../core/constants';
+import { HP_PER_HEART } from '../core/balance';
 import { CHARACTERS, specialFraction } from '../core/characters';
 import { hourglassLeverIndex, requiredPushers, statueRotationTarget } from '../core/mechanisms';
 import { reviveDurationFor } from '../core/players';
@@ -62,8 +63,8 @@ import type { HudRegionId } from '../tutorial/types';
 
 // ───────────────────────────── Partie pure ─────────────────────────────
 
-/** PV représentés par un cœur. */
-export const HP_PER_HEART = 10;
+/** PV représentés par un cœur (source de vérité : `core/balance.ts` [B10]). */
+export { HP_PER_HEART };
 /** Nombre max de cœurs affichés (150 PV de résistance 10 ⇒ 15 ; marge de sécurité). */
 export const MAX_HEARTS = 20;
 /** Distance (px) à laquelle un panneau affiche son texte. */

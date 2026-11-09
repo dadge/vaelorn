@@ -71,6 +71,13 @@ function heart(kind: 'full' | 'half' | 'empty'): Bitmap {
   return a;
 }
 
+/**
+ * Cœur 8×7 de l'interface (plein / demi / vide), réutilisé par les cartouches de nourriture (`pickup_*`, `loot.ts`) : un seul dessin de cœur dans l'atlas.
+ */
+export function heartBitmap(kind: 'full' | 'half' | 'empty'): Bitmap {
+  return heart(kind);
+}
+
 /** Frames d'interface 8×8. */
 export function buildUiFrames(): Record<string, Bitmap> {
   const pad = (b: Bitmap): Bitmap => {

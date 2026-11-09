@@ -74,6 +74,7 @@ ne sont pas à toi (travail en cours d'un autre agent) sont à ignorer ; les tie
   Implémentation par joueur (ennemis partagés par tous) : dégâts infligés à un ennemi par le joueur P = brut ÷ multPV(diff(P)) ;
   dégâts reçus par P = brut × multDégâts(diff(P)) × (1 − réduction(P)).
 - Invulnérabilité après coup : `PLAYER_INVULN_MS`. Les dégâts ne descendent jamais sous 1 une fois appliqués les multiplicateurs.
+- Sources de vie : `HP_PER_HEART` = 10 PV ; nourriture demi = 5 PV / entier = 10 PV ; cristal = 50 PV ; table et courbe de besoin dans `balance.ts` [B10]–[B17] (voir §9 « Sources de vie »).
 
 ### Relevage, mort d'équipe (src/core/players.ts)
 
@@ -259,6 +260,26 @@ Détail, durées et paramètres d'URL : README « Mode démo (attract mode) ».
 - **i18n** : les « parts » temporaires ont été fusionnées dans `fr.json`/`en.json` (`npm run i18n:merge`) ; le mécanisme de parts reste
   disponible (fusion automatique sous Vite/Vitest via `import.meta.glob`).
 - **Entrées** : voir §5 (réclamation d'emplacement, plus d'option « J1 = manette »).
+- **Sources de vie (équilibrage du solo)** : le jeu était trop difficile en solo (PV pleins à chaque redémarrage de salle ; entre deux salles, seuls les joueurs à terre sont relevés). Deux sources : (1) **butin
+  de nourriture** sur les ennemis vaincus (table par PV de base dans `balance.ts` [B10]–[B16], logique pure `src/core/loot.ts`) : faible 85/12/3 %,
+  standard 76/18/6 %, costaud 40/40/20 %, cœur entier garanti sur un demi-boss, rien sur un boss final ni sur un ennemi invoqué (marqueur existant
+  `EnemyState.wave === SUMMON_WAVE`) ; probabilité × (0,5 à PV pleins, 1 à 50 %, 2 à ≤ 30 %) selon le joueur vivant le plus blessé, plafonnée à 90 % ;
+  garantie anti-malchance (6 morts sèches ET le plus blessé < 70 % ⇒ au moins un demi-cœur) ; objets au sol 12 s (clignotent 3 s), ramassés au contact
+  (14 px) par un joueur vivant blessé (soin = min(valeur, manque)), effacés à chaque entrée de salle ; (2) **cristaux de soin** fixes
+  (`RoomDef.healCrystals`, 2 + 1 à partir de 3 joueurs) dans les 11 salles de boss / demi-boss des niveaux 2 à 6, à usage unique, 50 PV, rechargés au
+  redémarrage de salle, validés par `levelValidation` (sol, accessible, ≥ 8 tuiles des arrivées, ≥ 17 tuiles du départ des boss (portée des projectiles)). **Déviation des
+  règles « logique pure »** : aucune ; le tirage utilise un PRNG **dédié et sérialisé** (`GameState.lootRngState`, graine `seed ^ LOOT_SEED_XOR`) et
+  des ids propres (`nextPickupId`) pour ne pas décaler le flux de la simulation ; champs d'état optionnels (ancien snapshot = valeurs par défaut) ;
+  option `SimConfig.loot` (défaut vrai). Les taux ne dépendent NI de la difficulté NI du nombre de joueurs. Les bots (`BotRun`) jouent par défaut
+  avec `loot: false` (sinon ils ramassent par hasard et leurs résultats changent) ; la brique de fond `eat` sert à la calibration.
+  **Calibrage mesuré** (bots, `src/testing/lootCalibration.ts`, solo 20 graines par niveau, 4 joueurs 10 graines, difficulté 2 ; tableau complet au README « Butin de vie et
+  cristaux de soin ») : la table validée est **conservée sans réglage** car l'objectif est atteint. Solo : défaites collectives 190 → 56 sur 120 parties (−71 % avec un bot
+  qui va chercher la nourriture, −43 % avec un bot « passif » qui ne ramasse que par hasard ; l'humain est entre les deux, milieu ≈ −57 % ≈ « moitié moins »), PV perdus
+  par salle −13 % (la menace reste), durée 520 → 481 s (maxi 12,8 min). 4 joueurs : 0 défaite avec ou sans, durée 409 → 401 s (−2 %). Les défaites restantes sont dans
+  les boss finaux (sans butin, seuls les cristaux soignent). **Limite** : les bots sont un proxy (pas de vraie esquive, ramassage au plus près sans risque) : sens et
+  ordre de grandeur fiables, pas le ressenti. La brique `eat` est branchée dans `attackUntilClear` (boucle de combat des scripts) en plus des comportements de fond :
+  avant, les scripts ne cherchaient jamais la nourriture (seul le ramassage fortuit comptait, ce qui sous-estimait l'effet). Calibrage complet à la demande :
+  `src/testing/lootCalibration.long.test.ts` (ignoré par `npm test`) ; test léger de sens et d'invariants dans la suite : `src/testing/lootCalibration.test.ts`.
 
 ## 10. Demi-boss et boss des niveaux 4-6
 

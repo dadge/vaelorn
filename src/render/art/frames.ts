@@ -10,6 +10,7 @@ import { buildEnemyFrames } from './enemies';
 import { buildFxFrames } from './fx';
 import { buildHeroFrames } from './heroes';
 import { buildLightFrames } from './light';
+import { buildLootFrames } from './loot';
 import { buildKeyIcons, buildMechanismFrames } from './mechanisms';
 import { buildMechanism46Frames } from './mechanisms46';
 import { buildTileFrames } from './tiles';
@@ -30,6 +31,7 @@ export function buildAllFrames(): Record<string, Bitmap> {
     buildUiFrames(),
     buildKeyIcons(),
     buildLightFrames(),
+    buildLootFrames(),
   ];
   for (const fam of families) {
     for (const [name, bm] of Object.entries(fam)) {

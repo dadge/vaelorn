@@ -67,6 +67,14 @@ export const EXTRA_FRAME_SPECS: readonly FrameSpec[] = [
   /** Lanterne du porteur (2 frames de flamme), aussi utilisée par le HUD. */
   { name: 'lantern_0', size: [8, 8] },
   { name: 'lantern_1', size: [8, 8] },
+  // ── Sources de vie (src/render/art/loot.ts) ──
+  /** Nourriture au sol : le cœur de l'interface agrandi ×2 (demi-cœur / cœur entier), sans cadre ; le halo est un effet de rendu. */
+  { name: 'pickup_half', size: [16, 16] },
+  { name: 'pickup_full', size: [16, 16] },
+  /** Cristal de soin : 2 frames d'éclat (intact) et frame « vidée » (grise, après usage). */
+  { name: 'heal_crystal_0', size: [16, 16] },
+  { name: 'heal_crystal_1', size: [16, 16] },
+  { name: 'heal_crystal_used', size: [16, 16] },
 ];
 
 /** Toutes les frames du contrat, avec leurs tailles. */

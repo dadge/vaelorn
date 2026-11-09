@@ -105,6 +105,8 @@ export const SPRITE_MANIFEST: Record<string, SpriteManifestEntry> = {
   'brazier_lit_*': e('Brasero allumé : flamme vive orange/jaune sur un lit de braises (2 frames d’animation, brazier_lit_0 / brazier_lit_1)', [16, 16], 'Brasero allumé 16×16, flamme animée sur 2 frames'),
   'ui_torch_*': e('Icône de torche du HUD : ui_torch_full (flamme haute), ui_torch_half (petite flamme), ui_torch_empty (bout calciné)', [8, 8], 'Icônes 8×8 en 3 niveaux de combustible'),
   'fx_ember_*': e('Étincelles qui montent et retombent : fx_ember_0 (vive), fx_ember_1 (orange), fx_ember_2 (mourante)', [8, 8], 'Particules 8×8, 3 étapes'),
+  'pickup_*': e('Nourriture laissée par les ennemis (PROVISOIRE) : le cœur de l’interface seul, agrandi ×2, sans cadre — pickup_half (demi-cœur, +5 PV), pickup_full (cœur entier, +10 PV). Le halo et le clignotement (3 dernières secondes) sont des effets de rendu', [16, 16], 'Objet 16×16 en 2 variantes (demi / entier), lisible à zoom 2'),
+  'heal_crystal_*': e('Cristal de soin (PROVISOIRE) : cristal émeraude sur socle de pierre, 2 frames d’éclat (heal_crystal_0/1) et frame vidée grise (heal_crystal_used) ; usage unique, 50 PV', [16, 16], 'Cristal 16×16 : 2 frames animées + 1 frame vidée'),
   'ui_special': e('Étoile dorée : indicateur de l’attaque spéciale du HUD (teintée en gris pendant la recharge)', [8, 8], 'Icône 8×8'),
   'ui_heart_*': e('Cœurs de PV : plein, demi, vide', [8, 8], 'Icônes 8×8'),
   'ui_check': e('Coche verte (objectif accompli)', [8, 8], 'Icône 8×8'),

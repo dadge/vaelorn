@@ -15,7 +15,7 @@ import { canOccupy, projectileHitsWall, segmentBlocked } from '../core/collision
 import { getCharacter } from '../core/characters';
 import { enemyRadius, meleeTargets } from '../core/combat';
 import { ENEMIES } from '../core/enemies';
-import { dirFromVec, dist, pointInTileRect } from '../core/geometry';
+import { dirFromVec, dist, pointInTileRect, tileCenter } from '../core/geometry';
 import type { ActionFrame, Dir, EnemyKind, EnemyState, PlayerState, Vec2 } from '../core/types';
 import type { BackgroundFlags } from './botTypes';
 import type { BotPlayer } from './botKit';
@@ -831,6 +831,45 @@ export function decideRegroup(bot: BotPlayer): ActionFrame | null {
   return null;
 }
 
+// ───────────────────────────── Sources de vie ─────────────────────────────
+
+/**
+ * Brique « ramasse la nourriture proche quand PV < 70 % » (option `eat`, voir `BackgroundOptions`) : si le bot est vivant, blessé sous
+ * `eatBelowFrac` de ses PV et qu'une nourriture au sol ou un cristal de soin intact se trouve à moins de `eatRadius` px, il s'y rend par le plus
+ * court chemin (le contact suffit : le ramassage est automatique). Retourne null si l'option est fausse, si rien n'est à portée ou si la cible
+ * est inatteignable (le combat et le reste prennent alors la main). Pure lecture de l'état : n'écrit rien dans la simulation.
+ */
+export function decideEat(bot: BotPlayer): ActionFrame | null {
+  const o = bot.opts;
+  const p = bot.player;
+  if (!o.eat || p.status !== 'alive' || !(p.hp < p.maxHp * o.eatBelowFrac)) return null;
+  const sim = bot.run.sim;
+  let best: Vec2 | null = null;
+  let bd = o.eatRadius;
+  for (const pk of sim.state.room.pickups ?? []) {
+    const d = dist(p.pos, pk.pos);
+    if (d <= bd) {
+      bd = d;
+      best = pk.pos;
+    }
+  }
+  for (const cs of sim.state.room.healCrystals ?? []) {
+    if (cs.used) continue;
+    const def = (sim.room.healCrystals ?? []).find((c) => c.id === cs.id);
+    if (!def) continue;
+    const pos = tileCenter(def.tile[0], def.tile[1]);
+    const d = dist(p.pos, pos);
+    if (d <= bd) {
+      bd = d;
+      best = pos;
+    }
+  }
+  if (!best) return null;
+  const r = bot.follower.follow(bot, { pos: best, tolerance: 6 });
+  if (r.status === 'moving') return frameOf({ moveX: r.vec.x, moveY: r.vec.y });
+  return null;
+}
+
 // ───────────────────────────── Agrégation ─────────────────────────────
 
 /**
@@ -845,6 +884,10 @@ export function decideBackground(bot: BotPlayer, flags: BackgroundFlags): Action
   if (flags.revive && o.revive && p.revivingId !== null) {
     const r = decideRevive(bot);
     if (r) return r;
+  }
+  if (flags.eat !== false && o.eat) {
+    const e = decideEat(bot);
+    if (e) return e;
   }
   if (flags.combat && o.combat) {
     const c = decideCombat(bot, { mode: 'chase', radius: o.engageRadius });

@@ -1057,6 +1057,12 @@ const arene: RoomDef = {
     [...ARENE_SIGNS.map((s) => s.tile), ...ARENE_SPAWNS],
     72,
   ),
+  // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+  healCrystals: [
+    { id: 'arene_heal1', tile: [18, 12] },
+    { id: 'arene_heal2', tile: [16, 31] },
+    { id: 'arene_heal3', tile: [28, 2], minPlayers: 3 },
+  ],
   exit: {
     rect: { x: 46, y: 17, w: 3, h: 6 },
     requires: ['clear', 'obj:sync_levers', 'obj:read_runes', 'obj:bear_key', 'obj:hold_circle'],

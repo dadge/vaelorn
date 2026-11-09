@@ -24,6 +24,7 @@ de frames** (voir le tableau ci-dessous) : aucun autre code n'a à changer.
 | `bosses46.ts` | Demi-boss 32×32 (warden, pyromancer, wraith) et boss 48×48 (frostqueen, forgelord, voidlord) des niveaux 4-6 |
 | `mechanisms46.ts` | Statues jumelles, sablier, herse, pont de lumière, lanterne (niveaux 4-6) |
 | `enemyTiers.ts` | Table PURE `ENEMY_SPRITES : Record<EnemyKind, …>` : gabarit de sprite (small 16 / mini 32 / boss 48), préfixe de frame, décalages, ombre |
+| `loot.ts` | Sources de vie (**provisoire**) : `pickup_half`, `pickup_full` (cœur de l'UI seul, agrandi ×2, réutilisé via `heartBitmap`, sans cartouche), `heal_crystal_0/1/used` |
 | `light.ts` | Torches / salles sombres : `brazier_*`, `ui_torch_*`, `fx_ember_0..2` (voir « Lumière et obscurité ») |
 | `../darkness.ts` | `DarknessLayer` : voile d'obscurité (RenderTexture) + pinceaux lumineux générés par code (hors atlas) |
 | `../palettes.ts` | Toutes les couleurs (thèmes `crypt`/`grove`/`citadel`/`frost`/`ember`/`void`, héros, ennemis, demi-boss, boss, mécanismes, `PUZZLE_COLORS`, FX, UI) ; `ALL_PALETTE_COLORS` = liste blanche testée |
@@ -151,6 +152,17 @@ Taille = taille d'UNE frame. Les motifs utilisent `*` comme joker.
 | `fx_revive_*` | 16×16 | Relevage : anneau et étincelles montantes, 4 frames | Animation de relevage 16×16, 4 frames |
 | `fx_marker` | 8×8 | Triangle blanc pointant vers le bas, à teinter (couleur du joueur) | Marqueur 8×8 blanc |
 | `fx_shadow` | 16×8 | Ombre ovale au sol (alpha réglé par le rendu) | Ombre 16×8 |
+
+### Sources de vie (PROVISOIRES)
+
+Nourriture laissée par les ennemis et cristaux de soin des salles de boss / demi-boss. Dessins **provisoires** (générés par `src/render/art/loot.ts`) : à remplacer par de vrais sprites de nourriture (`TODO.md`). Le halo (texture `fx_glow` teintée) et le clignotement des 3 dernières secondes sont des effets de rendu (`src/entities/LifeViews.ts`, `src/render/lifeFx.ts`), pas des frames.
+
+| Frame(s) | Taille | Description | À remplacer par |
+|---|---|---|---|
+| `pickup_half` | 16×16 | Demi-cœur de nourriture (+5 PV) : le demi-cœur de l'interface agrandi ×2, sans cadre ni fond ; halo argenté ajouté au rendu | Objet 16×16, lisible à zoom 2 |
+| `pickup_full` | 16×16 | Cœur entier de nourriture (+10 PV) : le cœur plein de l'interface agrandi ×2, sans cadre ni fond ; halo doré (plus large) ajouté au rendu | Objet 16×16, plus voyant que le demi |
+| `heal_crystal_0`, `heal_crystal_1` | 16×16 | Cristal de soin (50 PV, usage unique) : cristal émeraude sur socle de pierre, croix d'éclat qui change de place (2 frames) | Cristal 16×16, 2 frames animées |
+| `heal_crystal_used` | 16×16 | Cristal vidé (gris, fissuré, sans éclat) après usage | Cristal éteint 16×16 |
 
 ### Interface (UI)
 

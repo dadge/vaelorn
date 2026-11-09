@@ -633,6 +633,12 @@ const wraithhall: RoomDef = (() => {
       ...p.decor('crystal', [3, 5], [50, 5], [3, 42], [50, 42], [55, 19], [60, 30]).decor('statue', [3, 22], [3, 26], [50, 22], [50, 26])
         .decor('bones', [22, 12], [36, 30], [45, 15]).decors,
     ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'wraithhall_heal1', tile: [22, 9] },
+      { id: 'wraithhall_heal2', tile: [22, 38] },
+      { id: 'wraithhall_heal3', tile: [24, 26], minPlayers: 3 },
+    ],
     exit: { rect: rect(57, 22, 4, 6), requires: ['wraithDoor', 'clear'] },
   };
 })();
@@ -888,6 +894,12 @@ const hearth: RoomDef = (() => {
       ...p.decor('crystal', [3, 5], [56, 5], [3, 44], [56, 44], [61, 19], [66, 30]).decor('statue', [3, 23], [3, 27], [56, 23], [56, 27])
         .decor('bones', [20, 12], [36, 34], [50, 14], [24, 38]).decors,
     ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'hearth_heal1', tile: [24, 9] },
+      { id: 'hearth_heal2', tile: [24, 40] },
+      { id: 'hearth_heal3', tile: [26, 23], minPlayers: 3 },
+    ],
     exit: { rect: rect(63, 22, 4, 6), requires: ['hearthDoor', 'obj:hunt', 'clear'] },
   };
 })();
@@ -1020,6 +1032,12 @@ const throne: RoomDef = (() => {
       ...wallDecor(rows, 'banner', rect(2, 4, 60, 40), 12, 'north', 5),
       ...p.decor('statue', [3, 5], [60, 5], [3, 42], [60, 42]).decor('crystal', [28, 1], [35, 1], [31, 3], [32, 3], [3, 24], [61, 24])
         .decor('bones', [16, 24], [38, 14], [46, 30]).decors,
+    ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'throne_heal1', tile: [18, 12] },
+      { id: 'throne_heal2', tile: [18, 36] },
+      { id: 'throne_heal3', tile: [34, 40], minPlayers: 3 },
     ],
     exit: {
       rect: rect(28, 1, 8, 2),

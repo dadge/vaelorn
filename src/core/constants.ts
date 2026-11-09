@@ -10,6 +10,12 @@ export const SIM_STEP_MS = 1000 / 60;
 
 export const MAX_PLAYERS = 4;
 
+/**
+ * Vague attribuée aux ennemis INVOQUÉS en cours de combat (boss, invocations : `EnemyAIContext.spawnEnemy`). Les ennemis de niveau ont une
+ * vague >= 0. Ils comptent pour 'clear' mais ne retardent pas les vagues suivantes, et ne laissent AUCUN butin de vie (anti-farm, `loot.ts`).
+ */
+export const SUMMON_WAVE = -1;
+
 /** Durée nominale du relevage (ms) quand le sauveteur maintient le bouton. */
 export const REVIVE_DURATION_MS = 3000;
 /** Distance max (centre à centre, px) entre sauveteur et joueur à terre. */

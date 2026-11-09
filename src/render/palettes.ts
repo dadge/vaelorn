@@ -478,6 +478,25 @@ export const UI_COLORS = {
  * Lumière / obscurité : braseros, icônes de torche du HUD, braises (fx_ember_*), et couleurs du voile d'obscurité
  * (`DARK_*` ne figurent PAS dans l'atlas : le voile est dessiné par `src/render/darkness.ts`).
  */
+/**
+ * Sources de vie (nourriture au sol, cristaux de soin) : la nourriture réutilise le cœur de l'interface (UI_COLORS, sans cadre) ; le halo
+ * (or = cœur entier, argent = demi-cœur) est un effet de rendu ; cristal de soin vert émeraude sur socle de pierre (vert = soin, distinct du cristal décoratif cyan),
+ * version « vidée » grise une fois utilisé. Placeholders : à remplacer par de vrais sprites (voir docs/SPRITES.md).
+ */
+export const LOOT_COLORS = {
+  spark: 0xffffff,
+  crystalHi: 0xd8ffe8,
+  crystal: 0x4fe39a,
+  crystalShade: 0x1fa56a,
+  crystalDeep: 0x147a52,
+  baseHi: 0xa8a6c0,
+  base: 0x6e6c88,
+  baseShade: 0x4a4862,
+  usedHi: 0x9aa8b2,
+  used: 0x6b7a86,
+  usedShade: 0x46525c,
+} as const;
+
 export const LIGHT_COLORS = {
   /** Charbon éteint / bois calciné. */
   coal: 0x2a1c26,
@@ -541,7 +560,7 @@ function collect(obj: unknown, out: Set<number>): void {
 export const ALL_PALETTE_COLORS: ReadonlySet<number> = (() => {
   const s = new Set<number>();
   collect(
-    [THEME_PALETTES, HERO_COLORS, ENEMY_COLORS, MINIBOSS_COLORS, BOSS_COLORS, HURT_COLORS, MECH_COLORS, PUZZLE_COLORS, RUNE_COLORS, DECOR_COLORS, FX_COLORS, UI_COLORS, LIGHT_COLORS, SLOT_SHADES, SLOT_LIGHTS, PLAYER_COLORS, OUTLINE, WHITE, EYE],
+    [THEME_PALETTES, HERO_COLORS, ENEMY_COLORS, MINIBOSS_COLORS, BOSS_COLORS, HURT_COLORS, MECH_COLORS, PUZZLE_COLORS, RUNE_COLORS, DECOR_COLORS, FX_COLORS, UI_COLORS, LIGHT_COLORS, LOOT_COLORS, SLOT_SHADES, SLOT_LIGHTS, PLAYER_COLORS, OUTLINE, WHITE, EYE],
     s,
   );
   return s;

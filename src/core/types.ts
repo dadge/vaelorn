@@ -584,6 +584,23 @@ export interface RoomDef {
    * de lumière devient minimal. Aucun dégât lié à l'obscurité.
    */
   dark?: boolean;
+  /**
+   * Cristaux de soin (sources de vie FIXES, salles de boss / demi-boss) : voir `HealCrystalDef`. Absent = aucun.
+   * Un cristal n'existe que si nbJoueurs >= minPlayers (sinon il est simplement absent, comme un ennemi `minPlayers`).
+   */
+  healCrystals?: HealCrystalDef[];
+}
+
+/**
+ * Cristal de soin : source de vie fixe à USAGE UNIQUE (se recharge au (re)démarrage de la salle). Le premier joueur vivant blessé
+ * qui le touche récupère `HEAL_CRYSTAL_HEAL` PV (plafonnés à son manque) et le cristal se vide. Un joueur aux PV pleins ne le consomme pas.
+ * Voir `balance.ts` [B17] et `levelValidation.ts` (tuile de sol, accessible, loin du départ des joueurs et des boss).
+ */
+export interface HealCrystalDef {
+  id: string;
+  tile: TileXY;
+  /** N'existe que si nbJoueurs >= minPlayers (défaut 1) : le 3e cristal d'une salle de boss exige 3 joueurs. */
+  minPlayers?: number;
 }
 
 export interface LevelDef {
@@ -721,6 +738,30 @@ export interface ObjectiveState {
   progress: number;
 }
 
+/** Valeur d'un objet de soin ramassable : demi-cœur (5 PV) ou cœur entier (10 PV), voir `LOOT_HALF_HEAL` / `LOOT_FULL_HEAL`. */
+export type PickupKind = 'half' | 'full';
+
+/**
+ * Objet de soin posé au sol (nourriture laissée par un ennemi vaincu). Ramassé au contact (`PICKUP_RADIUS`) par un joueur vivant
+ * dont les PV < max ; disparaît au bout de `PICKUP_TTL_MS`. Effacé à chaque (re)démarrage et changement de salle.
+ */
+export interface PickupState {
+  /** Identifiant propre aux objets de soin (compteur `GameState.nextPickupId`, distinct de `nextEntityId`). */
+  id: number;
+  kind: PickupKind;
+  pos: Vec2;
+  /** Durée de vie restante (ms) ; les `PICKUP_BLINK_MS` dernières millisecondes, le rendu fait clignoter l'objet. */
+  ttlMs: number;
+}
+
+/** État d'un cristal de soin de la salle (voir `HealCrystalDef`). */
+export interface HealCrystalState {
+  /** Id du `HealCrystalDef` correspondant. */
+  id: string;
+  /** Vrai une fois utilisé (usage unique ; remis à neuf par le (re)démarrage de salle). */
+  used: boolean;
+}
+
 export interface RoomState {
   roomId: string;
   enemies: EnemyState[];
@@ -730,6 +771,13 @@ export interface RoomState {
   spawnedSpawnIdx: number[];
   /** Temps écoulé dans la salle (ms). */
   elapsedMs: number;
+  /**
+   * Objets de soin au sol. Optionnel dans le type (ajout après coup : un ancien snapshot ou un état construit à la main n'a pas
+   * ce champ) mais TOUJOURS présent dans l'état d'une `GameSimulation` (valeur par défaut `[]` posée à la construction / `restore`).
+   */
+  pickups?: PickupState[];
+  /** Cristaux de soin de la salle (uniquement ceux présents à ce nombre de joueurs) ; même convention d'optionnalité que `pickups`. */
+  healCrystals?: HealCrystalState[];
 }
 
 export type GamePhase =
@@ -756,6 +804,21 @@ export interface GameState {
   objectives: ObjectiveState[];
   /** Ids des salles validées (conservées en cas de défaite collective). */
   clearedRooms: string[];
+  /**
+   * Butin de vie (nourriture des ennemis) ET cristaux de soin actifs ? Défaut true (`SimConfig.loot`). false = aucune source de vie
+   * (mesures « sans » de la calibration). Champ optionnel : absent d'un ancien snapshot = true.
+   */
+  lootEnabled?: boolean;
+  /**
+   * État du PRNG DÉDIÉ au butin (mulberry32, graine dérivée de celle de la simulation, `LOOT_SEED_XOR`) : isolé de `rngState` pour que
+   * les tirages de butin ne décalent JAMAIS le flux de la simulation (les parties existantes restent identiques). Absent d'un ancien snapshot :
+   * dérivé de `rngState` à la restauration.
+   */
+  lootRngState?: number;
+  /** Compteur anti-malchance : morts d'ennemis (non invoqués) sans butin depuis le dernier butin / le début de salle. Absent = 0. */
+  lootDryKills?: number;
+  /** Prochain id d'objet de soin. Absent = 1. */
+  nextPickupId?: number;
 }
 
 // ───────────────────────────── Événements (sons, FX, HUD) ─────────────────────────────
@@ -791,7 +854,11 @@ export type SimEvent =
   | { type: 'hourglassFlipped'; mechanismId: string; leverIndex: number; playerId: PlayerId }
   | { type: 'hourglassEmpty'; mechanismId: string }
   | { type: 'gateClosed'; mechanismId: string; closedCount: number }
-  | { type: 'callStarted'; playerId: PlayerId };
+  | { type: 'callStarted'; playerId: PlayerId }
+  // ── Sources de vie (butin des ennemis, cristaux de soin) ──
+  | { type: 'pickupDropped'; pickupId: number; kind: PickupKind; pos: Vec2 }
+  | { type: 'pickupCollected'; pickupId: number; playerId: PlayerId; kind: PickupKind; healed: number; pos: Vec2 }
+  | { type: 'crystalUsed'; crystalId: string; playerId: PlayerId; healed: number; pos: Vec2 };
 
 // ───────────────────────────── Simulation (interface publique) ─────────────────────────────
 
@@ -811,6 +878,11 @@ export interface SimConfig {
    * accomplis ; l'événement `roomEntered` a la raison 'start'.
    */
   startRoomIndex?: number;
+  /**
+   * Sources de vie actives (défaut true) : butin de nourriture des ennemis ET cristaux de soin. false = aucune (comparaisons
+   * « avec / sans » de la calibration) ; les parties sont alors strictement celles d'avant l'ajout des sources de vie.
+   */
+  loot?: boolean;
 }
 
 /** Entrées d'un pas pour tous les joueurs (absent = aucune entrée). */

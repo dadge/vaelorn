@@ -750,6 +750,12 @@ const cinderpit: RoomDef = (() => {
       ...wallDecor(rows, 'banner', rect(2, 4, 68, 38), 12, 'north', 6),
       ...p.decor('crystal', [32, 1], [39, 1], [2, 5], [69, 40]).decor('statue', [2, 40], [69, 5]).decor('bones', [28, 18], [56, 26], [66, 22]).decor('crate', [2, 4], [2, 41], [69, 41]).decors,
     ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'cinderpit_heal1', tile: [24, 10] },
+      { id: 'cinderpit_heal2', tile: [24, 36] },
+      { id: 'cinderpit_heal3', tile: [44, 6], minPlayers: 3 },
+    ],
     exit: { rect: rect(32, 1, 8, 2), requires: ['clear'] },
   };
 })();
@@ -1028,6 +1034,12 @@ const emberhold: RoomDef = (() => {
       ...wallDecor(rows, 'banner', rect(48, 8, 36, 32), 10, 'north', 5),
       ...p.decor('crystal', [3, 7], [44, 7], [3, 40], [44, 40]).decor('statue', [45, 15], [45, 32], [48, 9], [48, 38]).decor('bones', [22, 24], [62, 24]).decor('crate', [2, 6], [2, 41], [83, 8], [83, 39]).decors,
     ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'emberhold_heal1', tile: [26, 33] },
+      { id: 'emberhold_heal2', tile: [62, 12] },
+      { id: 'emberhold_heal3', tile: [62, 36], minPlayers: 3 },
+    ],
     exit: { rect: rect(76, 30, 6, 6), requires: ['doorBlue', 'doorRed', 'doorGreen', 'doorYellow', 'clear', 'obj:seal'] },
   };
 })();
@@ -1074,6 +1086,12 @@ const forgeheart: RoomDef = (() => {
       ...wallDecor(rows, 'torch', rect(1, 40, 56, 1), 8, 'south'),
       ...wallDecor(rows, 'banner', rect(1, 3, 56, 38), 12, 'north', 5),
       ...p.decor('statue', [2, 7], [55, 7], [2, 36], [55, 36]).decor('crystal', [25, 1], [32, 1], [28, 3], [29, 3]).decor('bones', [14, 24], [34, 14], [41, 26]).decors,
+    ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'forgeheart_heal1', tile: [17, 10] },
+      { id: 'forgeheart_heal2', tile: [17, 32] },
+      { id: 'forgeheart_heal3', tile: [29, 37], minPlayers: 3 },
     ],
     exit: {
       rect: rect(25, 1, 8, 2),

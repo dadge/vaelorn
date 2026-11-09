@@ -147,6 +147,71 @@ Deux blocs distincts dans la vue de chaque joueur (`src/render/roomGoals.ts` pou
 
 **Compteur d'ennemis et vagues** : « (N restants) » est affiché quand N ≤ 5, ou quand plus aucune apparition n'est en attente ; sinon seul le libellé apparaît (on garde la surprise des vagues suivantes). Un boss seul n'a pas de compteur. Les flèches rouges vers les 3 derniers ennemis restent inchangées. Le bloc est masqué quand le joueur est à terre, les bandeaux sablier/lanterne se placent sous lui et les notifications se décalent à sa gauche. À l'arrivée dans une salle, le bloc s'efface tant que le bandeau de nom de salle / d'indice (centré sur tout l'écran) passerait dessus, puis réapparaît.
 
+## Butin de vie et cristaux de soin
+
+Le jeu était trop difficile en solo : on peut maintenant **regagner de la vie** dans une salle. Les PV sont remplis à chaque **redémarrage** de salle (après une défaite) ; en passant à la salle suivante, seuls les joueurs à terre sont relevés, les autres gardent leurs PV : le soin sert donc à tenir **dans** une salle et se prolonge au-delà (en solo, mourir = retour au début de la salle). Toutes les valeurs sont dans `src/core/balance.ts` (constantes [B10] à [B17]), la logique pure dans `src/core/loot.ts`, l'application dans `src/core/simulation.ts` (étapes *i2* et *j*).
+
+**Rappel** : 1 cœur = 10 PV (`HP_PER_HEART`) ; un demi-cœur de nourriture rend 5 PV, un cœur entier 10 PV.
+
+### Nourriture laissée par les ennemis
+
+Chaque ennemi vaincu peut laisser un objet au sol (un cœur à halo : argenté pour un demi-cœur, doré pour un cœur entier). Table par type d'ennemi (selon ses PV de base, `src/core/enemies.ts`) :
+
+| Ennemi | Rien | Demi-cœur (5 PV) | Cœur entier (10 PV) | Gain moyen |
+|---|---|---|---|---|
+| **Faible** (PV ≤ 25) : slime, chauve-souris, feu follet | 85 % | 12 % | 3 % | 0,9 PV |
+| **Standard** (PV 26 à 40) : squelette, archer, araignée | 76 % | 18 % | 6 % | 1,5 PV |
+| **Costaud** (PV > 40, hors boss) : chevalier | 40 % | 40 % | 20 % | 4 PV |
+| **Demi-boss** (`isMiniBoss`) | — | — | **1 cœur entier garanti** | 10 PV |
+| **Boss final** (`isBoss`) | rien | | | 0 |
+| **Ennemi invoqué** (par un boss, un sbire…) | rien (anti-farm) | | | 0 |
+
+- **Invoqués** : la simulation les distingue déjà par `EnemyState.wave === SUMMON_WAVE` (−1, `constants.ts`), posé par `EnemyAIContext.spawnEnemy` ; ce marqueur est sérialisé, aucun champ n'a été ajouté. Ils ne laissent rien et ne touchent pas au compteur anti-malchance. Les ennemis des niveaux (vagues, embuscades, meutes des salles de boss) laissent leur butin normalement.
+- **Indépendant de la difficulté** : les taux ne dépendent ni de la difficulté (qui n'affecte que PV et dégâts des ennemis) ni du nombre de joueurs, et ne changent pas le nombre d'ennemis.
+- **Adaptation au besoin** : la probabilité de butin (la **somme** des deux chances non nulles) est multipliée selon les PV du joueur **vivant le plus blessé** : ×0,5 à PV pleins, ×1 à 50 %, ×2 à 30 % et moins (interpolation linéaire par morceaux, plafonnée) ; la probabilité totale est plafonnée à 90 % ; la répartition demi / entier reste celle du tableau.
+- **Garantie anti-malchance** : après **6 morts d'ennemis ordinaires (non invoqués) sans butin** dans la salle, et si le joueur le plus blessé est **sous 70 %** de ses PV, la mort **suivante** laisse **au moins** un demi-cœur. Le compteur repart de zéro à chaque butin et à chaque début de salle (arrivée, suivante, redémarrage).
+- **Au sol** : l'objet reste **12 s** (clignote pendant les 3 dernières secondes). Il est ramassé **au contact** (rayon 14 px) par un joueur **vivant** dont les PV sont **inférieurs au max** : il soigne `min(valeur, PV manquants)` et disparaît (texte flottant « +½ ♥ » / « +♥ »). À PV pleins, il **reste** : un allié peut le prendre. Un joueur à terre ne ramasse rien. Si deux joueurs sont à portée, le plus proche le prend. Un ennemi volant mort au-dessus d'une fosse laisse l'objet sur le sol praticable le plus proche. Tout est effacé au début / redémarrage de salle et au changement de salle.
+- **Événements** : `pickupDropped`, `pickupCollected` (`playerId`, `kind`, `healed`), `crystalUsed`.
+
+### Cristaux de soin (sources de vie fixes)
+
+Chaque **salle de boss ou de demi-boss** (11 salles : niveau 2 *arene* ; niveau 3 *throne* ; niveau 4 *warden1*, *antechamber*, *throne* ; niveau 5 *cinderpit*, *emberhold*, *forgeheart* ; niveau 6 *wraithhall*, *hearth*, *throne* — le niveau 1 n'a ni boss ni demi-boss) contient **2 cristaux de soin**, plus un **3e à partir de 3 joueurs** (`minPlayers: 3`), déclarés dans `RoomDef.healCrystals`. Un cristal est à **usage unique** : le premier joueur vivant blessé qui le touche récupère **50 PV** (5 cœurs, plafonnés à son manque) ; un joueur à PV pleins ne le consomme pas. Il se **recharge** au redémarrage de la salle (après une défaite). Le rendu est un cristal émeraude sur socle (vidé et gris après usage), avec une étiquette « Cristal de soin » à proximité.
+
+Placement (vérifié par `levelValidation.ts`) : tuile de **sol** (pas de mur, fosse ni pilier), distincte des arrivées, ennemis, portes, blocs, braseros, plaques, leviers, clés, socles, énigmes, panneaux et de la sortie ; **accessible** depuis les arrivées à chaque nombre de joueurs concerné ; à **au moins 8 tuiles** de tout point d'arrivée (pas trivial à atteindre) et à **au moins 17 tuiles** du départ de tout boss / demi-boss (portée de projectile des boss à distance, hors des zones de danger de départ). Les zones d'attaque des boss sont dynamiques (elles suivent le boss et les joueurs) : on les évite en plaçant les cristaux sur les flancs, entre l'arrivée et le boss, à côté des piliers.
+
+### Détails techniques et limites
+
+- **Aléatoire déterministe** : les tirages utilisent un flux PRNG **dédié et sérialisé** (`GameState.lootRngState`, graine dérivée `seed ^ LOOT_SEED_XOR`), distinct de `rngState` ; ids propres (`nextPickupId`). Sans ramassage, une partie est strictement identique à celle d'avant l'ajout. Un ancien snapshot sans ces champs se restaure avec des valeurs par défaut (butin actif, aucun objet au sol, cristaux de la salle intacts).
+- **Interrupteur** : option de simulation `loot` (`SimConfig.loot`, vrai par défaut) ; faux = ni nourriture ni cristaux (comparaisons « avec / sans »).
+- **Bots** : `BotRun` joue avec `loot: false` **par défaut** : mesuré, avec les sources de vie actives les bots existants (qui ne les cherchent pas mais les traversent) en ramassent des dizaines par niveau et leurs durées / défaites changent ; en les désactivant leurs résultats sont **identiques** à ceux d'avant (24 parties de niveau 1 à 6 à 1-4 joueurs comparées : mêmes durées à la seconde). Pour mesurer le jeu réel : `new BotRun(level, { loot: true, background: { eat: true } })` ; la brique `eat` (`decideEat`, `src/testing/botBrain.ts`) ramasse la nourriture proche et utilise un cristal proche quand les PV sont sous 70 % (`eatBelowFrac`, rayon `eatRadius` 160 px) ; elle agit dans les comportements de fond ET dans `attackUntilClear` (la boucle de combat des scripts de niveaux), désactivée par défaut donc sans effet sur les bots existants.
+- **Calibrage mesuré** (simulations headless de bots, `src/testing/lootCalibration.ts`, difficulté 2, personnages et scripts de `level*.solution.ts` ; chaque partie jouée **sans** puis **avec** sources de vie à graine identique ; **solo : 20 graines par niveau, 4 joueurs : 10 graines** ; graines 7, 11, 13, 17, 19, 23, 29, 31, 37, 41 puis 43 à 83). Avec la brique `eat` (le bot ramasse la nourriture ou le cristal à moins de 160 px quand ses PV sont sous 70 %), **valeurs du tableau prises telles quelles** (aucun réglage n'a été nécessaire, voir plus bas) :
+
+  | Niveau (solo) | Défaites collectives / partie (sans → avec) | PV perdus / salle | PV rendus / partie (nourriture + cristaux) | Objets / ennemi tué | Durée (s) |
+  |---|---|---|---|---|---|
+  | 1 | 0 → 0 | 1,9 → 1,9 | 3 (3 + 0) | 0,08 | 254 → 254 |
+  | 2 | 0 → 0 | 18,9 → 19,2 | 63 (11 + 52) | 0,12 | 239 → 241 |
+  | 3 | 3,15 → 1,35 | 63,4 → 47,4 | 133 (81 + 52) | 0,22 | 660 → 579 |
+  | 4 | 1,10 → 0,00 | 32,4 → 28,6 | 127 (65 + 62) | 0,14 | 540 → 516 |
+  | 5 | 1,60 → 0,75 | 39,0 → 36,8 | 100 (58 + 43) | 0,13 | 680 → 639 |
+  | 6 | 3,65 → 0,70 | 72,5 → 65,4 | 387 (156 + 232) | 0,19 | 768 → 656 |
+  | **Total solo (120 parties par mode)** | **1,58 → 0,47 (−71 %)** ; 190 → 56 défaites | **38,0 → 33,2 (−13 %)** | 136 (≈ 48 % des PV perdus) | 0,08 à 0,22 | **520 → 481** (maxi 767, 12,8 min, rare) |
+  | **Total 4 joueurs (60 parties par mode)** | **0 → 0** | 70,7 → 74,9 (+6 %) | 246 (≈ 40 %) | 0,19 à 0,30 | **409 → 401 (−2 %)** |
+
+  Le temps passé **sous 50 % de PV** passe en solo de 32 % à 10 % du temps de jeu (sous 25 % : 14 % → 2,7 %) ; à 4 joueurs de 45 % à 30 % (23 % → 9 %). Les défaites qui restent sont dans les **salles de boss final** (niveau 3 *throne* 45 → 27 défaites sur 20 parties, niveau 5 *forgeheart* 24 → 15, niveau 6 *throne* 22 → 14), où seuls les cristaux soignent ; hors boss final elles disparaissent presque (niveau 6 : *keys* 18 → 0, *hearth* 19 → 0, *gauntlet* 10 → 0 ; niveau 3 *dais* 15 → 0 ; niveau 4 *throne* 17 → 0).
+
+  **Objectifs et verdict** : (1) solo « ~ moitié moins de défaites collectives » : **atteint**. Le robot « gourmand » (la brique `eat`) fait −71 % ; le robot « passif », qui ne ramasse que ce qu'il croise par hasard (`loot: true` sans `eat`), fait −43 % (190 → 108) ; un joueur humain est entre les deux (le milieu est ≈ −57 %), donc **la table validée est conservée sans réglage**. (2) **Pas trivial** : le héros subit toujours l'essentiel des dégâts (−13 % de PV perdus seulement, dégâts par tentative inchangés dans le test léger) ; le bot reste 10 % du temps sous 50 % de PV et les boss finaux de 3 niveaux sur 4 continuent de le faire échouer. (3) **Durée solo** ≤ 12 min et non allongée : elle baisse même de 8 % (520 → 481 s) (moins de salles recommencées). (4) **4 joueurs** : durée −2 % (par niveau : −6 % à +1,3 %), 0 défaite avec ou sans : dans les ±10 %. La même mesure avec des bots « passifs » donne : solo 1,58 → 0,90 défaites par partie sur 6 niveaux (1,65 → 0,92 sur la première série de 10 graines), 4 joueurs durée 409 → 404.
+
+  **Réserve importante : les bots ne sont qu'un proxy.** Ils n'esquivent pas vraiment (esquive simple des projectiles seulement), n'utilisent pas leur attaque spéciale (sauf niveau 5), ne choisissent pas leur moment pour se soigner et ramassent « au plus près » sans risquer le moindre coup : l'ordre de grandeur et le sens de l'effet sont fiables, pas le ressenti réel. Parties « non terminées » (solo : 3 sur 120 sans sources de vie, 0 sur 120 avec ; 4 joueurs : 4 sur 60 sans, 1 sur 60 avec) : ce sont des scripts de bots désynchronisés avec d'autres graines, pas des défaites du jeu ; elles sont exclues de la durée.
+
+  **Autres difficultés** (mesure indépendante du relecteur, bots avec `eat`, niveau 6 *throne* en solo, 6 graines ; **non reproduite par le script de calibrage, qui ne couvre que la difficulté 2**) : difficulté 1 : 0 défaite avec comme sans sources de vie (les cristaux ne servent pas) ; difficulté 3 : 30 → 21 défaites et 2 parties réussies sur 6 au lieu de 0 : le solo en difficulté 3 reste **très dur** malgré les sources de vie, c'est un choix de difficulté à valider en jeu réel.
+
+  **Interprétation à valider** : « au-delà de 6 morts sans butin » est lu comme « à partir de 6 » (la **7e** mort est garantie) ; la lecture stricte (> 6, soit la 8e) se règle en passant `LOOT_PITY_DRY_KILLS` à 7. De même, un joueur à peine blessé (1 PV de manque) consomme une nourriture ou un cristal entier : c'est la règle validée (« PV < max »), un seuil de manque minimal reste une option (voir `TODO.md`).
+
+  **Si le solo reste trop dur / devient trop facile** (leviers dans `balance.ts`, par ordre d'efficacité) : probabilités de `LOOT_TIERS` ; courbe `LOOT_NEED_POINTS` (le ×2 à ≤ 30 % de PV est ce qui évite les défaites) ; `HEAL_CRYSTAL_HEAL` (les cristaux sont la seule aide dans les boss finaux) ; `LOOT_PITY_DRY_KILLS` ; `LOOT_MAX_CHANCE`.
+
+  **Relancer la mesure** : le test léger `src/testing/lootCalibration.test.ts` (suite normale, ~5 s : boss final du niveau 6 en solo, 8 graines, sens de l'effet et invariants) ; le calibrage complet est un script **à la demande**, ignoré par `npm test` : `$env:LOOT_CALIB='1'; $env:LOOT_CALIB_LEVELS='3,4,5,6'; $env:LOOT_CALIB_PLAYERS='1,4'; $env:LOOT_CALIB_SEEDS='7,11,13,17,19'; $env:LOOT_CALIB_OUT='C:\temp\calib.jsonl'; npx vitest run src/testing/lootCalibration.long.test.ts` (variables facultatives : `LOOT_CALIB_EAT=0` bots passifs, `LOOT_CALIB_EAT_RADIUS`, `LOOT_CALIB_EAT_BELOW`). Une ligne JSON par partie dans le fichier de sortie, un tableau « sans / avec » dans la console ; compter 2 à 5 s par partie (≈ 2 min pour 20 graines d'un niveau en solo).
+- **À vérifier à la main** : ressenti, lisibilité de la nourriture et des cristaux à 4 joueurs (vues 640×360) et en salle sombre, sprites provisoires (voir `TODO.md`).
+
 ## Personnages
 
 8 personnages jouables (chacun unique dans une partie), force et résistance différentes, plus une attaque spéciale. Les quatre premiers sont inspirés de la famille (stylisés heroic fantasy, pas des portraits).
@@ -223,6 +288,7 @@ src/core/      LOGIQUE PURE (aucune dépendance à Phaser/DOM, ni Math.random/Da
   saveRepository.ts  SaveRepository (load/save/clear) + LocalStorage/Memory ; autoSave.ts : écriture au début de salle / fin de niveau
   mechanisms.ts  plaques, leviers, clés, portes, blocs, runes, braseros ; objectives.ts ; levelValidation.ts
   combat.ts, collision.ts, ai.ts, bosses.ts, characters.ts, enemies.ts, light.ts, rng.ts, geometry.ts, grid.ts
+  loot.ts        sources de vie : table de butin, adaptation au besoin, garantie anti-malchance, ramassage (fonctions pures) ; cristaux de soin : `RoomDef.healCrystals`
 src/levels/    niveaux en données TS typées (level1.ts … level6.ts, index.ts)
   tutorial.ts   niveau-tutoriel (7 salles) : HORS campagne (pas dans LEVELS), jamais sauvegardé
 src/attract/   mode démo (attract mode) : config, minuterie d'inactivité, détection d'activité, session aléatoire, pilote automatique (logique PURE, testée)
@@ -232,7 +298,7 @@ src/pwa/       enregistrement du service worker (PWA) ; scripts/pwa-build.mjs (s
 src/net/       interface NetAdapter (prévue, sans implémentation réseau)
 src/i18n/      fr.json, en.json, i18n.ts (clés plates, aucune chaîne en dur dans le code)
 src/render/    atlas de sprites runtime (art/), palettes, splitscreen, caméras, HUD, obscurité, effets, indicateur d'appel (callIndicator.ts pur, callHud.ts dessin)
-src/entities/  vues Phaser (joueurs, ennemis, mécanismes, salle) — lecture seule de GameState
+src/entities/  vues Phaser (joueurs, ennemis, mécanismes, salle, nourriture et cristaux : LifeViews) — lecture seule de GameState
 src/scenes/    Boot, Menu, CharacterSelect, Dialogue, Game, Result
 src/testing/   bots de test qui jouent la simulation (déterministes)
 docs/          DESIGN.md (architecture détaillée), SPRITES.md (sprites à remplacer)
@@ -249,7 +315,7 @@ Principe : **Phaser ne décide d'aucune règle**. `GameScene` accumule le temps 
 
 ### Équilibrage
 
-Toutes les formules sont centralisées et commentées dans `src/core/balance.ts` (PV max = 50 + 10 × résistance ; réduction de dégâts 2 % × résistance ; dégâts de base = 6 + 2,5 × force ; multiplicateurs de difficulté PV ennemis ×0,7/1/1,4 et dégâts ennemis ×0,6/1/1,5). Statistiques des personnages : `src/core/characters.ts` ; des ennemis : `src/core/enemies.ts`. Ce sont des valeurs de premier jet, à affiner en jouant.
+Toutes les formules sont centralisées et commentées dans `src/core/balance.ts` (PV max = 50 + 10 × résistance ; réduction de dégâts 2 % × résistance ; dégâts de base = 6 + 2,5 × force ; multiplicateurs de difficulté PV ennemis ×0,7/1/1,4 et dégâts ennemis ×0,6/1/1,5). Statistiques des personnages : `src/core/characters.ts` ; des ennemis : `src/core/enemies.ts`. Ce sont des valeurs de premier jet, à affiner en jouant. Les sources de vie (butin des ennemis, cristaux de soin) ont leurs constantes [B10]–[B17] au même endroit : voir « Butin de vie et cristaux de soin ».
 
 ### Sprites à remplacer
 
@@ -299,6 +365,7 @@ Tous les sprites sont des **placeholders** générés par code (`src/render/art/
 - Les manettes ne sont accessibles qu'en HTTPS/localhost (limite des navigateurs).
 - Détails d'architecture et conventions : [docs/DESIGN.md](docs/DESIGN.md).
 
+- Sources de vie : butin de nourriture sur les ennemis et cristaux de soin dans les salles de boss / demi-boss (flux PRNG dédié, `SimConfig.loot`) ; les bots existants jouent sans (`loot: false` par défaut), voir « Butin de vie et cristaux de soin ».
 - Les deux salles de boss n'ont pas de mécanisme propre (assouplissement de « chaque salle en utilise au moins un »), voir DESIGN §9.
 
 ## Licence

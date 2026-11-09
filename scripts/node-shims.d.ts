@@ -20,6 +20,7 @@ declare module 'node:fs' {
   export function mkdtempSync(prefix: string): string;
   export function rmSync(path: string, options?: { recursive?: boolean; force?: boolean }): void;
   export function unlinkSync(path: string): void;
+  export function appendFileSync(path: string, data: string, encoding?: 'utf8'): void;
 }
 
 declare module 'node:path' {
@@ -38,3 +39,6 @@ declare module 'node:url' {
   export function fileURLToPath(url: string): string;
   export function pathToFileURL(path: string): { href: string };
 }
+
+/** Variables d'environnement (calibrage long à la demande : `src/testing/lootCalibration.long.test.ts`). */
+declare const process: { env: Record<string, string | undefined> };

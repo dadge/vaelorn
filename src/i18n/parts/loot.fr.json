@@ -1,0 +1,6 @@
+{
+  "loot.crystal.heal": "+{n} PV",
+  "loot.crystal.label": "Cristal de soin",
+  "loot.pickup.full": "+♥",
+  "loot.pickup.half": "+½ ♥"
+}

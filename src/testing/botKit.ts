@@ -96,7 +96,7 @@ import { buildNavMap, isPassable, type NavMap } from './pathfinding';
 export * from './botTypes';
 export * from './botActions';
 export * from './novelBots';
-export { PathFollower, decideCombat, decideRevive, decideBackground, NUDGE } from './botBrain';
+export { PathFollower, decideCombat, decideRevive, decideBackground, decideEat, NUDGE } from './botBrain';
 export type { FollowGoal, FollowResult, CombatRequest, CombatDecision } from './botBrain';
 export * from './pathfinding';
 export { diagnoseRun, formatStats } from './diagnostics';
@@ -128,6 +128,13 @@ export interface BotRunOptions {
    * fond) ; 'skip' passe à l'action suivante. Dans les deux cas l'échec est enregistré dans `run.failures`.
    */
   onActionFail?: 'clearQueue' | 'skip';
+  /**
+   * Sources de vie de la simulation (`SimConfig.loot`) : DÉFAUT FALSE pour les bots. Mesuré : avec les sources de vie actives, les bots existants
+   * (qui ne les cherchent pas mais les traversent par hasard, PV < max) en ramassent des dizaines par niveau et leurs résultats (durées, défaites)
+   * changeraient ; en les désactivant, les parties de bots sont strictement celles d'avant l'ajout des sources de vie. Pour mesurer le jeu réel :
+   * `loot: true` (nourriture et cristaux au sol, ramassés par contact) et, pour qu'ils les cherchent, `background: { eat: true }` (voir `BackgroundOptions`).
+   */
+  loot?: boolean;
   /** Conserver les files d'actions quand une salle est (re)chargée (défaut false : elles sont vidées, leurs coordonnées n'ont plus de sens). */
   keepQueuesAcrossRooms?: boolean;
 }
@@ -449,7 +456,7 @@ export class BotRun {
       characterId: chars[i] ?? CHARACTER_IDS[i % CHARACTER_IDS.length],
       difficulty: diffs[i] ?? 2,
     }));
-    let sim = createSimulation({ levelId: level.id, players, seed: opts.seed ?? 1 }, level);
+    let sim = createSimulation({ levelId: level.id, players, seed: opts.seed ?? 1, loot: opts.loot === true }, level);
     const start = Math.max(0, Math.min(level.rooms.length - 1, Math.floor(opts.startRoomIndex ?? 0)));
     if (start > 0) sim = jumpToRoom(sim, level, start);
     this.sim = sim;

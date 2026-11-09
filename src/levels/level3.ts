@@ -1363,6 +1363,12 @@ const throne: RoomDef = (() => {
       ...p.decor('statue', [2, 4], [53, 4], [2, 39], [53, 39]).decor('crystal', [24, 1], [31, 1], [27, 3], [28, 3])
         .decor('bones', [14, 24], [34, 14], [40, 26]).decors,
     ],
+    // Cristaux de soin (sources de vie fixes, usage unique, 50 PV) : loin des arrivées et du départ du boss ; le 3e exige 3 joueurs.
+    healCrystals: [
+      { id: 'throne_heal1', tile: [16, 9] },
+      { id: 'throne_heal2', tile: [16, 32] },
+      { id: 'throne_heal3', tile: [27, 37], minPlayers: 3 },
+    ],
     exit: {
       rect: rect(24, 1, 8, 2),
       requires: ['clear', 'obj:seal', 'obj:hold', 'obj:slayer', 'obj:lever'],

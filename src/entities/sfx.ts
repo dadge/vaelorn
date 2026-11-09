@@ -45,7 +45,11 @@ export type SfxName =
   | 'hourglassFlipped'
   | 'hourglassEmpty'
   | 'gateClosed'
-  | 'minibossPhase';
+  | 'minibossPhase'
+  // sources de vie
+  | 'pickupDrop'
+  | 'pickup'
+  | 'crystalHeal';
 
 interface SfxSpec {
   /** Fréquence de départ / d'arrivée (Hz). */
@@ -100,6 +104,10 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   hourglassEmpty: { f0: 340, f1: 110, durMs: 420, type: 'sawtooth', vol: 0.07, then: { f0: 340, f1: 110, delayMs: 260 } },
   gateClosed: { f0: 110, f1: 48, durMs: 240, type: 'square', vol: 0.08 },
   minibossPhase: { f0: 150, f1: 70, durMs: 380, type: 'sawtooth', vol: 0.07 },
+  // sources de vie (placeholders) : « pop » discret à l'apparition, deux notes montantes au ramassage, carillon plus long pour le cristal
+  pickupDrop: { f0: 700, f1: 980, durMs: 70, type: 'sine', vol: 0.025 },
+  pickup: { f0: 620, f1: 930, durMs: 110, type: 'triangle', vol: 0.06, then: { f0: 930, f1: 1400, delayMs: 90 } },
+  crystalHeal: { f0: 440, f1: 880, durMs: 240, type: 'sine', vol: 0.07, then: { f0: 660, f1: 1320, delayMs: 140 } },
 };
 
 /** Son d'une attaque spéciale selon sa famille. Pur. */
@@ -184,6 +192,12 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
       return 'torchLow';
     case 'torchOut':
       return 'torchOut';
+    case 'pickupDropped':
+      return 'pickupDrop';
+    case 'pickupCollected':
+      return 'pickup';
+    case 'crystalUsed':
+      return 'crystalHeal';
     default:
       return null;
   }

@@ -77,7 +77,7 @@
   "tutorial.step.roomGoals": "En haut à droite : le bloc « Objectifs de la salle » (« Objectif » quand il n'y a qu'une ligne). Il liste ce qu'il faut faire pour ouvrir la sortie : ennemis à vaincre, portes à ouvrir, objectifs personnels accomplis (x/y).",
   "tutorial.step.attack": "Une limace ! Attaque-la avec {attack} (maintiens pour enchaîner les coups).",
   "tutorial.step.personalGoal": "En haut à gauche : « Ton objectif », propre à ton héros. Ici : vaincre 2 ennemis, le compteur monte à chaque coup fatal que TU portes. Continue le combat.",
-  "tutorial.step.hearts": "Tes cœurs sont ta vie. À zéro tu tombes à terre : ce n'est pas la mort, un allié peut te relever.",
+  "tutorial.step.hearts": "Tes cœurs sont ta vie. À zéro tu tombes à terre : ce n'est pas la mort, un allié peut te relever. Les ennemis laissent parfois de la nourriture (un demi-cœur ou un cœur) : ramasse-la quand tu es blessé.",
   "tutorial.step.special": "Lance ton attaque spéciale ({specialName}) avec {special} : bien plus puissante qu'une attaque normale.",
   "tutorial.step.specialRecharge": "La jauge se recharge ensuite, puis affiche PRÊT. Un spécial n'est pas utilisable en continu : choisis ton moment.",
   "tutorial.step.clearYard": "Vaincs tous les ennemis restants. Le bloc d'objectifs indique combien il en reste.",
