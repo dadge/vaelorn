@@ -81,7 +81,7 @@ function start(): void {
 
   // Mobile : invite de rotation, plein écran, recalage du canvas à chaque rotation / barre d'adresse.
   installMobileUi(game);
-  // Mobile : manette virtuelle (stick + A B X Y + appel + pause), vue par le code d'entrées comme une manette d'indice 4.
+  // Mobile : manette virtuelle (stick + losange A B X Y [A action, X appel, Y spécial, B retour de menu] + pause), vue par le code d'entrées comme une manette d'indice 4.
   // ?touch=1 l'affiche sur PC (test), ?touch=0 la masque ; elle se masque seule dès qu'une vraie manette est branchée.
   installTouchControls();
 

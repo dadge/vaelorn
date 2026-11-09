@@ -35,6 +35,6 @@
   "save.reset.confirm.message": "Effacer définitivement la sauvegarde illisible ? Cette action est irréversible.",
   "save.reset.confirm.title": "Repartir de zéro ?",
   "save.resume": "Niveau {level} — Salle {room}",
-  "save.resume.subtitle": "{resume} — chaque joueur appuie sur un bouton pour rejoindre",
+  "save.resume.subtitle": "{resume} — chaque joueur appuie sur A (manette) ou Entrée / Espace (clavier) pour rejoindre",
   "save.resume.title": "Reprise de la partie"
 }

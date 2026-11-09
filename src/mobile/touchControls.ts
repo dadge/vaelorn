@@ -1,7 +1,7 @@
 /**
  * Manette virtuelle tactile (couche DOM mince). Toute la logique (état des boutons par pointeur, stick → axes,
  * instantané de manette standard) est dans `src/input/VirtualPad.ts` (pure, testée). Ce fichier ne fait que :
- *  - créer les éléments (stick à gauche ; losange A / B / X / Y à droite, le X étant le bouton APPEL ; PAUSE en haut au centre) ;
+ *  - créer les éléments (stick à gauche ; losange A / B / X / Y à droite (A action, X appel, Y spécial, B retour dans les menus) ; PAUSE en haut au centre) ;
  *  - brancher les Pointer Events (multi-touch : chaque contrôle suit SON pointerId via `setPointerCapture`) ;
  *  - mettre à jour l'aspect (enfoncé) et décider de l'affichage (tactile + paysage, ou `?touch=1` ; masquée dès qu'une
  *    vraie manette est connectée ; `?touch=0` la force cachée) avec `shouldShowVirtualPad` (device.ts).
@@ -67,7 +67,7 @@ const STYLE = `
 #touch-controls .vp-a { --s: calc(var(--vp-base) * 0.5); --cx: calc(var(--vp-base) * 0.625); --cy: calc(var(--vp-base) * 0.995); border-color: #ffd27a; color: #ffd27a; }
 #touch-controls .vp-b { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.995); --cy: calc(var(--vp-base) * 0.625); }
 #touch-controls .vp-y { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.625); --cy: calc(var(--vp-base) * 0.255); }
-#touch-controls .vp-call { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.255); --cy: calc(var(--vp-base) * 0.625); }
+#touch-controls .vp-x { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.255); --cy: calc(var(--vp-base) * 0.625); }
 #touch-controls .vp-pause {
   --s: clamp(34px, calc(var(--vp-base) * 0.34), 46px); position: absolute; pointer-events: auto; border-radius: 50%;
   width: var(--s); height: var(--s); top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; margin-left: calc(var(--s) / -2);
@@ -151,7 +151,7 @@ function build(): TouchControlsHandle {
       const letter = document.createElement('span');
       letter.className = 'vp-letter';
       letter.setAttribute('aria-hidden', 'true');
-      letter.textContent = content; // lettre du bouton (A B Y) : identique dans toutes les langues
+      letter.textContent = content; // lettre du bouton (A B X Y) : identique dans toutes les langues
       el.append(letter);
     } else if (html !== null) {
       el.innerHTML = html; // SVG statique défini dans ce fichier
@@ -163,9 +163,9 @@ function build(): TouchControlsHandle {
   const a = makeButton('a', 'vp-btn vp-a', 'A', null);
   const b = makeButton('b', 'vp-btn vp-b', 'B', null);
   const y = makeButton('y', 'vp-btn vp-y', 'Y', null);
-  const call = makeButton('call', 'vp-btn vp-call', 'X', null); // lettre X (l'appel est LB) : le losange garde A B X Y
+  const x = makeButton('x', 'vp-btn vp-x', 'X', null); // X = le vrai X de la manette standard (appel des alliés)
   const pause = makeButton('pause', 'vp-pause', null, PAUSE_ICON);
-  cluster.append(y.el, call.el, b.el, a.el);
+  cluster.append(y.el, x.el, b.el, a.el);
   root.append(stick, cluster, pause.el);
 
   const labels = (): void => {
@@ -175,7 +175,7 @@ function build(): TouchControlsHandle {
     a.el.setAttribute('aria-label', t('touch.a'));
     b.el.setAttribute('aria-label', t('touch.b'));
     y.el.setAttribute('aria-label', t('touch.y'));
-    call.el.setAttribute('aria-label', t('touch.call'));
+    x.el.setAttribute('aria-label', t('touch.x'));
     pause.el.setAttribute('aria-label', t('touch.pause'));
   };
   labels();

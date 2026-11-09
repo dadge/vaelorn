@@ -61,9 +61,9 @@ function makeManager(opts: ConstructorParameters<typeof InputManager>[0] = {}) {
 describe('appeler : bindings par défaut', () => {
   const b = createDefaultBindings();
 
-  it('clavier C ; manette LB / LT ; bindings valides', () => {
+  it('clavier C ; manette X seul ; bindings valides', () => {
     expect(b.call.keys).toEqual(['KeyC']);
-    expect(b.call.pad).toEqual([PAD_BUTTON.LB, PAD_BUTTON.LT]);
+    expect(b.call.pad).toEqual([PAD_BUTTON.X]);
     expect(validateBindings(b).valid).toBe(true);
     expect(DEFAULT_BINDINGS.call.keys).toEqual(['KeyC']);
     expect(Object.isFrozen(DEFAULT_BINDINGS.call)).toBe(true);
@@ -136,17 +136,16 @@ describe('appeler : mapping clavier / manette → frame.call', () => {
     expect(f).toMatchObject({ call: true, moveX: 1, attack: true, interact: true, revive: true, special: false });
   });
 
-  it('manette : LB et LT déclenchent call seulement (LT analogique au-delà du seuil)', () => {
-    expect(gamepadToFrame(snap({ pressed: [PAD_BUTTON.LB] }), b).call).toBe(true);
-    expect(gamepadToFrame(snap({ pressed: [PAD_BUTTON.LT] }), b).call).toBe(true);
-    expect(gamepadToFrame(snap({ values: { [PAD_BUTTON.LT]: 0.8 } }), b).call).toBe(true);
-    expect(gamepadToFrame(snap({ values: { [PAD_BUTTON.LT]: 0.2 } }), b).call).toBe(false);
-    const f = gamepadToFrame(snap({ pressed: [PAD_BUTTON.LB] }), b);
+  it('manette : X (seul) déclenche call, sans aucune autre action (X analogique au-delà du seuil)', () => {
+    expect(gamepadToFrame(snap({ pressed: [PAD_BUTTON.X] }), b).call).toBe(true);
+    expect(gamepadToFrame(snap({ values: { [PAD_BUTTON.X]: 0.8 } }), b).call).toBe(true);
+    expect(gamepadToFrame(snap({ values: { [PAD_BUTTON.X]: 0.2 } }), b).call).toBe(false);
+    const f = gamepadToFrame(snap({ pressed: [PAD_BUTTON.X] }), b);
     expect(f.attack || f.interact || f.revive || f.special).toBe(false);
   });
 
-  it('manette : A, B, X, Y, RB, RT et la croix ne déclenchent pas call', () => {
-    for (const i of [PAD_BUTTON.A, PAD_BUTTON.B, PAD_BUTTON.X, PAD_BUTTON.Y, PAD_BUTTON.RB, PAD_BUTTON.RT, PAD_BUTTON.DPAD_UP, PAD_BUTTON.START]) {
+  it('manette : A, B, Y, LB, LT, RB, RT, la croix et Start ne déclenchent pas call', () => {
+    for (const i of [PAD_BUTTON.A, PAD_BUTTON.B, PAD_BUTTON.Y, PAD_BUTTON.LB, PAD_BUTTON.LT, PAD_BUTTON.RB, PAD_BUTTON.RT, PAD_BUTTON.DPAD_UP, PAD_BUTTON.START]) {
       expect(gamepadToFrame(snap({ pressed: [i] }), b).call, String(i)).toBe(false);
     }
   });
@@ -164,7 +163,7 @@ describe('appeler : fusion et validation de bindings personnalisés', () => {
     const b = createDefaultBindings();
     const m = mergeBindings(b, { call: { keys: ['KeyV'] } });
     expect(m.call.keys).toEqual(['KeyV']);
-    expect(m.call.pad).toEqual([PAD_BUTTON.LB, PAD_BUTTON.LT]);
+    expect(m.call.pad).toEqual([PAD_BUTTON.X]);
     const m2 = mergeBindings(b, { call: { pad: [10] } });
     expect(m2.call.keys).toEqual(['KeyC']);
     expect(m2.call.pad).toEqual([10]);
@@ -212,7 +211,7 @@ describe('appeler : sources et InputManager', () => {
     expect(keyboard.poll().call).toBe(false);
     press('KeyC');
     expect(keyboard.poll().call).toBe(true);
-    const gp = new GamepadSource({ index: 0, provider: () => [padLike(0, { pressed: [PAD_BUTTON.LB] })] });
+    const gp = new GamepadSource({ index: 0, provider: () => [padLike(0, { pressed: [PAD_BUTTON.X] })] });
     expect(gp.poll().call).toBe(true);
     const remote = new RemoteInputSource(1);
     remote.push({ ...emptyFrame(), call: true });
@@ -229,7 +228,7 @@ describe('appeler : sources et InputManager', () => {
 
     const four = makeManager({ playerCount: 4 });
     for (let i = 0; i < 4; i++) four.mgr.assignDevice(i as 0 | 1 | 2 | 3, { kind: 'gamepad', index: i });
-    four.setPads([0, 1, 2, 3].map((i) => padLike(i, { pressed: i === 2 ? [PAD_BUTTON.LT] : [] })));
+    four.setPads([0, 1, 2, 3].map((i) => padLike(i, { pressed: i === 2 ? [PAD_BUTTON.X] : [] })));
     const inp = four.mgr.poll();
     expect(inp[2]?.call).toBe(true);
     expect([inp[0]?.call, inp[1]?.call, inp[3]?.call]).toEqual([false, false, false]);

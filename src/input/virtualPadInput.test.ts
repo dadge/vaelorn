@@ -87,18 +87,22 @@ describe('manette virtuelle : vue comme une manette d’indice 4', () => {
     expect(f.call).toBe(false);
   });
 
-  it('B = interagir/relever seul, Y = spécial, bouton affiché « X » = appel (LB) = call', () => {
+  it('A = action contextuelle, Y = spécial, X (vrai X) = appel, B = AUCUN effet en jeu', () => {
     pad.setConnected(true);
     const { mgr } = makeManager();
-    pad.pressButton(1, 'b');
+    pad.pressButton(1, 'a');
     let f = mgr.poll()[0]!;
-    expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([false, true, true, false, false]);
+    expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([true, true, true, false, false]);
+    pad.releasePointer(1);
+    pad.pressButton(1, 'b');
+    f = mgr.poll()[0]!;
+    expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([false, false, false, false, false]);
     pad.releasePointer(1);
     pad.pressButton(1, 'y');
     f = mgr.poll()[0]!;
     expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([false, false, false, true, false]);
     pad.releasePointer(1);
-    pad.pressButton(1, 'call');
+    pad.pressButton(1, 'x');
     f = mgr.poll()[0]!;
     expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([false, false, false, false, true]);
   });
@@ -272,7 +276,7 @@ describe('manette virtuelle : une VRAIE manette prend le pas', () => {
 
   it('multi-joueurs par défaut : J2 = manette 0 (vraie) ; la virtuelle n’est attribuée à personne sans attribution explicite', () => {
     pad.setConnected(true);
-    browserPads = [realPad(0, [PAD_BUTTON.X]), null, null, null];
+    browserPads = [realPad(0, [PAD_BUTTON.A]), null, null, null];
     const { mgr } = makeManager({ playerCount: 2 });
     pad.pressButton(1, 'a');
     const inputs = mgr.poll();

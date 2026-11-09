@@ -2,8 +2,8 @@
  * MenuScene : menu principal navigable au clavier ET à la manette (MenuNavigator) et à la souris.
  *
  * Lignes : Jouer, Nombre de joueurs (1–4), Difficulté de CHAQUE joueur (1 facile / 2 normal / 3 difficile),
- * Niveau de départ, Langue (FR/EN, change tous les textes immédiatement), Plein écran, Contrôles (panneau : touches,
- * bouton d'attaque spéciale, manettes détectées). Chaque joueur choisit son appareil à l'écran de sélection
+ * Niveau de départ, Langue (FR/EN, change tous les textes immédiatement), Plein écran, Contrôles (panneau : déplacement,
+ * action, spécial, appeler, pause et menus au clavier et à la manette, manettes détectées). Chaque joueur choisit son appareil à l'écran de sélection
  * (rejoindre par bouton) : l'ancienne option « J1 à la manette » n'est donc plus affichée.
  * 100 % utilisable à la manette seule : croix / stick = naviguer et modifier, A = valider, B = fermer le panneau.
  * La manette qui lance « Jouer » réclame automatiquement l'emplacement 1 de l'écran de sélection.
@@ -752,6 +752,7 @@ export class MenuScene extends Phaser.Scene {
           [t('pad.controls.special'), t('pad.controls.keyboard.special')],
           [t('call.controls.label'), t('call.controls.keyboard')],
           [t('controls.pause'), t('controls.keyboard.pause')],
+          [t('controls.menus'), t('controls.keyboard.menu')],
         ],
       },
       {
@@ -759,12 +760,13 @@ export class MenuScene extends Phaser.Scene {
         header: t('controls.gamepad'),
         lines: [
           [t('controls.move'), t('controls.gamepad.move')],
+          // Schéma à trois boutons : A action (relever, interagir, attaquer), Y spécial, X appel, Start pause ; tous les autres
+          // boutons n'ont aucun effet en jeu. A / B ne servent qu'à valider / revenir dans les menus.
           [t('controls.action'), t('controls.gamepad.action')],
-          [t('controls.attack'), t('controls.gamepad.attack')],
-          [t('controls.interact'), t('controls.gamepad.interact')],
           [t('pad.controls.special'), t('pad.controls.gamepad.special')],
           [t('call.controls.label'), t('call.controls.gamepad')],
           [t('controls.pause'), t('controls.gamepad.pause')],
+          [t('controls.menus'), t('controls.gamepad.menu')],
         ],
       },
     ];
@@ -774,7 +776,7 @@ export class MenuScene extends Phaser.Scene {
       for (const [label, value] of col.lines) {
         add(createText(this, col.x, y, label, { size: 'sm', color: UI_THEME.textDim, wrapWidth: colW }));
         add(createText(this, col.x + 12, y + 18, value, { size: 'sm', color: UI_THEME.text, wrapWidth: colW - 12 }));
-        y += 36; // 7 lignes (dont « Appeler ») pour la colonne manette
+        y += 36; // 5 lignes au clavier, 6 à la manette (« Menus » : A valider, B retour)
       }
     }
     add(createText(this, GAME_WIDTH / 2, py + 390, t('hint.revive'), { size: 'sm', color: UI_THEME.accent, origin: [0.5, 0.5], align: 'center', wrapWidth: pw - 80 }));

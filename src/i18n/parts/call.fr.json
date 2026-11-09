@@ -1,7 +1,7 @@
 {
-  "call.controls.gamepad": "Bouton LB ou LT",
+  "call.controls.gamepad": "Bouton X",
   "call.controls.keyboard": "C",
   "call.controls.label": "Appeler (les alliés voient d'où tu appelles)",
-  "call.pause.gamepad": "Y / RB / RT : spécial - LB / LT : appeler",
+  "call.pause.gamepad": "Y : spécial - X : appeler",
   "call.pause.keyboard": "F : spécial - C : appeler"
 }

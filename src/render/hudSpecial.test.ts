@@ -49,7 +49,7 @@ describe('HUD du spécial : charge', () => {
 });
 
 describe('HUD du spécial : rappel du bouton', () => {
-  const binding = { keys: ['KeyF', 'KeyX'], pad: [3, 5, 7] };
+  const binding = { keys: ['KeyF', 'KeyX'], pad: [3] };
 
   it('libellés de touches et de boutons', () => {
     expect(keyCodeLabel('KeyF')).toBe('F');

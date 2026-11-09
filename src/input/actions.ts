@@ -57,7 +57,7 @@ export function deviceToId(device: DeviceAssignment): DeviceId {
 export interface ButtonBinding {
   /** Codes physiques (ex. 'Space', 'KeyE', 'ArrowUp'). Indépendants de la disposition AZERTY/QWERTY. */
   keys: string[];
-  /** Indices de boutons du mapping « standard » des manettes (0 = A, 1 = B, 2 = X, 3 = Y…). */
+  /** Indices de boutons du mapping « standard » des manettes (0 = A, 1 = B, 2 = X, 3 = Y…) ; en jeu seuls A (action), X (appel) et Y (spécial) sont liés par défaut. */
   pad: number[];
 }
 
@@ -81,11 +81,11 @@ export interface Bindings {
   attack: ButtonBinding;
   interact: ButtonBinding;
   revive: ButtonBinding;
-  /** Attaque spéciale (bouton DÉDIÉ : ni Espace ni A ne la déclenchent). Clavier F / X, manette Y / RB / RT. */
+  /** Attaque spéciale (bouton DÉDIÉ : ni Espace ni A ne la déclenchent). Clavier F / X, manette Y seul. */
   special: ButtonBinding;
   /**
    * Appel (bouton DÉDIÉ : signal vers l'équipe, le joueur s'immobilise 1 s ; ni Espace ni A ne le déclenchent).
-   * Clavier C ; manette LB / LT.
+   * Clavier C ; manette X seul.
    */
   call: ButtonBinding;
   /** Navigation de menu : confirmer / retour (les directions réutilisent `move`). */

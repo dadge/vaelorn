@@ -147,12 +147,16 @@ Palettes (`src/render/palettes.ts`) : une palette cohérente par thème de donjo
 - Clavier J1 : flèches = déplacement, `Espace` = action (déclenche attack + interact + revive en même temps ; la simulation
   arbitre : relevage si un allié à terre est à portée > interaction si un mécanisme est à portée > attaque). Alternatives : `W/A/S/D` + `E`
   pour une seconde disposition (même joueur, aide au confort).
-- **Attaque spéciale** : action `special` (clavier `F` ou `X`, manette `Y`, `RB` ou `RT`) ; jamais mêlée à l'action contextuelle.
-- **Appel** : action `call` (clavier `C`, manette `LB` ou `LT`), champ optionnel `ActionFrame.call`, front montant détecté par la simulation (bouton dédié, jamais mêlé à l'action contextuelle).
+- **Attaque spéciale** : action `special` (clavier `F` ou `X`, manette `Y` seul) ; jamais mêlée à l'action contextuelle.
+- **Appel** : action `call` (clavier `C`, manette `X` seul), champ optionnel `ActionFrame.call`, front montant détecté par la simulation (bouton dédié, jamais mêlé à l'action contextuelle).
   Règles dans le cœur (`CALL_FREEZE_MS` 1 s d'immobilisation, `CALL_DURATION_MS` 3 s de signal, `CALL_COOLDOWN_MS` 5 s depuis l'appui ; `PlayerState.callMs` / `callCooldownMs` ;
   événement `callStarted`) ; rendu pur dans `src/render/callIndicator.ts` (projection au bord via `edgeIndicator`, phases des 3 arcs, point au bord, anneaux du monde), dessin dans `callHud.ts`.
-- Manettes : stick gauche/croix = déplacement, `A` (bouton 0) = action contextuelle (attack+interact+revive), `X` (2) = attaque seule,
-  `B` (1) = interact+revive, `Y` (3) = spécial. Dead-zone 0.25. Manettes non « standard » : mappage de repli signalé dans l'UI.
+- Manettes (schéma à TROIS boutons) : stick gauche/croix = déplacement ; `A` (bouton 0) = action contextuelle (attack+interact+revive) ;
+  `X` (2) = appel ; `Y` (3) = spécial ; `Start` (9) = pause (lu par `GameScene.pollPadStart`, hors bindings). TOUS les autres boutons
+  (B, LB, RB, LT, RT, Back hors tutoriel, appuis de sticks, Home) sont SANS EFFET en jeu. Exceptions hors jeu : dans les menus A = confirmer et B = retour ;
+  `Back / Select` (8) = « passer » du tutoriel (`GameScene.pollTutorialPad`). Dead-zone 0.25. Manettes non « standard » : mappage de repli
+  (mêmes indices 0 / 2 / 3) signalé dans l'UI. Manette virtuelle tactile : A / B / X / Y envoient les VRAIS boutons 0 / 1 / 2 / 3, pause = Start.
+  Persistance des bindings : clé `vaelorn.bindings.v2` ; l'ancienne clé `v1` (ancien schéma) est ignorée.
 - **Attribution par réclamation d'emplacement** (écran de sélection) : chaque emplacement 1..N est libre jusqu'à ce qu'un appareil le réclame
   (A / Entrée / Espace) ; B / Échap annule « prêt » ou relâche l'emplacement ; un appareil = un emplacement ; le clavier peut occuper n'importe quel
   emplacement ; 4 joueurs peuvent jouer chacun à la manette. La sélection est appliquée à `inputManager.assignDevice` avant l'intro du niveau.

@@ -35,6 +35,6 @@
   "save.reset.confirm.message": "Permanently delete the unreadable save? This cannot be undone.",
   "save.reset.confirm.title": "Start from scratch?",
   "save.resume": "Level {level} — Room {room}",
-  "save.resume.subtitle": "{resume} — each player presses a button to join",
+  "save.resume.subtitle": "{resume} — each player presses A (gamepad) or Enter / Space (keyboard) to join",
   "save.resume.title": "Resuming the game"
 }

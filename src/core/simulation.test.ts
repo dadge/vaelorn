@@ -726,7 +726,7 @@ describe('mécanismes coopératifs', () => {
     expect(types(ev)).toContain('mechanismChanged');
     expect(types(ev)).not.toContain('playerAttack');
 
-    // attaque seule (manette X) : attaque normalement même près d'un levier
+    // attaque sans interaction (A seul, sans autre ordre) : attaque normalement même près d'un levier
     const s2 = sim(lv, 1);
     const ev2 = s2.step(DT, { 0: frame({ attack: true }) });
     expect(types(ev2)).toContain('playerAttack');

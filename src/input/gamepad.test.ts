@@ -55,9 +55,9 @@ function makeManager(opts: ConstructorParameters<typeof InputManager>[0] = {}) {
 describe('attaque spéciale (bouton dédié)', () => {
   const b = createDefaultBindings();
 
-  it('bindings par défaut : clavier F / X, manette Y / RB / RT', () => {
+  it('bindings par défaut : clavier F / X, manette Y seul', () => {
     expect(b.special.keys).toEqual(['KeyF', 'KeyX']);
-    expect(b.special.pad).toEqual([PAD_BUTTON.Y, PAD_BUTTON.RB, PAD_BUTTON.RT]);
+    expect(b.special.pad).toEqual([PAD_BUTTON.Y]);
     expect(validateBindings(b).valid).toBe(true);
   });
 
@@ -72,11 +72,11 @@ describe('attaque spéciale (bouton dédié)', () => {
     expect(f.interact).toBe(false);
   });
 
-  it('manette : Y, RB et RT (RT analogique compris) déclenchent le spécial ; A / X / B non', () => {
-    for (const i of [3, 5, 7]) expect(gamepadToFrame(snap({ pressed: [i] }), b).special).toBe(true);
-    expect(gamepadToFrame(snap({ values: { 7: 0.8 } }), b).special).toBe(true);
-    expect(gamepadToFrame(snap({ values: { 7: 0.2 } }), b).special).toBe(false);
-    for (const i of [0, 1, 2]) expect(gamepadToFrame(snap({ pressed: [i] }), b).special).toBe(false);
+  it('manette : Y SEUL déclenche le spécial (analogique au-delà du seuil) ; A / B / X / LB / RB / LT / RT non', () => {
+    expect(gamepadToFrame(snap({ pressed: [PAD_BUTTON.Y] }), b).special).toBe(true);
+    expect(gamepadToFrame(snap({ values: { [PAD_BUTTON.Y]: 0.8 } }), b).special).toBe(true);
+    expect(gamepadToFrame(snap({ values: { [PAD_BUTTON.Y]: 0.2 } }), b).special).toBe(false);
+    for (const i of [0, 1, 2, 4, 5, 6, 7]) expect(gamepadToFrame(snap({ pressed: [i] }), b).special, String(i)).toBe(false);
     expect(gamepadToFrame(snap({ pressed: [3] }), b).attack).toBe(false);
   });
 
@@ -88,7 +88,7 @@ describe('attaque spéciale (bouton dédié)', () => {
   it('mergeBindings / validateBindings : surcharge, défaut conservé, liste vide et conflit refusés', () => {
     const m = mergeBindings(b, { special: { keys: ['KeyG'] } });
     expect(m.special.keys).toEqual(['KeyG']);
-    expect(m.special.pad).toEqual([3, 5, 7]);
+    expect(m.special.pad).toEqual([3]);
     // ancien JSON sauvegardé sans « special » : la valeur par défaut est reprise
     const old = JSON.parse(JSON.stringify(b)) as Record<string, unknown>;
     delete old.special;
@@ -111,7 +111,7 @@ describe('attaque spéciale (bouton dédié)', () => {
     const { keyboard, press } = makeManager();
     press('KeyF');
     expect(keyboard.poll().special).toBe(true);
-    const gp = new GamepadSource({ index: 0, provider: () => [padLike(0, { pressed: [5] })] });
+    const gp = new GamepadSource({ index: 0, provider: () => [padLike(0, { pressed: [3] })] });
     expect(gp.poll().special).toBe(true);
     const remote = new RemoteInputSource(1);
     remote.push({ ...emptyFrame(), special: true });
@@ -157,12 +157,13 @@ describe('manettes non standard (mappage de repli)', () => {
     expect(gamepadToMenuHeld(nonStd({ axes: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.1429] }), b).has('down')).toBe(true);
   });
 
-  it('stick 0/1 et boutons 0/1/2 = A/B/X en repli', () => {
+  it('stick 0/1 et boutons 0/2/3 = A/X/Y en repli (B sans effet en jeu)', () => {
     const f = gamepadToFrame(nonStd({ axes: [1, 0], pressed: [0] }), b);
     expect(f.moveX).toBeCloseTo(1);
     expect(f.attack && f.interact && f.revive).toBe(true);
-    expect(gamepadToFrame(nonStd({ pressed: [2] }), b)).toMatchObject({ attack: true, interact: false });
-    expect(gamepadToFrame(nonStd({ pressed: [1] }), b)).toMatchObject({ attack: false, interact: true, revive: true });
+    expect(gamepadToFrame(nonStd({ pressed: [2] }), b)).toMatchObject({ attack: false, interact: false, call: true });
+    expect(gamepadToFrame(nonStd({ pressed: [3] }), b)).toMatchObject({ attack: false, interact: false, special: true });
+    expect(gamepadToFrame(nonStd({ pressed: [1] }), b)).toMatchObject({ attack: false, interact: false, revive: false, special: false, call: false });
     expect(gamepadToMenuHeld(nonStd({ pressed: [0] }), b).has('confirm')).toBe(true);
     expect(gamepadToMenuHeld(nonStd({ pressed: [1] }), b).has('back')).toBe(true);
   });

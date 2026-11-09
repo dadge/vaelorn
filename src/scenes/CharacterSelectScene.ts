@@ -16,7 +16,7 @@
  * Toute la logique (unicité, curseurs, emplacements, annulation) est pure : voir src/render/menuLogic.ts.
  *
  * MODE REPRISE (`data.resume`, entrée « Continuer » du menu) : l'équipe vient de la sauvegarde ; personnages et difficultés
- * sont verrouillés (tous « prêts » d'office) et l'écran devient une salle d'attente « appuyez sur un bouton pour rejoindre » :
+ * sont verrouillés (tous « prêts » d'office) et l'écran devient une salle d'attente « A (manette) ou Entrée / Espace pour rejoindre » :
  * le premier appareil à appuyer prend la place 1 (celui qui a validé « Continuer » la prend d'office), puis la 2, etc. Quand
  * toutes les places sont réclamées, compte à rebours puis lancement directement dans la salle sauvegardée (dialogue d'intro
  * seulement si on reprend au début d'un niveau). Voir src/render/saveMenuLogic.ts.
@@ -162,7 +162,7 @@ export class CharacterSelectScene extends Phaser.Scene {
   /**
    * Mode REPRISE (« Continuer ») : équipe figée par la sauvegarde. Personnages et difficultés sont pré-remplis et
    * VERROUILLÉS (tous « prêts », on ne peut ni les changer ni les annuler) ; l'écran ne sert qu'à attribuer les appareils :
-   * chaque joueur appuie sur un bouton pour rejoindre (premier arrivé = place 1, etc.).
+   * chaque joueur appuie sur A (manette) ou Entrée / Espace (clavier) pour rejoindre (premier arrivé = place 1, etc.).
    */
   private resumeMode = false;
   /** Vérifie l'état « tous prêts » à la prochaine frame (reprise : l'auto-réclamation a lieu dans `create`). */

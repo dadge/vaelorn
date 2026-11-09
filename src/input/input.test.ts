@@ -174,20 +174,18 @@ describe('gamepadToFrame', () => {
     });
   });
 
-  it('X = attaque seule', () => {
+  it('X = appel seul (aucune action contextuelle)', () => {
     expect(gamepadToFrame(snap({ pressed: [PAD_BUTTON.X] }), b)).toMatchObject({
-      attack: true,
+      attack: false,
       interact: false,
       revive: false,
+      special: false,
+      call: true,
     });
   });
 
-  it('B = interact + revive (sans attaque)', () => {
-    expect(gamepadToFrame(snap({ pressed: [PAD_BUTTON.B] }), b)).toMatchObject({
-      attack: false,
-      interact: true,
-      revive: true,
-    });
+  it('B = AUCUN effet en jeu (n est que « retour » dans les menus)', () => {
+    expect(gamepadToFrame(snap({ pressed: [PAD_BUTTON.B] }), b)).toEqual(emptyFrame());
   });
 
   it('bouton analogique (value) et indices manquants gérés', () => {
@@ -424,7 +422,7 @@ describe('GamepadSource', () => {
   });
 
   it('indice configurable, "any" = première connectée, creux et connected=false ignorés', () => {
-    const pads: (GamepadLike | null)[] = [null, padLike(1, { pressed: [PAD_BUTTON.X] }), padLike(2, {}, false)];
+    const pads: (GamepadLike | null)[] = [null, padLike(1, { pressed: [PAD_BUTTON.A] }), padLike(2, {}, false)];
     const src = new GamepadSource({ index: 2, provider: () => pads });
     expect(src.connected()).toBe(false);
     src.setIndex(1);
@@ -712,14 +710,14 @@ describe('InputManager : poll', () => {
 
   it('manettes attribuées par indice stable : débrancher la manette 0 ne décale pas J3', () => {
     const { mgr, setPads } = makeManager({ playerCount: 3 });
-    setPads([padLike(0, { pressed: [PAD_BUTTON.A] }), padLike(1, { pressed: [PAD_BUTTON.X] })]);
+    setPads([padLike(0, { pressed: [PAD_BUTTON.A] }), padLike(1, { pressed: [PAD_BUTTON.Y] })]);
     let t = mgr.poll();
     expect(t[1]?.interact).toBe(true);
-    expect(t[2]).toMatchObject({ attack: true, interact: false });
-    setPads([null, padLike(1, { pressed: [PAD_BUTTON.X] })]);
+    expect(t[2]).toMatchObject({ attack: false, interact: false, special: true });
+    setPads([null, padLike(1, { pressed: [PAD_BUTTON.Y] })]);
     t = mgr.poll();
     expect(t[1]).toEqual(emptyFrame());
-    expect(t[2]).toMatchObject({ attack: true, interact: false });
+    expect(t[2]).toMatchObject({ attack: false, interact: false, special: true });
   });
 
   it('solo : première source utilisée (clavier ou manette), la source active garde la main', () => {
@@ -865,9 +863,9 @@ describe('InputManager : bindings', () => {
 
   it('updateBindings fusionne sur les bindings courants et propage aux manettes', () => {
     const { mgr, setPads } = makeManager({ playerCount: 2 });
-    setPads([padLike(0, { pressed: [PAD_BUTTON.Y] })]);
+    setPads([padLike(0, { pressed: [PAD_BUTTON.B] })]);
     expect(mgr.poll()[1]?.attack).toBe(false);
-    expect(mgr.updateBindings({ attack: { pad: [PAD_BUTTON.Y] } }).valid).toBe(true);
+    expect(mgr.updateBindings({ attack: { pad: [PAD_BUTTON.B] } }).valid).toBe(true);
     expect(mgr.poll()[1]?.attack).toBe(true);
     expect(mgr.getBindings().interact.pad).toEqual(DEFAULT_BINDINGS.interact.pad);
     mgr.resetBindings();
@@ -910,7 +908,7 @@ describe('InputManager : bindings', () => {
     expect(makeManager({ storage: null }).mgr.saveBindings()).toBe(false);
   });
 
-  it("loadBindings : une sauvegarde antérieure à « appeler » qui utilise déjà C (ou LB) pour une direction entre en conflit avec le défaut de `call` : repli complet sur les défauts (documenté, pas de remappage partiel)", () => {
+  it("loadBindings : une sauvegarde antérieure à « appeler » qui utilise déjà C pour une direction entre en conflit avec le défaut de `call` : repli complet sur les défauts (documenté, pas de remappage partiel)", () => {
     const old = JSON.stringify({ move: { keys: { up: ['KeyC'] } } });
     const m = makeManager({ storage: memoryStorage(old) });
     expect(m.mgr.loadBindings()).toBe(false);

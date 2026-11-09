@@ -468,7 +468,7 @@ export class PauseMenu {
     setTextIfChanged(this.title, t('hud.pause'));
     this.hint.setText(this.confirmingQuit ? t(this.tutorialMode ? 'tutorial.quit.confirm' : 'game.pause.quit.confirm') : t('game.pause.hint'));
     // rappel des commandes : déplacement, action, spécial et appeler (boutons dédiés), pause
-    this.controls.setText(`${t('controls.keyboard')} : ${t('controls.keyboard.move')} - ${t('controls.keyboard.action')} - ${t('call.pause.keyboard')} - ${t('controls.keyboard.pause')}\n${t('controls.gamepad')} : ${t('controls.gamepad.move')} - ${t('controls.gamepad.action')} - ${t('call.pause.gamepad')} - ${t('controls.gamepad.pause')}`);
+    this.controls.setText(`${t('controls.keyboard')} : ${t('controls.keyboard.move')} - ${t('game.pause.controls.keyboard')}\n${t('controls.gamepad')} : ${t('controls.gamepad.move')} - ${t('game.pause.controls.gamepad')}`);
     this.refreshItems();
   }
 

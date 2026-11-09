@@ -4,7 +4,7 @@
  *
  * Éléments (cohérents avec le HUD existant : même police, mêmes fonds sombres, liseré or) :
  *  - CARTE d'instruction (bas-centre, au-dessus de l'invite et du panneau ; repli en haut) : « Tutoriel n/total », le texte de l'étape
- *    (jetons de boutons résolus par appareil), la puce de saut ; se replie sur UNE ligne (« 4/31 · Attaque : X ») après lecture ;
+ *    (jetons de boutons résolus par appareil), la puce de saut ; se replie sur UNE ligne (« 4/31 · Attaque : le bouton A ») après lecture ;
  *  - CADRES pulsants (or + légende : jamais la couleur seule) autour des zones du HUD (`PlayerHud.regions()`) ;
  *  - REPÈRES du monde : flèche qui rebondit au-dessus de la cible (panneau, levier, plaque, clé, porte, brasero, partenaire, sortie, ennemi) ;
  *  - BARRE pulsante au bord de la vue qui regarde le partenaire hors champ (leçon de l'appel) ;

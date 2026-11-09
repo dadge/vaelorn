@@ -80,21 +80,43 @@ describe('buttonLabels', () => {
     expect(l.move).toContain('L');
   });
 
-  it('manette : A/B/X/Y/LB ; PlayStation : croix/rond/carré/triangle/L1 ; tactile : boutons de la manette virtuelle', () => {
+  it('manette Xbox : A = action / attaque / interaction, Y = spécial, X = appel, Select = passer, Start = pause', () => {
     const pad = buttonLabels('gamepad');
-    expect([pad.action, pad.interact, pad.attack, pad.special, pad.call]).toEqual(['le bouton A', 'le bouton B', 'le bouton X', 'le bouton Y', 'le bouton LB']);
+    expect([pad.action, pad.interact, pad.attack, pad.special, pad.call]).toEqual(['le bouton A', 'le bouton A', 'le bouton A', 'le bouton Y', 'le bouton X']);
+    expect(pad.skip).toContain('Select');
+    expect(pad.pause).toContain('Start');
+    setLanguage('en');
+    const en = buttonLabels('gamepad');
+    expect([en.action, en.interact, en.attack, en.special, en.call]).toEqual(['the A button', 'the A button', 'the A button', 'the Y button', 'the X button']);
+  });
+
+  it('manette PlayStation (A = croix, X = carré, Y = triangle) : croix = action, triangle = spécial, carré = appel', () => {
     const ps = buttonLabels('gamepadPs');
-    expect(ps.action).toContain('croix');
-    expect(ps.attack).toContain('carré');
-    expect(ps.interact).toContain('rond');
+    expect([ps.action, ps.interact, ps.attack]).toEqual(['le bouton croix', 'le bouton croix', 'le bouton croix']);
     expect(ps.special).toContain('triangle');
-    expect(ps.call).toContain('L1');
+    expect(ps.call).toContain('carré');
+    setLanguage('en');
+    const en = buttonLabels('gamepadPs');
+    expect(en.action).toContain('cross');
+    expect(en.special).toContain('triangle');
+    expect(en.call).toContain('square');
+  });
+
+  it('tactile : gros A = action, Y = spécial, X (vrai X de la manette virtuelle) = appel ; B n est cité nulle part', () => {
     const touch = buttonLabels('touch');
     expect(touch.move).toContain('stick');
-    expect(touch.action).toContain('A');
-    // la manette virtuelle n'a PAS de bouton X d'attaque : l'attaque est le gros A ; le bouton affiché « X » est l'APPEL
-    expect(touch.attack).toContain('A');
-    expect(touch.attack).not.toContain('X');
+    expect([touch.action, touch.attack, touch.interact]).toEqual(['le gros bouton A', 'le gros bouton A', 'le gros bouton A']);
+    expect(touch.special).toContain('Y');
     expect(touch.call).toContain('X');
+    for (const lang of ['fr', 'en'] as const) {
+      setLanguage(lang);
+      for (const dev of ['gamepad', 'gamepadPs', 'touch'] as const) {
+        const l = buttonLabels(dev);
+        for (const b of ['action', 'attack', 'interact', 'special', 'call'] as const) {
+          // jamais LB / RB / LT / RT / L1 / R1 / R2 / L2, ni le bouton B / le rond (sans effet en jeu)
+          expect(l[b], `${lang} ${dev} ${b}`).not.toMatch(/(LB|RB|LT|RT|L1|R1|L2|R2)|bouton B|B button|rond|circle/);
+        }
+      }
+    }
   });
 });

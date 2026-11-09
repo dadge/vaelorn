@@ -52,8 +52,15 @@ export interface StorageLike {
   setItem(key: string, value: string): void;
 }
 
-/** Clé localStorage des bindings (versionnée). */
-export const BINDINGS_STORAGE_KEY = 'vaelorn.bindings.v1';
+/**
+ * Clé localStorage des bindings (versionnée). v2 = schéma de manette à trois boutons (A action, X appel, Y spécial) :
+ * les sauvegardes de l'ancien schéma (clé v1 : B / X d'attaque, RB / RT de spécial, LB / LT d'appel) ne sont JAMAIS relues,
+ * pour ne pas ressusciter d'anciens boutons ni créer de conflit avec les nouveaux défauts. Aucun écran de remappage n'existe
+ * encore : ces données ne sont écrites que par `saveBindings()` (non appelé par le jeu).
+ */
+export const BINDINGS_STORAGE_KEY = 'vaelorn.bindings.v2';
+/** Ancienne clé (schéma de manette d'avant les trois boutons) : IGNORÉE, jamais lue ni écrasée. */
+export const LEGACY_BINDINGS_STORAGE_KEY = 'vaelorn.bindings.v1';
 
 /** Une ligne de l'écran de sélection : quelle entrée contrôle quel joueur. */
 export interface PlayerAssignment {
@@ -630,7 +637,7 @@ export class InputManager implements MenuDeviceProvider {
   /**
    * Charge les bindings sauvegardés (localStorage, try/catch). Les valeurs sont fusionnées sur les défauts
    * puis validées ; un contenu absent, illisible ou invalide est ignoré (repli COMPLET sur les défauts, sans remappage partiel :
-   * une ancienne sauvegarde qui affecte déjà la touche/le bouton par défaut de `call` à une direction entre en conflit).
+   * une sauvegarde v2 qui affecte déjà la touche/le bouton par défaut de `call` à une direction entre en conflit). Seule la clé v2 est lue : l'ancienne clé v1 est ignorée (voir `BINDINGS_STORAGE_KEY`).
    * Retourne true si des bindings ont été appliqués.
    */
   loadBindings(): boolean {

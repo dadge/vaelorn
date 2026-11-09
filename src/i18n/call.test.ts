@@ -59,13 +59,28 @@ describe('i18n « appeler »', () => {
     setLanguage('fr');
   });
 
-  it('les touches affichées correspondent aux bindings par défaut (C ; LB / LT)', () => {
+  it('les touches affichées correspondent aux bindings par défaut (C ; X)', () => {
     expect(fr['call.controls.keyboard']).toBe('C');
     expect(fr['call.pause.keyboard']).toContain('C');
-    expect(fr['call.pause.gamepad']).toContain('LB');
-    expect(fr['call.pause.gamepad']).toContain('LT');
-    expect(fr['call.controls.gamepad']).toContain('LB');
-    expect(en['call.controls.gamepad']).toContain('LT');
+    expect(fr['call.pause.gamepad']).toContain('X : appeler');
+    expect(fr['call.pause.gamepad']).toContain('Y : spécial');
+    expect(fr['call.controls.gamepad']).toBe('Bouton X');
+    expect(en['call.controls.gamepad']).toBe('X button');
+    for (const v of [fr['call.pause.gamepad'], fr['call.controls.gamepad'], en['call.pause.gamepad'], en['call.controls.gamepad']]) {
+      expect(v).not.toMatch(/(LB|LT|RB|RT)/);
+    }
+  });
+
+  it('rappel de la pause et panneau Contrôles : libellés explicites des actions, schéma A / Y / X / Start', () => {
+    setLanguage('fr');
+    expect(t('game.pause.controls.gamepad')).toBe('A : action - Y : spécial - X : appeler - Start : pause');
+    expect(t('game.pause.controls.keyboard')).toContain('C : appeler');
+    expect(t('controls.keyboard.menu')).toContain('Échap');
+    setLanguage('en');
+    expect(t('game.pause.controls.gamepad')).toBe('A: action - Y: special - X: call - Start: pause');
+    expect(t('controls.keyboard.menu')).toContain('Esc');
+    expect(t('game.pause.hint')).toContain('Start');
+    setLanguage('fr');
   });
 
   it('toute clé `call.*` référencée dans le code source existe dans le dictionnaire', () => {

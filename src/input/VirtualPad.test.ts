@@ -27,10 +27,11 @@ describe('constantes', () => {
   it('indice 4, hors des vraies manettes 0..3', () => {
     expect(VIRTUAL_PAD_INDEX).toBe(4);
   });
-  it('boutons : A=0 B=1 Y=3, appel (affiché « X ») = LB (4), pause = Start (9)', () => {
-    expect(VIRTUAL_BUTTON_INDEX).toEqual({ a: 0, b: 1, y: 3, call: 4, pause: 9 });
-    expect(VIRTUAL_BUTTONS).not.toContain('x');
-    expect(VIRTUAL_BUTTON_INDEX.call).toBe(PAD_BUTTON.LB);
+  it('boutons : A=0 B=1 X=2 Y=3 (VRAIS boutons standard, plus de LB), pause = Start (9)', () => {
+    expect(VIRTUAL_BUTTON_INDEX).toEqual({ a: 0, b: 1, x: 2, y: 3, pause: 9 });
+    expect(VIRTUAL_BUTTONS).toEqual(['a', 'b', 'x', 'y', 'pause']);
+    expect(VIRTUAL_BUTTON_INDEX.x).toBe(PAD_BUTTON.X);
+    expect(Object.values(VIRTUAL_BUTTON_INDEX)).not.toContain(PAD_BUTTON.LB);
     expect(VIRTUAL_BUTTON_INDEX.pause).toBe(PAD_BUTTON.START);
     expect(new Set(Object.values(VIRTUAL_BUTTON_INDEX)).size).toBe(VIRTUAL_BUTTONS.length);
   });
@@ -123,7 +124,7 @@ describe('VirtualPad : connexion', () => {
   it('déconnecter remet TOUT à zéro (aucune touche collée) et reconnecter repart de zéro', () => {
     const p = connectedPad();
     p.pressButton(1, 'a');
-    p.pressButton(2, 'call');
+    p.pressButton(2, 'x');
     p.beginStick(3, R, 0, R);
     expect(p.snapshot().axes[0]).toBeCloseTo(1);
     p.setConnected(false);
@@ -192,13 +193,13 @@ describe('VirtualPad : boutons multi-pointeurs', () => {
   it('deux doigts sur deux boutons ; relâcher un seul laisse l’autre', () => {
     const p = connectedPad();
     p.pressButton(10, 'a');
-    p.pressButton(11, 'call');
+    p.pressButton(11, 'x');
     expect(p.isButtonDown('a')).toBe(true);
-    expect(p.isButtonDown('call')).toBe(true);
+    expect(p.isButtonDown('x')).toBe(true);
     expect(p.releasePointer(10)).toBe(true);
     expect(p.isButtonDown('a')).toBe(false);
-    expect(p.isButtonDown('call')).toBe(true);
-    expect(p.snapshot().buttons[4].pressed).toBe(true);
+    expect(p.isButtonDown('x')).toBe(true);
+    expect(p.snapshot().buttons[2].pressed).toBe(true);
     expect(p.snapshot().buttons[0].pressed).toBe(false);
   });
   it('stick + bouton simultanés', () => {

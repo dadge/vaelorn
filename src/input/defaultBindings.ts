@@ -5,18 +5,27 @@
  * Les codes sont des `KeyboardEvent.code` PHYSIQUES : sur un clavier AZERTY, la disposition « WASD »
  * correspond donc aux touches ZQSD sans rien configurer.
  *
- * Manette (mapping « standard ») : stick gauche + croix = déplacement ; A (0) = action contextuelle
- * (attack + interact + revive) ; X (2) = attaque seule ; B (1) = interact + revive ; Y (3) / RB (5) / RT (7) =
- * ATTAQUE SPÉCIALE (bouton dédié). Clavier : F ou X = spécial. LB (4) / LT (6) = APPEL (bouton dédié) ; clavier : C. Dead-zone 0.25.
+ * Manette (mapping « standard »), schéma à TROIS boutons (demande du joueur) :
+ *   A (0) = action contextuelle (attack + interact + revive : relever, interagir, attaquer) ;
+ *   X (2) = APPEL des alliés ; Y (3) = ATTAQUE SPÉCIALE (rechargeable) ; Start (9) = pause (lu par GameScene, pas par les bindings).
+ * TOUS les autres boutons (B, LB, RB, LT, RT, Back, appuis de sticks, croix hors déplacement…) sont SANS EFFET en jeu.
+ * Stick gauche + croix = déplacement (zone morte 0.25).
+ * Exceptions (hors jeu, donc hors bindings d'action) : dans les MENUS, A = confirmer et B = retour (sinon on ne pourrait plus
+ * annuler ni libérer une place à l'écran de sélection) ; Select / Back (8) reste le « passer » du tutoriel sur manette
+ * (GameScene.pollTutorialPad) ; B sert aussi de « retour » dans la pause et les dialogues.
+ * Clavier (inchangé) : Espace / E = action ; F ou X = spécial ; C = appel ; Entrée / Échap / M (menus, pause, son).
  * Un seul clavier existe (un seul joueur à la fois, dispositions flèches ET WASD en parallèle) : « C » ne figure dans aucune
- * autre action ni direction, et Entrée / Échap / M (menus, pause, son) restent libres.
+ * autre action ni direction.
  */
 import type { Bindings } from './actions';
 
 /** Zone morte par défaut du stick. */
 export const DEFAULT_DEADZONE = 0.25;
 
-/** Indices du mapping standard des manettes. */
+/**
+ * Indices du mapping standard des manettes. Seuls A, X, Y (jeu), Start (pause), A / B (menus), Back (« passer » du tutoriel)
+ * et la croix (déplacement / menus) ont un rôle ; LB / RB / LT / RT restent déclarés pour les tests (« sans effet »).
+ */
 export const PAD_BUTTON = {
   A: 0,
   B: 1,
@@ -53,14 +62,14 @@ export function createDefaultBindings(): Bindings {
         right: PAD_BUTTON.DPAD_RIGHT,
       },
     },
-    // Espace / E / A : action contextuelle → la simulation arbitre (relevage > interaction > attaque).
-    attack: { keys: ['Space', 'KeyE'], pad: [PAD_BUTTON.A, PAD_BUTTON.X] },
-    interact: { keys: ['Space', 'KeyE'], pad: [PAD_BUTTON.A, PAD_BUTTON.B] },
-    revive: { keys: ['Space', 'KeyE'], pad: [PAD_BUTTON.A, PAD_BUTTON.B] },
-    // Attaque spéciale : bouton dédié (clavier F / X ; manette Y / RB / RT). Espace et A ne la déclenchent PAS.
-    special: { keys: ['KeyF', 'KeyX'], pad: [PAD_BUTTON.Y, PAD_BUTTON.RB, PAD_BUTTON.RT] },
-    // Appel : bouton dédié (clavier C ; manette LB / LT, les seuls boutons de façade encore libres). Aucune autre action n'utilise ces entrées.
-    call: { keys: ['KeyC'], pad: [PAD_BUTTON.LB, PAD_BUTTON.LT] },
+    // Espace / E / A : action contextuelle → la simulation arbitre (relevage > interaction > attaque). A SEUL à la manette.
+    attack: { keys: ['Space', 'KeyE'], pad: [PAD_BUTTON.A] },
+    interact: { keys: ['Space', 'KeyE'], pad: [PAD_BUTTON.A] },
+    revive: { keys: ['Space', 'KeyE'], pad: [PAD_BUTTON.A] },
+    // Attaque spéciale : bouton dédié (clavier F / X ; manette Y SEUL). Espace et A ne la déclenchent PAS.
+    special: { keys: ['KeyF', 'KeyX'], pad: [PAD_BUTTON.Y] },
+    // Appel : bouton dédié (clavier C ; manette X SEUL). Aucune autre action n'utilise ces entrées.
+    call: { keys: ['KeyC'], pad: [PAD_BUTTON.X] },
     menu: {
       confirm: { keys: ['Enter', 'NumpadEnter', 'Space'], pad: [PAD_BUTTON.A] },
       back: { keys: ['Escape', 'Backspace'], pad: [PAD_BUTTON.B] },

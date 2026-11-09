@@ -39,7 +39,7 @@ export interface GamepadSnapshot {
 /** Indice d'axe du « hat » (croix directionnelle encodée sur un axe) des manettes non standard. */
 export const NONSTANDARD_HAT_AXIS = 9;
 
-/** true si la manette n'a PAS le mapping standard (mappage de repli : axes 0/1, axe 9 = croix, boutons 0/1/2 = A/B/X). */
+/** true si la manette n'a PAS le mapping standard (mappage de repli : axes 0/1, axe 9 = croix, mêmes indices de boutons 0 / 2 / 3 = A / X / Y). */
 export function isNonStandardPad(snapshot: GamepadSnapshot): boolean {
   return snapshot.mapping !== undefined && snapshot.mapping !== 'standard';
 }
@@ -164,9 +164,11 @@ function clampDeadzone(dz: number): number {
  * - Sinon le stick gauche : zone morte RADIALE (`deadzone`, défaut `bindings.deadzone` = 0.25), puis
  *   l'amplitude est re-mappée de [deadzone, STICK_SATURATION] vers [0, 1] (mouvement progressif, sans à-coup).
  *   La simulation peut donc recevoir une amplitude analogique (0..1) ; la direction reste exacte.
- * - Boutons : voir `bindings.attack/interact/revive/special.pad` (A = les trois, X = attaque, B = interact + revive,
- *   Y / RB / RT = attaque spéciale UNIQUEMENT : A ne la déclenche jamais ; LB / LT = appel UNIQUEMENT).
- * - Manette non standard (`snapshot.mapping` ≠ 'standard') : mappage de repli (axes 0/1, croix sur l'axe 9, boutons 0/1/2 = A/B/X).
+ * - Boutons : voir `bindings.attack/interact/revive/special/call.pad`. Schéma par défaut : A = action contextuelle (attack +
+ *   interact + revive), Y = attaque spéciale UNIQUEMENT (A ne la déclenche jamais), X = appel UNIQUEMENT ; B, LB, RB, LT, RT, Back,
+ *   appuis de sticks… n'ont AUCUN effet en jeu (B n'est que « retour » dans les menus : voir `gamepadToMenuHeld`).
+ * - Manette non standard (`snapshot.mapping` ≠ 'standard') : mappage de repli (axes 0/1, croix sur l'axe 9, mêmes indices de
+ *   boutons 0 / 2 / 3 = A / X / Y).
  */
 export function gamepadToFrame(snapshot: GamepadSnapshot, bindings: Bindings, deadzone?: number): ActionFrame {
   const dz = clampDeadzone(deadzone ?? bindings.deadzone);
@@ -235,7 +237,8 @@ export function keysToMenuHeld(pressedKeyCodes: ReadonlySet<string>, bindings: B
 
 /**
  * Manette → actions de menu « tenues » : croix, stick (axe dominant uniquement, seuil
- * `max(MENU_STICK_THRESHOLD, deadzone)`), A = confirmer, B = retour par défaut.
+ * `max(MENU_STICK_THRESHOLD, deadzone)`), A = confirmer, B = retour par défaut (exception « menus » du schéma à trois
+ * boutons : sans B on ne pourrait plus annuler ; X, Y, gâchettes… n'ont aucun effet dans les menus).
  */
 export function gamepadToMenuHeld(snapshot: GamepadSnapshot, bindings: Bindings, deadzone?: number): Set<MenuAction> {
   const dz = clampDeadzone(deadzone ?? bindings.deadzone);

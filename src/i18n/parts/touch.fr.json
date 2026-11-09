@@ -1,12 +1,12 @@
 {
-  "touch.a": "A, action",
-  "touch.b": "B, interagir ou relever",
-  "touch.call": "Appeler les alliés",
+  "touch.a": "A, action (relever, interagir, attaquer)",
+  "touch.b": "B, retour dans les menus (sans effet en jeu)",
   "touch.game.disconnected": "Manette virtuelle du joueur {n} masquée — remets le téléphone en paysage",
   "touch.group": "Commandes tactiles",
   "touch.hidden": "Manette virtuelle masquée : mets l'écran en paysage.",
   "touch.padName": "Manette virtuelle",
   "touch.pause": "Pause",
   "touch.stick": "Stick de déplacement",
+  "touch.x": "X, appeler les alliés",
   "touch.y": "Y, attaque spéciale"
 }

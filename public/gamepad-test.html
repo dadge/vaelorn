@@ -77,10 +77,10 @@
       hat: 'Croix (axe 9)', special: 'attaque spéciale', hHelp: 'Boutons dans le jeu', hLog: 'Journal',
       help: [
         'Déplacement : stick gauche ou croix directionnelle.',
-        'Action (attaquer / interagir / relever) : A ; X = attaque ; B = interagir / relever.',
-        "Attaque spéciale : Y, RB ou RT (clavier : F ou X). Espace et A ne la déclenchent PAS.",
+        'Action (relever / interagir / attaquer) : A seul. Appeler les alliés : X. Attaque spéciale : Y (clavier : F ou X ; Espace et A ne la déclenchent PAS).',
+        'Tous les autres boutons (B, LB, RB, LT, RT, Back hors tutoriel, sticks…) sont SANS EFFET en jeu. Dans les menus : A = valider, B = retour. Select / Back = passer le tutoriel.',
         'Pause : Start (clavier : Échap).',
-        "Manette non standard (mapping vide) : le jeu utilise un mappage de secours : axes 0/1 = stick, axe 9 = croix, boutons 0/1/2 = A/B/X."
+        "Manette non standard (mapping vide) : le jeu utilise un mappage de secours : axes 0/1 = stick, axe 9 = croix, boutons 0/2/3 = A/X/Y."
       ],
       connectedEv: 'Manette branchée', disconnectedEv: 'Manette débranchée', joined: 'a rejoint', left: 'a quitté'
     },
@@ -97,10 +97,10 @@
       hat: 'D-pad (axis 9)', special: 'special attack', hHelp: 'In-game buttons', hLog: 'Log',
       help: [
         'Move: left stick or D-pad.',
-        'Action (attack / interact / revive): A; X = attack; B = interact / revive.',
-        'Special attack: Y, RB or RT (keyboard: F or X). Space and A do NOT trigger it.',
+        'Action (revive / interact / attack): A only. Call your allies: X. Special attack: Y (keyboard: F or X; Space and A do NOT trigger it).',
+        'All other buttons (B, LB, RB, LT, RT, Back outside the tutorial, sticks…) have NO effect in game. In menus: A = confirm, B = back. Select / Back = skip the tutorial.',
         'Pause: Start (keyboard: Escape).',
-        'Non-standard gamepad (empty mapping): the game uses a fallback mapping: axes 0/1 = stick, axis 9 = D-pad, buttons 0/1/2 = A/B/X.'
+        'Non-standard gamepad (empty mapping): the game uses a fallback mapping: axes 0/1 = stick, axis 9 = D-pad, buttons 0/2/3 = A/X/Y.'
       ],
       connectedEv: 'Gamepad connected', disconnectedEv: 'Gamepad disconnected', joined: 'joined', left: 'left'
     }
@@ -112,7 +112,7 @@
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   var BUTTON_NAMES = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'Back', 'Start', 'L3', 'R3', '↑', '↓', '←', '→', 'Home'];
-  var SPECIAL = { 3: true, 5: true, 7: true };
+  var SPECIAL = { 3: true }; // seul Y (3) est l'attaque spéciale ; A (0) et X (2) sont aussi actifs en jeu (action, appel)
   var MAX_PLAYERS = 4;
   var owners = [null, null, null, null];   // 'keyboard' | 'gamepad:N' | null
   var prevDown = {};                       // "gamepad:N:b" -> bool
