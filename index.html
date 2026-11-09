@@ -3,6 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0b0a14" />
+    <meta name="description" content="Jeu d'aventure coopératif local (1 à 4 joueurs) : donjons, énigmes et boss." />
+    <!-- PWA : manifeste, icônes ; le service worker est enregistré par src/pwa/register.ts (build de production seulement) -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Fragments" />
     <title>Les Fragments de l'Aube</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #0b0a14; overflow: hidden; }

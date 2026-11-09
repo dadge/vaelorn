@@ -11,7 +11,7 @@ declare module 'node:fs' {
     isDirectory(): boolean;
     isFile(): boolean;
   }
-  export function readFileSync(path: string, encoding: 'utf8'): string;
+  export function readFileSync(path: string, encoding: 'utf8' | 'latin1'): string;
   export function writeFileSync(path: string, data: string, encoding?: 'utf8'): void;
   export function readdirSync(path: string): string[];
   export function readdirSync(path: string, options: { withFileTypes: true }): Dirent[];

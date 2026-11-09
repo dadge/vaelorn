@@ -33,6 +33,16 @@ Le jeu est un site **statique** : aucun serveur applicatif. Attention : les navi
 - **PC du salon** : `npm run dev` (ou `npm run build && npm run preview`) puis `http://localhost:…` — les manettes fonctionnent.
 - **Home Assistant** : copier le contenu de `dist/` dans `/config/www/vaelorn/` → `/local/vaelorn/index.html` ; les manettes ne marcheront que si l'accès est en HTTPS.
 
+### Application installable (PWA) et hors ligne
+
+Le jeu est une **PWA** (*Progressive Web App*) : on peut l'installer sur l'écran d'accueil / le bureau et il se lance ensuite **sans connexion**.
+
+- **Installer** : Chrome (PC ou Android) → menu ⋮ → *Installer l'application* / *Ajouter à l'écran d'accueil* (ou l'icône d'installation dans la barre d'adresse). Sur iPhone/iPad (Safari) : *Partager → Sur l'écran d'accueil*. Il faut **HTTPS** (GitHub Pages convient) ou `localhost`.
+- **Hors ligne** : au premier chargement, un *service worker* (`sw.js`, généré au build par `scripts/pwa-build.mjs`) met en cache **tous** les fichiers du jeu. La page est ensuite servie depuis le cache si le réseau est coupé ou lent (> 4 s) ; en ligne, c'est toujours la version la plus récente qui est chargée. Les sauvegardes (`localStorage`) restent locales à l'appareil.
+- **Mises à jour** : chaque déploiement change la version du cache (hash du contenu du build) ; la nouvelle version s'active dès le prochain chargement et supprime l'ancien cache. Pour forcer : fermer et rouvrir l'application.
+- **Réglages** : `public/manifest.webmanifest` (nom, couleurs, plein écran, orientation paysage). Les icônes (`public/icons/`) sont générées par `node scripts/make-icons.mjs` (soleil levant et fragments) ; refaire cette commande seulement pour changer le dessin.
+- Le service worker n'est **pas** enregistré en développement (`npm run dev`). Pour l'essayer : `npm run build && npm run preview`, puis ouvrir `http://localhost:4173` dans Chrome (le navigateur intégré à certains éditeurs ne gère pas les service workers).
+
 Diagnostic des manettes : ouvrir `/gamepad-test.html` (liste les manettes détectées, boutons et axes en direct).
 
 ## Contrôles
@@ -153,6 +163,7 @@ src/core/      LOGIQUE PURE (aucune dépendance à Phaser/DOM, ni Math.random/Da
   combat.ts, collision.ts, ai.ts, bosses.ts, characters.ts, enemies.ts, light.ts, rng.ts, geometry.ts, grid.ts
 src/levels/    niveaux en données TS typées (level1.ts … level6.ts, index.ts)
 src/input/     couche d'abstraction des entrées : ActionFrame par joueur (clavier, manettes, réseau/tactile plus tard)
+src/pwa/       enregistrement du service worker (PWA) ; scripts/pwa-build.mjs (sw.js au build), make-icons.mjs (icônes)
 src/net/       interface NetAdapter (prévue, sans implémentation réseau)
 src/i18n/      fr.json, en.json, i18n.ts (clés plates, aucune chaîne en dur dans le code)
 src/render/    atlas de sprites runtime (art/), palettes, splitscreen, caméras, HUD, obscurité, effets

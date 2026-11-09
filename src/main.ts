@@ -19,6 +19,7 @@ import { onLanguageChange, setLanguage, t } from './i18n/i18n';
 import { inputManager } from './input';
 import { LEVELS } from './levels';
 import { parseQuickParams, setQuickParams } from './render/menuLogic';
+import { registerServiceWorker } from './pwa/register';
 import { isSmoothRendering } from './render/smoothing';
 import { BootScene } from './scenes/BootScene';
 import { CharacterSelectScene } from './scenes/CharacterSelectScene';
@@ -79,3 +80,4 @@ function start(): void {
 }
 
 start();
+registerServiceWorker();
