@@ -1,7 +1,7 @@
 /**
  * Manette virtuelle tactile (couche DOM mince). Toute la logique (état des boutons par pointeur, stick → axes,
  * instantané de manette standard) est dans `src/input/VirtualPad.ts` (pure, testée). Ce fichier ne fait que :
- *  - créer les éléments (stick à gauche ; losange A / B / Y + APPEL (à la place du X) à droite ; PAUSE en haut au centre) ;
+ *  - créer les éléments (stick à gauche ; losange A / B / X / Y à droite, le X étant le bouton APPEL ; PAUSE en haut au centre) ;
  *  - brancher les Pointer Events (multi-touch : chaque contrôle suit SON pointerId via `setPointerCapture`) ;
  *  - mettre à jour l'aspect (enfoncé) et décider de l'affichage (tactile + paysage, ou `?touch=1` ; masquée dès qu'une
  *    vraie manette est connectée ; `?touch=0` la force cachée) avec `shouldShowVirtualPad` (device.ts).
@@ -83,9 +83,6 @@ const STYLE = `
 @media (prefers-reduced-motion: reduce) { #touch-controls .vp-btn, #touch-controls .vp-pause { transition: none; } }
 `;
 
-/** Icône « signal » du bouton d'appel (au rang du X) : point + 3 arcs, comme l'indicateur d'appel du jeu. */
-const CALL_ICON = `<svg class="vp-icon" viewBox="0 0 24 24" fill="none" stroke="#f0e2b0" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="4.5" cy="12" r="1.8" fill="#f0e2b0" stroke="none"/><path d="M8.04 8.46A5 5 0 0 1 8.04 15.54"/><path d="M10.86 5.64A9 9 0 0 1 10.86 18.36"/><path d="M13.69 2.81A13 13 0 0 1 13.69 21.19"/></svg>`;
-
 /** Icône pause (deux barres). */
 const PAUSE_ICON = `<svg class="vp-icon" viewBox="0 0 24 24" fill="#f0e2b0" aria-hidden="true" focusable="false"><rect x="6" y="4.5" width="4.2" height="15" rx="1.2"/><rect x="13.8" y="4.5" width="4.2" height="15" rx="1.2"/></svg>`;
 
@@ -166,7 +163,7 @@ function build(): TouchControlsHandle {
   const a = makeButton('a', 'vp-btn vp-a', 'A', null);
   const b = makeButton('b', 'vp-btn vp-b', 'B', null);
   const y = makeButton('y', 'vp-btn vp-y', 'Y', null);
-  const call = makeButton('call', 'vp-btn vp-call', null, CALL_ICON);
+  const call = makeButton('call', 'vp-btn vp-call', 'X', null); // lettre X (l'appel est LB) : le losange garde A B X Y
   const pause = makeButton('pause', 'vp-pause', null, PAUSE_ICON);
   cluster.append(y.el, call.el, b.el, a.el);
   root.append(stick, cluster, pause.el);

@@ -87,7 +87,7 @@ describe('manette virtuelle : vue comme une manette d’indice 4', () => {
     expect(f.call).toBe(false);
   });
 
-  it('B = interagir/relever seul, Y = spécial, appel (au rang du X, LB) = call ; pas de bouton X virtuel', () => {
+  it('B = interagir/relever seul, Y = spécial, bouton affiché « X » = appel (LB) = call', () => {
     pad.setConnected(true);
     const { mgr } = makeManager();
     pad.pressButton(1, 'b');

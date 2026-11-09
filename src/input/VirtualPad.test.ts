@@ -27,7 +27,7 @@ describe('constantes', () => {
   it('indice 4, hors des vraies manettes 0..3', () => {
     expect(VIRTUAL_PAD_INDEX).toBe(4);
   });
-  it('boutons : A=0 B=1 Y=3, appel = LB (4), pause = Start (9) ; pas de X virtuel', () => {
+  it('boutons : A=0 B=1 Y=3, appel (affiché « X ») = LB (4), pause = Start (9)', () => {
     expect(VIRTUAL_BUTTON_INDEX).toEqual({ a: 0, b: 1, y: 3, call: 4, pause: 9 });
     expect(VIRTUAL_BUTTONS).not.toContain('x');
     expect(VIRTUAL_BUTTON_INDEX.call).toBe(PAD_BUTTON.LB);
