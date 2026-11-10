@@ -53,7 +53,7 @@ export interface StorageLike {
 }
 
 /**
- * Clé localStorage des bindings (versionnée). v2 = schéma de manette à trois boutons (A action, X appel, Y spécial) :
+ * Clé localStorage des bindings (versionnée). v2 = schéma de manette à quatre boutons (A action, B cœur, X appel, Y spécial) :
  * les sauvegardes de l'ancien schéma (clé v1 : B / X d'attaque, RB / RT de spécial, LB / LT d'appel) ne sont JAMAIS relues,
  * pour ne pas ressusciter d'anciens boutons ni créer de conflit avec les nouveaux défauts. Aucun écran de remappage n'existe
  * encore : ces données ne sont écrites que par `saveBindings()` (non appelé par le jeu).

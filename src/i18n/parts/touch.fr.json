@@ -1,6 +1,6 @@
 {
   "touch.a": "A, action (relever, interagir, attaquer)",
-  "touch.b": "B, retour dans les menus (sans effet en jeu)",
+  "touch.b": "B, utiliser le cœur rangé (retour dans les menus)",
   "touch.game.disconnected": "Manette virtuelle du joueur {n} masquée — remets le téléphone en paysage",
   "touch.group": "Commandes tactiles",
   "touch.hidden": "Manette virtuelle masquée : mets l'écran en paysage.",

@@ -31,10 +31,13 @@
  *  (i) projectiles et impacts ;
  *  (i2) sources de vie (phase 'playing', sim créée avec `loot` vrai) : vieillissement et péremption de la nourriture au sol, ramassage
  *      (`pickupCollected`) par le joueur vivant blessé le plus proche, usage des cristaux de soin (`crystalUsed`) ;
+ *      AVEC `SimConfig.heartSlot` (`heartSlot.ts`) : d'abord l'usage VOLONTAIRE du cœur rangé par le front montant de `ActionFrame.heart` (B : `heartUsed` sur un allié blessé à portée, ou
+ *      cristal de soin sous les pieds (`crystalUsed`), ou soi-même ; sinon `heartRefused`), puis le RANGEMENT du cœur / demi-cœur touché dans l'emplacement du joueur vivant le plus proche
+ *      dont il est vide (`heartStored`, blessé ou non) ; aucune consommation au contact, le cristal ne soigne plus au contact ;
  *  (i3) équipement au sol (phase 'playing') : vieillissement / péremption des objets, verrous, ramassage automatique (`gearPicked`) par le joueur
  *      vivant le plus proche pour qui l'objet est STRICTEMENT meilleur (`gear.ts` `pickupDecision`) ;
  *  (i4) appel AUTOMATIQUE (phases 'playing' et 'roomCleared', option `SimConfig.autoCall`, 2 joueurs ou plus ; `autoCall.ts`, [B28]) : un joueur vivant qui chevauche un cœur qu'il ne
- *      peut pas consommer ou un objet d'équipement qu'il ne prend pas (décision 'ignore') prévient les alliés pour qui l'objet serait utile (`autoCallStarted`).
+ *      peut pas prendre (PV pleins ; avec `heartSlot` : emplacement PLEIN, quels que soient les PV) ou un objet d'équipement qu'il ne prend pas (décision 'ignore') prévient les alliés pour qui l'objet serait utile (`autoCallStarted`).
  *      Purement informatif : ne fige personne, ne consomme pas le délai de l'appel manuel, aucun tirage aléatoire, aucun effet sur le jeu ;
  *  (j) morts d'ennemis (enemyDied, kills du tueur, retrait) ; BUTIN : chaque mort d'ennemi non invoqué tire son butin de vie avec le PRNG
  *      DÉDIÉ (`lootRngState`, jamais `rngState`) → `pickupDropped` (voir `loot.ts`, `balance.ts` [B10]-[B17]) ; puis, s'il ne laisse pas de cœur,
@@ -73,6 +76,9 @@
  *  - sources de vie : nourriture (`room.pickups`) et cristaux (`room.healCrystals`) sont remis à zéro / à neuf à chaque entrée de salle (start /
  *    next / restart), comme le compteur anti-malchance (`lootDryKills`) ; leur flux aléatoire (`lootRngState`) et leurs ids (`nextPickupId`) sont
  *    DISTINCTS de ceux du reste de la partie : sans ramassage, une partie est strictement identique à celle d'avant leur ajout ;
+ *  - emplacement CŒUR (`PlayerState.heart`, champ optionnel ; option `heartSlot`) : conservé d'une salle à l'autre comme l'équipement, réinitialisé avec la simulation (nouveau niveau) ;
+ *    perdu à la chute (au combat, scénarisée, ou défaite d'équipe) mais le cœur tombe alors au sol aux pieds du joueur (`heartLost` puis `pickupDropped`) ; B ne fait rien hors phases 'playing' et 'roomCleared' (le rangement et B restent actifs pendant le délai de salle terminée),
+ *    à terre, pendant le gel d'un appel manuel ni pendant un relevage ; `ActionFrame.heart` est un bouton DÉDIÉ (aucune autre action). Aucun tirage aléatoire : les flux restent identiques ;
  *  - équipement : conservé d'une salle à l'autre, perdu à la chute, réinitialisé avec la simulation (nouveau niveau) ; `room.gearDrops` et `room.gearBudget`
  *    sont remis à neuf à chaque entrée de salle (start / next / restart) ; le flux aléatoire (`gearRngState`) et les ids (`nextGearDropId`) sont ISOLÉS :
  *    sans ramassage, une partie est strictement identique à celle d'avant l'ajout de l'équipement (aux champs d'état supplémentaires près) ;
@@ -140,6 +146,7 @@ import {
 } from './gear';
 import { dirFromVec, distSq, pointInTileRect, tileCenter } from './geometry';
 import { RoomGrid } from './grid';
+import { heartCollectorFor, heartUseAmount, isHeartKind, normalizeHeartField, planHeartUse } from './heartSlot';
 import { lightSources, type LightSource } from './light';
 import {
   areAllRequirementsMet,
@@ -205,6 +212,7 @@ import type {
   HealCrystalState,
   IGameSimulation,
   LevelDef,
+  PickupKind,
   PickupState,
   PlayerId,
   PlayerSetup,
@@ -235,7 +243,7 @@ export const MAX_STEP_MS = 100;
 
 /** Frame d'entrées assainie : NaN → 0, axes bornés à [-1, 1] (±Infinity → ±1), booléens stricts. Frame absente = frame vide. */
 export function sanitizeFrame(f: ActionFrame | undefined): ActionFrame {
-  if (!f) return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false };
+  if (!f) return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false, heart: false };
   const axis = (v: number): number => (Number.isNaN(v) ? 0 : Math.max(-1, Math.min(1, v)));
   return {
     moveX: axis(f.moveX),
@@ -245,6 +253,7 @@ export function sanitizeFrame(f: ActionFrame | undefined): ActionFrame {
     revive: f.revive === true,
     special: f.special === true,
     call: f.call === true,
+    heart: f.heart === true,
   };
 }
 
@@ -345,6 +354,8 @@ interface Arbitration {
   special: Set<PlayerId>;
   /** Joueurs dont l'appel est lancé CE pas (front montant accepté : vivant, libre, délai écoulé). */
   call: Set<PlayerId>;
+  /** Joueurs dont le bouton B (utiliser le cœur) vient d'être pressé ce pas : front montant accepté (option `heartSlot`, phase 'playing', ni relevage ni appel ni gel d'appel). */
+  heart: Set<PlayerId>;
 }
 
 /**
@@ -374,6 +385,7 @@ export class GameSimulation implements IGameSimulation {
     normalizeLootState(state, level.rooms[state.roomIndex]);
     normalizeGearState(state);
     for (const p of state.players) normalizeAutoCallFields(p); // champs d'appel automatique : absents = valides, mal formés = supprimés
+    for (const p of state.players) normalizeHeartField(p, state.heartSlot === true); // emplacement cœur : valeur inconnue = vide, sans l'option toujours vide
     this.gearRng = {
       get rngState(): number {
         return state.gearRngState as number;
@@ -475,6 +487,31 @@ export class GameSimulation implements IGameSimulation {
     markPlayerDown(p);
     this.pending.push({ type: 'playerDown', playerId: id });
     this.loseGear(p, this.pending);
+    return true;
+  }
+
+  /**
+   * BLESSURE SCÉNARISÉE d'un joueur (tutoriel uniquement : démonstration du soin d'un coéquipier blessé, comme `knockDown`). À appeler ENTRE deux pas ; ramène les PV d'un joueur VIVANT à
+   * `fraction` de ses PV max (au moins 1, jamais à terre, ne soigne jamais : sans effet s'il est déjà plus bas). Retourne false (aucun effet) si la phase n'est pas 'playing', si l'id est
+   * inconnu, si le joueur n'est pas vivant ou si ses PV sont déjà <= la cible. Déterministe.
+   */
+  woundPlayer(id: PlayerId, fraction: number): boolean {
+    if (this.state.phase !== 'playing') return false;
+    const p = this.state.players.find((q) => q.id === id);
+    if (!p || p.status !== 'alive' || !Number.isFinite(fraction)) return false;
+    const target = Math.max(1, Math.floor(p.maxHp * Math.max(0, Math.min(1, fraction))));
+    if (p.hp <= target) return false;
+    p.hp = target;
+    return true;
+  }
+
+  /**
+   * Cœur / demi-cœur SCÉNARISÉ posé au sol (tutoriel uniquement), avec une durée de vie longue (`ttlMs`) pour qu'il ne disparaisse pas pendant la lecture de la consigne. Événement
+   * `pickupDropped` au pas suivant. À appeler ENTRE deux pas ; retourne false hors phase 'playing'. Ne tire AUCUN flux aléatoire.
+   */
+  spawnScriptedHeart(pos: Vec2, kind: PickupKind, ttlMs: number): boolean {
+    if (this.state.phase !== 'playing' || !isHeartKind(kind) || !Number.isFinite(ttlMs) || !(ttlMs > 0)) return false;
+    this.addPickup(kind, this.findPickupSpot(pos), ttlMs, this.pending);
     return true;
   }
 
@@ -602,7 +639,12 @@ export class GameSimulation implements IGameSimulation {
 
     // (i2) sources de vie : nourriture au sol (vieillissement, ramassage) et cristaux de soin
     if (s.phase === 'playing' || s.phase === 'roomCleared') this.stepMagnets(dt);
-    if (s.phase === 'playing') this.stepLifeSources(dt, events);
+    // Avec l'emplacement cœur, B et le rangement fonctionnent AUSSI pendant le délai de 'roomCleared' (les PV passent à la salle suivante : se soigner et ranger le cœur du dernier ennemi ont encore un sens) ;
+    // sans l'option, l'ancien comportement (phase 'playing' seulement) est conservé tel quel.
+    if (s.phase === 'playing' || (s.heartSlot === true && s.phase === 'roomCleared')) {
+      if (s.heartSlot === true) this.stepHeartUse(arb, events); // B : usage volontaire, AVANT le rangement (un emplacement libéré ce pas peut ranger l'objet sous les pieds)
+      this.stepLifeSources(dt, events);
+    }
 
     // (i3) équipement au sol : vieillissement, verrous, ramassage
     // (aussi pendant 'roomCleared' : l'objet laissé par le dernier ennemi reste ramassable et vieillit pendant le délai avant la salle suivante)
@@ -611,7 +653,7 @@ export class GameSimulation implements IGameSimulation {
     // (i4) appel automatique : objets au sol qu'un joueur ne prend pas (après les ramassages : un objet pris a disparu). Aussi en 'roomCleared' : l'équipement y reste
     // ramassable (le butin du dernier ennemi) et le signal d'un objet pris pendant ce délai doit être purgé.
     if ((s.phase === 'playing' || s.phase === 'roomCleared') && s.autoCallDisabled !== true) {
-      stepAutoCalls(players, s.room.pickups as PickupState[], s.room.gearDrops as GearDropState[], events);
+      stepAutoCalls(players, s.room.pickups as PickupState[], s.room.gearDrops as GearDropState[], events, { heartSlot: s.heartSlot === true });
     }
 
     // (j) morts
@@ -650,6 +692,7 @@ export class GameSimulation implements IGameSimulation {
       p.prev.revive = f.revive;
       p.prev.special = f.special === true;
       p.prev.call = f.call === true;
+      if (s.heartSlot === true) p.prev.heart = f.heart === true; // posé seulement avec l'option : sans elle l'état reste celui d'avant l'ajout
       if (p.status !== 'alive') {
         cancelAutoCall(p);
         cancelCall(p);
@@ -716,7 +759,8 @@ export class GameSimulation implements IGameSimulation {
    *    (touche d'action unique du clavier) ; uniquement en phase 'playing'.
    */
   private arbitrate(frameOf: (p: PlayerState) => ActionFrame): Arbitration {
-    const arb: Arbitration = { reviving: new Set(), interactPressed: {}, swapPressed: new Set(), attacking: new Set(), special: new Set(), call: new Set() };
+    const arb: Arbitration = { reviving: new Set(), interactPressed: {}, swapPressed: new Set(), attacking: new Set(), special: new Set(), call: new Set(), heart: new Set() };
+    const heartSlot = this.state.heartSlot === true;
     const playing = this.state.phase === 'playing';
     for (const p of this.state.players) {
       if (p.status !== 'alive') continue;
@@ -727,12 +771,18 @@ export class GameSimulation implements IGameSimulation {
         arb.reviving.add(p.id);
         continue;
       }
-      if (!playing) continue;
+      if (!playing) {
+        // délai de 'roomCleared' : seul B (utiliser le cœur) reste actif, front montant comme en jeu
+        if (heartSlot && this.state.phase === 'roomCleared' && f.heart === true && p.prev.heart !== true) arb.heart.add(p.id);
+        continue;
+      }
       // Appel : front montant, joueur libre (délai écoulé, pas d'appel en cours). Il prime sur le reste du pas (immobilisation immédiate).
       if (f.call === true && p.prev.call !== true && canStartCall(p)) {
         arb.call.add(p.id);
         continue;
       }
+      // B (utiliser le cœur) : bouton DÉDIÉ, front montant ; il n'a lieu ni pendant un relevage (A prioritaire, `continue` ci-dessus), ni avec un appel accepté ce pas, ni pendant le gel d'un appel.
+      if (heartSlot && f.heart === true && p.prev.heart !== true) arb.heart.add(p.id);
       if (f.special === true && p.prev.special !== true) arb.special.add(p.id);
       const pressed = f.interact && !p.prev.interact;
       if (pressed) arb.interactPressed[p.id] = true;
@@ -1206,6 +1256,7 @@ export class GameSimulation implements IGameSimulation {
    * les leurs. Règle stricte : aussi à la défaite d'équipe (pas de point de reprise). Idempotent : sans équipement, ne fait rien. Émet `gearLost` puis `gearDropped`.
    */
   private loseGear(p: PlayerState, events: SimEvent[]): void {
+    this.loseHeart(p, events); // le cœur rangé est perdu avec l'équipement (mais tombe au sol) : même garde-fou, même idempotence
     const hadBuffs = p.loadout.buffs.length > 0;
     const lost = stripLoadout(p.loadout);
     if (lost.length === 0) {
@@ -1347,7 +1398,9 @@ export class GameSimulation implements IGameSimulation {
         }
       }
     };
-    for (const pk of s.room.pickups as PickupState[]) pull(pk.pos, (p) => p.hp < p.maxHp);
+    // l'aimant ne tire un cœur que vers un porteur qui peut s'en servir : blessé (comportement d'origine) ; avec l'emplacement cœur : qui peut le RANGER (emplacement vide)
+    const heartSlot = s.heartSlot === true;
+    for (const pk of s.room.pickups as PickupState[]) pull(pk.pos, heartSlot ? (p) => p.heart === undefined : (p) => p.hp < p.maxHp);
     for (const d of s.room.gearDrops as GearDropState[]) {
       pull(d.pos, (p) => {
         if (d.lockedFor === p.id) return false;
@@ -1386,10 +1439,23 @@ export class GameSimulation implements IGameSimulation {
   private stepLifeSources(dt: number, events: SimEvent[]): void {
     const s = this.state;
     const pickups = s.room.pickups as PickupState[];
+    const heartSlot = s.heartSlot === true;
     if (pickups.length > 0) {
       agePickups(pickups, dt);
       for (let i = 0; i < pickups.length; ) {
         const pk = pickups[i];
+        if (heartSlot) {
+          // EMPLACEMENT CŒUR : le joueur vivant à l'emplacement VIDE le plus proche RANGE l'objet (blessé ou non, aucun soin) ; emplacement plein : il reste au sol
+          const keeper = heartCollectorFor(s.players, pk.pos, PICKUP_RADIUS);
+          if (!keeper) {
+            i++;
+            continue;
+          }
+          keeper.heart = pk.kind;
+          pickups.splice(i, 1);
+          events.push({ type: 'heartStored', playerId: keeper.id, pickupId: pk.id, kind: pk.kind, pos: { x: pk.pos.x, y: pk.pos.y } });
+          continue;
+        }
         const p = collectorFor(s.players, pk.pos, PICKUP_RADIUS);
         if (!p) {
           i++;
@@ -1401,6 +1467,7 @@ export class GameSimulation implements IGameSimulation {
         events.push({ type: 'pickupCollected', pickupId: pk.id, playerId: p.id, kind: pk.kind, healed, pos: { x: pk.pos.x, y: pk.pos.y } });
       }
     }
+    if (heartSlot) return; // le cristal de soin est VOLONTAIRE avec l'emplacement cœur : il ne soigne plus au contact (voir `stepHeartUse`)
     const crystals = s.room.healCrystals as HealCrystalState[];
     for (const cs of crystals) {
       if (cs.used) continue;
@@ -1414,6 +1481,82 @@ export class GameSimulation implements IGameSimulation {
       cs.used = true;
       events.push({ type: 'crystalUsed', crystalId: cs.id, playerId: p.id, healed, pos: { x: pos.x, y: pos.y } });
     }
+  }
+
+  /** Cristal de soin INTACT le plus proche de `p` dans `HEAL_CRYSTAL_RADIUS` (id), ou null. */
+  private crystalUnderfoot(p: PlayerState): string | null {
+    let best: string | null = null;
+    let bestD = Infinity;
+    const r2 = HEAL_CRYSTAL_RADIUS * HEAL_CRYSTAL_RADIUS;
+    for (const cs of this.state.room.healCrystals as HealCrystalState[]) {
+      if (cs.used) continue;
+      const def = (this.room.healCrystals ?? []).find((c) => c.id === cs.id);
+      if (!def) continue;
+      const d = distSq(p.pos, tileCenter(def.tile[0], def.tile[1]));
+      if (d <= r2 && d < bestD) {
+        best = cs.id;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * B : usage VOLONTAIRE du cœur rangé (option `heartSlot`, joueurs de `arb.heart` dans l'ordre des ids, un effet par appui). `planHeartUse` décide : (a) allié blessé à portée de contact
+   * ([B29]) et cœur rangé → on LE soigne ; (b) cristal de soin sous les pieds et joueur blessé → on utilise le CRISTAL (le cœur rangé reste) ; (c) joueur blessé avec un cœur → il se soigne
+   * lui-même ; (d) sinon rien (`heartRefused`, aucun cœur gaspillé). Soin plafonné au manque, le reste est perdu. Émet `heartUsed` / `crystalUsed` / `heartRefused`.
+   */
+  private stepHeartUse(arb: Arbitration, events: SimEvent[]): void {
+    if (arb.heart.size === 0) return;
+    const s = this.state;
+    for (const p of s.players) {
+      if (!arb.heart.has(p.id) || p.status !== 'alive') continue;
+      const crystalId = this.crystalUnderfoot(p);
+      const plan = planHeartUse(s.players, p, crystalId);
+      if (plan.kind === 'none') {
+        events.push({ type: 'heartRefused', playerId: p.id });
+      } else if (plan.kind === 'crystal') {
+        const cs = (s.room.healCrystals as HealCrystalState[]).find((c) => c.id === plan.crystalId);
+        const def = (this.room.healCrystals ?? []).find((c) => c.id === plan.crystalId);
+        if (!cs || !def) continue;
+        const pos = tileCenter(def.tile[0], def.tile[1]);
+        const healed = healAmountFor(p, HEAL_CRYSTAL_HEAL);
+        p.hp = Math.min(p.maxHp, p.hp + healed);
+        cs.used = true;
+        events.push({ type: 'crystalUsed', crystalId: cs.id, playerId: p.id, healed, pos: { x: pos.x, y: pos.y } });
+      } else {
+        const target = plan.kind === 'ally' ? plan.target : p;
+        const kind = p.heart as PickupKind;
+        const amount = heartUseAmount(p, target);
+        target.hp = Math.min(target.maxHp, target.hp + amount);
+        delete p.heart;
+        events.push({ type: 'heartUsed', playerId: p.id, targetId: target.id, kind, amount, pos: { x: target.pos.x, y: target.pos.y } });
+      }
+    }
+  }
+
+  /**
+   * Pose un cœur / demi-cœur au sol (le sien : id du compteur `nextPickupId`, durée `ttlMs`) et émet `pickupDropped`. Sert à la perte du cœur rangé (durée habituelle) et au tutoriel
+   * (`spawnScriptedHeart`).
+   */
+  private addPickup(kind: PickupKind, pos: Vec2, ttlMs: number, events: SimEvent[]): void {
+    const s = this.state;
+    const id = s.nextPickupId ?? 1;
+    s.nextPickupId = id + 1;
+    (s.room.pickups as PickupState[]).push({ id, kind, pos: { x: pos.x, y: pos.y }, ttlMs });
+    events.push({ type: 'pickupDropped', pickupId: id, kind, pos: { x: pos.x, y: pos.y } });
+  }
+
+  /**
+   * Un joueur TOMBÉ perd son cœur rangé : il tombe AU SOL à ses pieds (cœur ou demi-cœur identique, ramassable sans verrou, durée de vie habituelle `PICKUP_TTL_MS`) ; événements `heartLost` (la
+   * sauvegarde enregistre la perte dès la chute) puis `pickupDropped`. Idempotent : emplacement vide, ne fait rien. Sans l'option `heartSlot`, l'emplacement est toujours vide.
+   */
+  private loseHeart(p: PlayerState, events: SimEvent[]): void {
+    const kind = p.heart;
+    if (kind === undefined) return;
+    delete p.heart;
+    events.push({ type: 'heartLost', playerId: p.id, kind, pos: { x: p.pos.x, y: p.pos.y } });
+    this.addPickup(kind, this.findPickupSpot(p.pos), PICKUP_TTL_MS, events);
   }
 
   // ── (l) Sortie ──
@@ -1540,6 +1683,9 @@ export function createSimulation(config: SimConfig, level: LevelDef): GameSimula
   players.forEach((p, i) => {
     const g = config.initialGear?.[i];
     if (g) p.loadout = { ...normalizeGear(g), buffs: [] };
+    // reprise : cœur rangé (valeur inconnue = vide ; sans l'option, l'emplacement reste vide et le champ absent)
+    const h = config.initialHearts?.[i];
+    if (config.heartSlot === true && isHeartKind(h)) p.heart = h;
   });
   const state: GameState = {
     version: 1,
@@ -1561,6 +1707,7 @@ export function createSimulation(config: SimConfig, level: LevelDef): GameSimula
     lootDryKills: 0,
     nextPickupId: 1,
     ...(config.autoCall === false ? { autoCallDisabled: true } : {}),
+    ...(config.heartSlot === true ? { heartSlot: true } : {}),
     gearEnabled: config.gear !== false,
     gearRngState: seedToState((Number.isFinite(config.seed) ? Math.floor(config.seed) | 0 : 0) ^ GEAR_SEED_XOR),
     nextGearDropId: 1,

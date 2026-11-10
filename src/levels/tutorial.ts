@@ -5,7 +5,7 @@
  * `src/tutorial/`). Ce niveau n'est JAMAIS dans `LEVELS` (src/levels/index.ts) : il n'apparaît ni dans la campagne, ni dans
  * le menu « niveau de départ », ni dans les sauvegardes. Il est quand même validé par `validateLevel` (tests).
  *
- * Une salle = un chapitre (7 salles). Contraintes de conception :
+ * Une salle = un chapitre (8 salles). Contraintes de conception :
  *  - `playerSpawns[0]` = le joueur, `playerSpawns[1]` = le partenaire scripté (les deux autres servent de bourrage : la
  *    validation exige 4 spawns reliés) ;
  *  - toutes les cibles du partenaire sont sur la RANGÉE 6 (centre des passages de 5 tuiles, rangées 4..8) : il avance en
@@ -189,7 +189,22 @@ const revive: RoomDef = {
   exit: { rect: EXIT, requires: ['d_revive'] },
 };
 
-// ───────────────────────────── Salle 6 : l'appel (grande salle : le partenaire est hors de la vue) ─────────────────────────────
+// ───────────────────────────── Salle 6 : la réserve (emplacement cœur : ranger, se soigner, soigner un allié, appel automatique) ─────────────────────────────
+
+const heart: RoomDef = {
+  id: 't_heart',
+  nameKey: 'room.tutorial.t_heart.name',
+  theme: 'crypt',
+  layout: hall(W, H, [], [[14, 2], [14, 9], [22, 2], [22, 9]]),
+  // le partenaire attend sur la rangée 6 (x = 18) : les cœurs sont posés par le script de l'étape (voir `TutorialStepDef.script`), tous sur la même rangée
+  playerSpawns: [[3, 5], [18, 6], [3, 7], [4, 7]],
+  enemies: [],
+  mechanisms: [decorBrazier([27, 2])],
+  decor: wallTorches([6, 18, 30]),
+  exit: { rect: EXIT, requires: [] },
+};
+
+// ───────────────────────────── Salle 7 : l'appel (grande salle : le partenaire est hors de la vue) ─────────────────────────────
 
 const callPillars: TileXY[] = [];
 for (let x = 8; x <= 56; x += 8) callPillars.push([x, 2], [x, 10]);
@@ -207,7 +222,7 @@ const call: RoomDef = {
   exit: { rect: { x: 61, y: 5, w: 2, h: 4 }, requires: [] },
 };
 
-// ───────────────────────────── Salle 7 : le sceau (mort d'équipe, objectifs, sortie finale) ─────────────────────────────
+// ───────────────────────────── Salle 8 : le sceau (mort d'équipe, objectifs, sortie finale) ─────────────────────────────
 
 const seal: RoomDef = {
   id: 't_seal',
@@ -234,7 +249,7 @@ export const tutorialLevel: LevelDef = {
   // texte jamais joué (le tutoriel n'a pas de dialogue) mais exigé par la validation
   intro: [{ speaker: 'aldric', textKey: 'level.tutorial.intro.1' }],
   outro: [{ speaker: 'aldric', textKey: 'level.tutorial.outro.1' }],
-  rooms: [yard, workshop, vault, dark, revive, call, seal],
+  rooms: [yard, workshop, vault, dark, revive, heart, call, seal],
   objectives: [
     { id: 'o_kills', slot: 0, roomId: 't_yard', kind: 'kills', count: 2, labelKey: 'objective.tutorial.o_kills' },
     { id: 'o_lever', slot: 1, roomId: 't_workshop', kind: 'mechanism', mechanismId: 'lv1', labelKey: 'objective.tutorial.o_lever' },

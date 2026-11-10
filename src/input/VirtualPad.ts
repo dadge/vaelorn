@@ -26,7 +26,7 @@ export const VIRTUAL_PAD_BUTTON_COUNT = 16;
 
 /**
  * Contrôles à bouton de la manette virtuelle : le losange A / B / X / Y et la pause. Chacun envoie le VRAI bouton standard
- * du même nom (A = action, X = appel, Y = attaque spéciale, B = « retour » dans les menus, sans effet en jeu ; pause = Start).
+ * du même nom (A = action, B = utiliser le cœur rangé en jeu et « retour » dans les menus, X = appel, Y = attaque spéciale ; pause = Start).
  */
 export type VirtualButton = 'a' | 'b' | 'x' | 'y' | 'pause';
 

@@ -87,24 +87,24 @@ describe('manette virtuelle : vue comme une manette d’indice 4', () => {
     expect(f.call).toBe(false);
   });
 
-  it('A = action contextuelle, Y = spécial, X (vrai X) = appel, B = AUCUN effet en jeu', () => {
+  it('A = action contextuelle, B = utiliser le cœur, Y = spécial, X (vrai X) = appel : chaque bouton ne déclenche QUE sa propre action', () => {
     pad.setConnected(true);
     const { mgr } = makeManager();
     pad.pressButton(1, 'a');
     let f = mgr.poll()[0]!;
-    expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([true, true, true, false, false]);
+    expect([f.attack, f.interact, f.revive, f.special, f.call, f.heart]).toEqual([true, true, true, false, false, false]);
     pad.releasePointer(1);
     pad.pressButton(1, 'b');
     f = mgr.poll()[0]!;
-    expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([false, false, false, false, false]);
+    expect([f.attack, f.interact, f.revive, f.special, f.call, f.heart]).toEqual([false, false, false, false, false, true]);
     pad.releasePointer(1);
     pad.pressButton(1, 'y');
     f = mgr.poll()[0]!;
-    expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([false, false, false, true, false]);
+    expect([f.attack, f.interact, f.revive, f.special, f.call, f.heart]).toEqual([false, false, false, true, false, false]);
     pad.releasePointer(1);
     pad.pressButton(1, 'x');
     f = mgr.poll()[0]!;
-    expect([f.attack, f.interact, f.revive, f.special, f.call]).toEqual([false, false, false, false, true]);
+    expect([f.attack, f.interact, f.revive, f.special, f.call, f.heart]).toEqual([false, false, false, false, true, false]);
   });
 
   it('stick -> moveX / moveY (y négatif = haut), amplitude analogique', () => {
@@ -223,7 +223,7 @@ describe('manette virtuelle : écran « rejoindre » (attribution explicite)', (
     expect(mgr.getDisconnectedPlayers()).toEqual([]);
     pad.setConnected(false); // rotation en portrait, ou vraie manette branchée
     expect(mgr.getDisconnectedPlayers()).toEqual([0]);
-    expect(mgr.poll()[0]).toEqual({ moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false });
+    expect(mgr.poll()[0]).toEqual({ moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false, heart: false });
     pad.setConnected(true);
     expect(mgr.getDisconnectedPlayers()).toEqual([]);
   });
@@ -342,7 +342,7 @@ describe('fournisseur par défaut', () => {
 });
 
 describe('manette virtuelle : passage de relais avec les vraies manettes', () => {
-  const emptyFrameLike = { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false };
+  const emptyFrameLike = { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false, heart: false };
 
   it('vraie manette branchée après inscription au pad virtuel : le joueur la reprend (plus de déconnexion permanente)', () => {
     pad.setConnected(true);

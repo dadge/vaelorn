@@ -14,14 +14,17 @@
  * niveau). La perte (`gearLost`) est écrite au moment même de la chute ; une défaite collective ('restart') ne change PAS la salle de reprise, mais enregistre
  * l'équipement (alors vide : règle stricte, pas de point de reprise) : « Continuer » ne ressuscite donc jamais l'équipement perdu. Écrit seulement si l'équipement
  * a réellement changé.
+ * CŒUR RANGÉ (emplacement cœur, champ optionnel du schéma v3) : avec `heartProvider`, même cycle que l'équipement. Écrit au début de chaque salle ('start' | 'next' ; et à la défaite
+ * collective, où il est alors vide), remis à zéro à la fin d'un niveau ; la perte (`heartLost`) est écrite DÈS la chute, comme `gearLost`, et l'USAGE (`heartUsed`) DÈS qu'il a lieu : quitter puis « Continuer » ne restitue jamais un
+ * cœur perdu (le cœur tombé au sol n'est pas sauvegardé : le sol est neuf à chaque début de salle).
  * Une écriture identique à la dernière valeur connue du stockage est sautée. Une écriture qui échoue est signalée via
  * `onError` (une seule fois par type d'erreur consécutif) et retentée à la prochaine salle.
  *
  * `enabled: false` (mode `?quick=1`, `?nosave=1`, paramètres de dev) : l'état est suivi mais RIEN n'est jamais écrit.
  */
-import { applySimEvents, newGameSave, serializeSave, withGear, type SaveContext, type SaveGame } from './save';
+import { applySimEvents, newGameSave, serializeSave, withGear, withHearts, type SaveContext, type SaveGame } from './save';
 import type { SaveRepository, SaveStorageError } from './saveRepository';
-import type { PlayerGear, PlayerSetup, SimEvent } from './types';
+import type { PickupKind, PlayerGear, PlayerSetup, SimEvent } from './types';
 
 export interface AutoSaverOptions {
   repository: SaveRepository;
@@ -41,6 +44,8 @@ export interface AutoSaverOptions {
   enabled?: boolean;
   /** Équipement courant de chaque joueur (dans l'ordre de `players`), lu à chaque début de salle. Absent : l'équipement n'est pas sauvegardé. */
   gearProvider?: () => readonly PlayerGear[];
+  /** Cœur rangé de chaque joueur (dans l'ordre de `players`, indéfini = emplacement vide), lu à chaque début de salle. Absent : le cœur rangé n'est pas sauvegardé. */
+  heartProvider?: () => readonly (PickupKind | undefined)[];
   /** Appelé quand une écriture échoue (quota, stockage bloqué). */
   onError?: (error: SaveStorageError) => void;
 }
@@ -56,6 +61,7 @@ export class AutoSaver {
   private readonly enabled: boolean;
   private readonly onError?: (error: SaveStorageError) => void;
   private readonly gearProvider?: () => readonly PlayerGear[];
+  private readonly heartProvider?: () => readonly (PickupKind | undefined)[];
   /** Dernière erreur d'écriture (null après une écriture réussie). */
   lastError: SaveStorageError | null = null;
   /** Nombre d'écritures réussies. */
@@ -68,6 +74,7 @@ export class AutoSaver {
     this.enabled = options.enabled !== false;
     this.onError = options.onError;
     this.gearProvider = options.gearProvider;
+    this.heartProvider = options.heartProvider;
     if (options.existing) {
       this.current = options.existing;
       this.lastWritten = serializeSave(options.existing);
@@ -95,14 +102,15 @@ export class AutoSaver {
   /** À appeler avec les événements de chaque pas de simulation. Retourne true si une écriture a eu lieu. */
   handleEvents(events: readonly SimEvent[]): boolean {
     const relevant = events.some(
-      (e) => (e.type === 'roomEntered' && (e.reason === 'start' || e.reason === 'next')) || e.type === 'levelCompleted' || e.type === 'gearLost',
+      (e) => (e.type === 'roomEntered' && (e.reason === 'start' || e.reason === 'next')) || e.type === 'levelCompleted' || e.type === 'gearLost' || e.type === 'heartLost' || e.type === 'heartUsed',
     );
-    // défaite collective : la salle de reprise ne change pas, mais l'équipement (perdu) est enregistré
-    const restart = this.gearProvider !== undefined && events.some((e) => e.type === 'roomEntered' && e.reason === 'restart');
+    // défaite collective : la salle de reprise ne change pas, mais l'équipement et le cœur (perdus) sont enregistrés
+    const restart = (this.gearProvider !== undefined || this.heartProvider !== undefined) && events.some((e) => e.type === 'roomEntered' && e.reason === 'restart');
     if (!relevant && !restart) return false;
     this.current = applySimEvents(this.current, this.levelId, events, this.context);
-    if (this.gearProvider && events.some((e) => e.type === 'roomEntered') && !events.some((e) => e.type === 'levelCompleted')) {
-      this.current = withGear(this.current, this.gearProvider());
+    if (events.some((e) => e.type === 'roomEntered') && !events.some((e) => e.type === 'levelCompleted')) {
+      if (this.gearProvider) this.current = withGear(this.current, this.gearProvider());
+      if (this.heartProvider) this.current = withHearts(this.current, this.heartProvider());
     }
     if (!this.enabled) return false;
     const data = serializeSave(this.current);

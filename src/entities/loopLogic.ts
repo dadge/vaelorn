@@ -2,8 +2,11 @@
  * Logique PURE de la boucle de jeu de GameScene : accumulateur de temps réel → pas de simulation fixes,
  * et verrouillage des appuis courts (un bouton pressé puis relâché entre deux pas n'est jamais perdu).
  */
-import { SIM_STEP_MS } from '../core/constants';
+import { MAX_PLAYERS, SIM_STEP_MS } from '../core/constants';
 import type { ActionFrame, PlayerId, TickInputs } from '../core/types';
+
+/** Identifiants de joueur possibles (0..MAX_PLAYERS-1). */
+const PLAYER_IDS: readonly PlayerId[] = Array.from({ length: MAX_PLAYERS }, (_, i) => i as PlayerId);
 
 /** Nombre maximal de pas de simulation par frame de rendu (évite la spirale de la mort). */
 export const MAX_STEPS_PER_FRAME = 5;
@@ -60,6 +63,8 @@ function mergeFrame(a: ActionFrame | undefined, b: ActionFrame | undefined): Act
     special: a.special === true || b.special === true,
     // idem pour `call` (optionnel) : un appui court sur « appeler » entre deux pas ne doit pas être perdu
     call: a.call === true || b.call === true,
+    // idem pour `heart` (B, utiliser le cœur) : un appui court entre deux pas ne doit pas être perdu
+    heart: a.heart === true || b.heart === true,
   };
 }
 
@@ -70,9 +75,80 @@ function mergeFrame(a: ActionFrame | undefined, b: ActionFrame | undefined): Act
 export function mergeTickInputs(prev: TickInputs | null, next: TickInputs): TickInputs {
   if (!prev) return next;
   const out: TickInputs = {};
-  for (const id of [0, 1, 2, 3] as PlayerId[]) {
+  for (const id of PLAYER_IDS) {
     const m = mergeFrame(prev[id], next[id]);
     if (m) out[id] = m;
   }
   return out;
+}
+
+/**
+ * Entrées avec `heart` (B) forcé à faux pour tous les joueurs, SANS modifier l'argument. Renvoie l'argument lui-même s'il n'y a rien à masquer (aucune allocation).
+ */
+export function maskHeartInputs(inputs: TickInputs): TickInputs {
+  let any = false;
+  for (const id of PLAYER_IDS) if (inputs[id]?.heart === true) any = true;
+  if (!any) return inputs;
+  const out: TickInputs = {};
+  for (const id of PLAYER_IDS) {
+    const f = inputs[id];
+    if (f) out[id] = f.heart === true ? { ...f, heart: false } : f;
+  }
+  return out;
+}
+
+/**
+ * GARDE du bouton B (« utiliser le cœur »), PAR JOUEUR. Dans les menus, la pause et les dialogues, B est « retour » : le B qui vient de fermer la pause (ou qui était encore tenu à l'ouverture de la
+ * scène) ne doit JAMAIS soigner au pas suivant. Armée, la garde masque le B de chaque joueur jusqu'à ce qu'un relevé le montre RELÂCHÉ chez CE joueur : il se désarme alors seul et son prochain
+ * appui est un vrai front montant pour la simulation. Un joueur qui garde B enfoncé n'empêche donc jamais un autre joueur d'utiliser le sien. Pure (aucune horloge) et déterministe.
+ */
+export class HeartInputGuard {
+  private readonly armed: boolean[] = PLAYER_IDS.map(() => false);
+
+  /** @param armed armée dès la création (défaut true : une scène qui démarre avec B encore tenu ne soigne pas) */
+  constructor(armed = true) {
+    if (armed) this.arm();
+  }
+
+  /** Arme la garde pour tous les joueurs (fermeture de la pause, reprise après un menu). */
+  arm(): void {
+    this.armed.fill(true);
+  }
+
+  get isArmed(): boolean {
+    return this.armed.some(Boolean);
+  }
+
+  /** Filtre les entrées d'un relevé : masque le B des joueurs armés qui le tiennent ; un joueur armé dont B est relâché (ou absent) est désarmé. */
+  filter(inputs: TickInputs): TickInputs {
+    if (!this.isArmed) return inputs;
+    let out = inputs;
+    for (const id of PLAYER_IDS) {
+      if (!this.armed[id]) continue;
+      const f = inputs[id];
+      if (f?.heart === true) {
+        if (out === inputs) out = { ...inputs };
+        out[id] = { ...f, heart: false };
+      } else {
+        this.armed[id] = false;
+      }
+    }
+    return out;
+  }
+}
+
+/** Options de simulation qui dépendent du MODE de la scène (partie normale, tutoriel, démo). Pure : testée, GameScene n'a plus qu'à la déballer. */
+export interface ModeSimFlags {
+  /** équipement : partie normale uniquement */
+  gear: boolean;
+  /** butin de vie aléatoire : partie normale et démo (le tutoriel pose ses cœurs par script) */
+  loot: boolean;
+  /** appel automatique : partie normale et tutoriel (il y enseigne « emplacement plein = appel »), pas en démo */
+  autoCall: boolean;
+  /** emplacement cœur : partie normale et tutoriel (il l'enseigne), PAS en démo (les pilotes automatiques n'utilisent pas B : ancien comportement) */
+  heartSlot: boolean;
+}
+
+export function modeSimFlags(mode: { tutorial: boolean; demo: boolean }): ModeSimFlags {
+  return { gear: !mode.tutorial && !mode.demo, loot: !mode.tutorial, autoCall: !mode.demo, heartSlot: !mode.demo };
 }

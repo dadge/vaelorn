@@ -963,6 +963,7 @@ export class MenuScene extends Phaser.Scene {
           [t('controls.move'), t('controls.keyboard.move')],
           [t('controls.action'), t('controls.keyboard.action')],
           [t('pad.controls.special'), t('pad.controls.keyboard.special')],
+          [t('heart.controls.label'), t('heart.controls.keyboard')],
           [t('call.controls.label'), t('call.controls.keyboard')],
           [t('controls.pause'), t('controls.keyboard.pause')],
           [t('controls.menus'), t('controls.keyboard.menu')],
@@ -973,9 +974,10 @@ export class MenuScene extends Phaser.Scene {
         header: t('controls.gamepad'),
         lines: [
           [t('controls.move'), t('controls.gamepad.move')],
-          // Schéma à trois boutons : A action (relever, interagir, attaquer), Y spécial, X appel, Start pause ; tous les autres
-          // boutons n'ont aucun effet en jeu. A / B ne servent qu'à valider / revenir dans les menus.
+          // Schéma à quatre boutons : A action (relever, interagir, attaquer), B utiliser le cœur rangé, Y spécial, X appel, Start pause ; tous les autres
+          // boutons n'ont aucun effet en jeu. A / B valident / reviennent aussi dans les menus.
           [t('controls.action'), t('controls.gamepad.action')],
+          [t('heart.controls.label'), t('heart.controls.gamepad')],
           [t('pad.controls.special'), t('pad.controls.gamepad.special')],
           [t('call.controls.label'), t('call.controls.gamepad')],
           [t('controls.pause'), t('controls.gamepad.pause')],
@@ -989,7 +991,7 @@ export class MenuScene extends Phaser.Scene {
       for (const [label, value] of col.lines) {
         add(createText(this, col.x, y, label, { size: 'sm', color: UI_THEME.textDim, wrapWidth: colW }));
         add(createText(this, col.x + 12, y + 18, value, { size: 'sm', color: UI_THEME.text, wrapWidth: colW - 12 }));
-        y += 36; // 5 lignes au clavier, 6 à la manette (« Menus » : A valider, B retour)
+        y += 36; // 7 lignes par colonne (déplacement, action, cœur, spécial, appel, pause, menus) : la dernière finit avant l'indice de relevage (py + 390)
       }
     }
     add(createText(this, GAME_WIDTH / 2, py + 390, t('hint.revive'), { size: 'sm', color: UI_THEME.accent, origin: [0.5, 0.5], align: 'center', wrapWidth: pw - 80 }));

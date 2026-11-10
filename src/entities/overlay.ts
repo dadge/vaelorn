@@ -406,7 +406,7 @@ export class PauseMenu {
     const cx = GAME_WIDTH / 2;
     const cy = GAME_HEIGHT / 2;
     this.dim = hudRect(ctx, cx, cy, GAME_WIDTH, GAME_HEIGHT, 0x05040a, 0.66, HUD_DEPTH.pause);
-    this.panel = hudRect(ctx, cx, cy, 520, 372, 0x1c1530, 0.97, HUD_DEPTH.pause + 1); // 372 : la ligne de commandes (spécial, appeler) peut occuper 4 lignes
+    this.panel = hudRect(ctx, cx, cy, 520, 392, 0x1c1530, 0.97, HUD_DEPTH.pause + 1); // 392 : la ligne de commandes (cœur, spécial, appeler) peut occuper 5 lignes
     this.panel.setStrokeStyle(3, 0xf0e2b0, 1);
     this.title = hudText(ctx, cx, cy - 140, '', { size: 38, originX: 0.5, color: 0xf0e2b0, depth: HUD_DEPTH.pause + 2 });
     PAUSE_ITEMS.forEach((_, i) => {

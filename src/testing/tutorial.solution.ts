@@ -8,6 +8,7 @@ import { SIM_STEP_MS } from '../core/constants';
 import { createSimulation, type GameSimulation } from '../core/simulation';
 import type { ActionFrame, CharacterId, GameState, PlayerId, SimEvent, Vec2 } from '../core/types';
 import { TUTORIAL_LEVEL_ID, TUTORIAL_SEED, tutorialLevel } from '../levels/tutorial';
+import { applyScripted } from '../entities/tutorialRuntime';
 import { TutorialDirector } from '../tutorial/TutorialDirector';
 import type { HudRegionId } from '../tutorial/types';
 
@@ -17,7 +18,7 @@ const px = (tx: number, ty: number): Vec2 => ({ x: (tx + 0.5) * 16, y: (ty + 0.5
 
 /** Entrées vides. */
 export function idleFrame(): ActionFrame {
-  return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false };
+  return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false, heart: false };
 }
 
 /** Stratégie de l'humain scripté. */
@@ -60,9 +61,11 @@ export class TutorialRun {
         ],
         seed: opts.seed ?? TUTORIAL_SEED,
         startRoomIndex: opts.startRoomIndex,
-        // comme GameScene : le tutoriel ne produit ni n'accepte d'objets d'équipement
+        // comme GameScene : le tutoriel ne produit ni n'accepte d'objets d'équipement ni de butin aléatoire (les cœurs sont posés par le script)
         gear: false,
-        autoCall: false, // idem : le tutoriel n'a pas d'appel automatique
+        loot: false,
+        autoCall: true, // l'appel automatique y est actif : « emplacement plein = appel automatique avec le symbole du cœur »
+        heartSlot: true, // emplacement cœur : ranger, B sur soi, B sur un coéquipier blessé
       },
       tutorialLevel,
     );
@@ -95,6 +98,7 @@ export class TutorialRun {
     const events = this.sim.step(SIM_STEP_MS, { 0: human, 1: partner });
     this.director.observe(events, state, { regions: ALL_REGIONS });
     for (const id of this.director.takeKnockDowns()) this.sim.knockDown(id);
+    for (const a of this.director.takeScripted()) applyScripted(this.sim, a);
     for (const e of events) this.events.push(e);
     if (state.roomIndex === 0) this.partnerMinHp = Math.min(this.partnerMinHp, state.players[1].hp);
     if (this.opts.dieAtMs !== undefined && !this.dieDone && state.timeMs >= this.opts.dieAtMs && state.roomIndex === 0) {
@@ -242,6 +246,33 @@ export class TutorialRun {
           return w.arrived ? { ...idleFrame(), revive: true } : w.f;
         }
         return idleFrame();
+      }
+      case 'heartStore': {
+        // marche sur le cœur posé au sol (rangée 6)
+        const pk = state.room.pickups?.[0];
+        return pk ? this.walk(pos, pk.pos, 2).f : idleFrame();
+      }
+      case 'heartSelf': {
+        // blessé avec un cœur rangé : appui court sur B (front montant)
+        this.pulse++;
+        return { ...idleFrame(), heart: this.pulse % 6 < 3 };
+      }
+      case 'heartAlly': {
+        // sans cœur rangé : va ramasser celui du sol ; avec un cœur : se place SUR le coéquipier blessé et appuie sur B
+        const partner = state.players[1];
+        if (me.heart === undefined) {
+          const pk = state.room.pickups?.[0];
+          return pk ? this.walk(pos, pk.pos, 2).f : idleFrame();
+        }
+        const w = this.walk(pos, partner.pos, 6);
+        if (!w.arrived) return w.f;
+        this.pulse++;
+        return { ...idleFrame(), heart: this.pulse % 6 < 3 };
+      }
+      case 'heartFull': {
+        // deux cœurs au sol : le premier est rangé, en passant sur le second l'emplacement est plein (appel automatique)
+        const target = state.room.pickups?.[0];
+        return target ? this.walk(pos, target.pos, 2).f : idleFrame();
       }
       case 'callReceive':
         return this.walk(pos, state.players[1].pos, 30).f;

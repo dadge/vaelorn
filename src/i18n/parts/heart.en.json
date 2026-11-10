@@ -1,0 +1,7 @@
+{
+  "heart.controls.gamepad": "B button",
+  "heart.controls.keyboard": "B",
+  "heart.controls.label": "Use the heart",
+  "heart.stored.full": "♥ stored",
+  "heart.stored.half": "½ ♥ stored"
+}

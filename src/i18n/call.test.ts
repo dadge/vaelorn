@@ -71,13 +71,14 @@ describe('i18n « appeler »', () => {
     }
   });
 
-  it('rappel de la pause et panneau Contrôles : libellés explicites des actions, schéma A / Y / X / Start', () => {
+  it('rappel de la pause et panneau Contrôles : libellés explicites des actions, schéma A / B / Y / X / Start', () => {
     setLanguage('fr');
-    expect(t('game.pause.controls.gamepad')).toBe('A : action - Y : spécial - X : appeler - Start : pause');
+    expect(t('game.pause.controls.gamepad')).toBe('A : action - B : cœur - Y : spécial - X : appeler - Start : pause');
     expect(t('game.pause.controls.keyboard')).toContain('C : appeler');
+    expect(t('game.pause.controls.keyboard')).toContain('B : cœur');
     expect(t('controls.keyboard.menu')).toContain('Échap');
     setLanguage('en');
-    expect(t('game.pause.controls.gamepad')).toBe('A: action - Y: special - X: call - Start: pause');
+    expect(t('game.pause.controls.gamepad')).toBe('A: action - B: heart - Y: special - X: call - Start: pause');
     expect(t('controls.keyboard.menu')).toContain('Esc');
     expect(t('game.pause.hint')).toContain('Start');
     setLanguage('fr');

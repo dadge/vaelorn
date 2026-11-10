@@ -47,3 +47,19 @@ describe('sons : appel', () => {
     s.destroy();
   });
 });
+
+describe('sons : emplacement cœur', () => {
+  it('rangement, usage et refus ont chacun leur son discret ; heartLost n ajoute pas de son (pickupDropped joue déjà le « pop » du cœur tombé)', () => {
+    expect(sfxForEvent({ type: 'heartStored', playerId: 0, pickupId: 1, kind: 'full', pos: { x: 0, y: 0 } })).toBe('heartStore');
+    expect(sfxForEvent({ type: 'heartUsed', playerId: 0, targetId: 1, kind: 'half', amount: 5, pos: { x: 0, y: 0 } })).toBe('heartUse');
+    expect(sfxForEvent({ type: 'heartRefused', playerId: 0 })).toBe('heartRefuse');
+    expect(sfxForEvent({ type: 'heartLost', playerId: 0, kind: 'full', pos: { x: 0, y: 0 } })).toBeNull();
+    expect(sfxForEvent({ type: 'pickupDropped', pickupId: 1, kind: 'full', pos: { x: 0, y: 0 } })).toBe('pickupDrop');
+  });
+
+  it('les trois sons se jouent sans audio (Node) sans lever ; le refus est plus discret que l usage', () => {
+    const s = new Sfx();
+    for (const n of ['heartStore', 'heartUse', 'heartRefuse'] as const) expect(() => s.play(n)).not.toThrow();
+    s.destroy();
+  });
+});

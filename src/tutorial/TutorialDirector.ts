@@ -28,6 +28,7 @@ import {
   stepSignNear,
   type ConditionCtx,
 } from './conditions';
+import { tileCenterPx } from '../core/mechanisms';
 import { loadProgram, newVm, resolveTarget, stepVm } from './partnerScript';
 import { TUTORIAL_STEPS, firstStepIndexOfRoom, isExitStep } from './steps';
 import type {
@@ -36,6 +37,7 @@ import type {
   MarkerSpec,
   PartnerOp,
   ResolvedMarker,
+  ScriptedAction,
   TutorialState,
   TutorialStepDef,
   TutorialView,
@@ -126,6 +128,8 @@ export class TutorialDirector {
       wipeDone: false,
       knocked: false,
       pendingKnock: [],
+      scripted: false,
+      pendingScript: [],
       flash: null,
       phase: 'playing',
       backlog: [],
@@ -196,6 +200,7 @@ export class TutorialDirector {
     s.lastPos = null;
     s.signNear = { id: null, ms: 0 };
     s.knocked = false;
+    s.scripted = false;
     if (clearBacklog) {
       s.backlog = [];
       s.backlogN = 0;
@@ -312,6 +317,14 @@ export class TutorialDirector {
         s.knocked = true;
         for (const id of def.knockDown.ids) if (!s.pendingKnock.includes(id)) s.pendingKnock.push(id);
       }
+      if (def.script && !s.scripted && gateOpen && s.activeMs >= def.script.afterMs) {
+        s.scripted = true;
+        for (const w of def.script.wound ?? []) s.pendingScript.push({ k: 'wound', id: w.id, fraction: w.fraction });
+        for (const h of def.script.hearts ?? []) {
+          const at = tileCenterPx(h.tile);
+          s.pendingScript.push({ k: 'heart', x: at.x, y: at.y, kind: h.kind });
+        }
+      }
     }
     // validation (aussi hors phase 'playing' : `roomCleared` / `levelCompleted` arrivent au pas où la phase change)
     if (gateOpen && s.activeMs >= def.minMs) {
@@ -355,6 +368,13 @@ export class TutorialDirector {
   takeKnockDowns(): PlayerId[] {
     const out = this.s.pendingKnock;
     this.s.pendingKnock = [];
+    return out;
+  }
+
+  /** Mises en scène du soin (blessures, cœurs posés) à appliquer à la simulation (`applyScripted`), une seule fois par étape. */
+  takeScripted(): ScriptedAction[] {
+    const out = this.s.pendingScript;
+    this.s.pendingScript = [];
     return out;
   }
 

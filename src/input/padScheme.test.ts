@@ -1,10 +1,10 @@
 /**
- * Schéma de manette à TROIS boutons (demande du joueur) :
- *   A = action contextuelle (relever, interagir, attaquer) ; X = appeler les alliés ; Y = attaque spéciale ; Start = pause ;
- *   TOUS les autres boutons sont SANS EFFET en jeu.
+ * Schéma de manette à QUATRE boutons (A B X Y) :
+ *   A = action contextuelle (relever, interagir, attaquer) ; B = utiliser le cœur rangé (emplacement cœur) ; X = appeler les alliés ;
+ *   Y = attaque spéciale ; Start = pause ; TOUS les autres boutons sont SANS EFFET en jeu.
  * Exceptions documentées (hors jeu) : dans les menus A = confirmer et B = retour ; Select / Back = « passer » du tutoriel.
  *
- * Ces tests parcourent les 17 boutons du mapping standard (0..16) : ils échouent si un bouton « parasite » (B, LB, RB, LT, RT,
+ * Ces tests parcourent les 17 boutons du mapping standard (0..16) : ils échouent si un bouton « parasite » (LB, RB, LT, RT,
  * Back, appuis de sticks, Home…) reprend un effet en jeu, ou si les menus perdent A / B / croix / stick.
  */
 import { describe, expect, it } from 'vitest';
@@ -37,36 +37,37 @@ function padLike(index: number, pressed: number[] = []): GamepadLike {
   return { index, id: `Pad ${index}`, connected: true, ...snap(pressed) };
 }
 
-/** Ne garde que les champs « action » d'une frame (sans le déplacement). */
-function actions(f: ReturnType<typeof gamepadToFrame>): [boolean, boolean, boolean, boolean, boolean] {
-  return [f.attack, f.interact, f.revive, f.special === true, f.call === true];
+/** Ne garde que les champs « action » d'une frame (sans le déplacement) : attack, interact, revive, special, call, heart. */
+function actions(f: ReturnType<typeof gamepadToFrame>): [boolean, boolean, boolean, boolean, boolean, boolean] {
+  return [f.attack, f.interact, f.revive, f.special === true, f.call === true, f.heart === true];
 }
 
-describe('manette en jeu : seuls A, X, Y ont un effet (parcours des 17 boutons)', () => {
+describe('manette en jeu : seuls A, B, X, Y ont un effet (parcours des 17 boutons)', () => {
   const b = createDefaultBindings();
 
-  // attack, interact, revive, special, call
-  const EXPECTED: Record<number, [boolean, boolean, boolean, boolean, boolean]> = {
-    [PAD_BUTTON.A]: [true, true, true, false, false],
-    [PAD_BUTTON.X]: [false, false, false, false, true],
-    [PAD_BUTTON.Y]: [false, false, false, true, false],
+  // attack, interact, revive, special, call, heart
+  const EXPECTED: Record<number, [boolean, boolean, boolean, boolean, boolean, boolean]> = {
+    [PAD_BUTTON.A]: [true, true, true, false, false, false],
+    [PAD_BUTTON.B]: [false, false, false, false, false, true],
+    [PAD_BUTTON.X]: [false, false, false, false, true, false],
+    [PAD_BUTTON.Y]: [false, false, false, true, false, false],
   };
 
-  it('chaque bouton seul : frame vide sauf A (action), X (appel), Y (spécial)', () => {
+  it('chaque bouton seul : frame vide sauf A (action), B (cœur), X (appel), Y (spécial)', () => {
     for (const i of ALL_BUTTONS) {
       const f = gamepadToFrame(snap([i]), b);
-      expect(actions(f), `bouton ${i}`).toEqual(EXPECTED[i] ?? [false, false, false, false, false]);
+      expect(actions(f), `bouton ${i}`).toEqual(EXPECTED[i] ?? [false, false, false, false, false, false]);
       if (!DPAD.includes(i as (typeof DPAD)[number])) {
         // hors croix : pas même de déplacement
-        expect(f, `bouton ${i}`).toEqual({ ...emptyFrame(), attack: f.attack, interact: f.interact, revive: f.revive, special: f.special, call: f.call });
+        expect(f, `bouton ${i}`).toEqual({ ...emptyFrame(), attack: f.attack, interact: f.interact, revive: f.revive, special: f.special, call: f.call, heart: f.heart });
         expect([f.moveX, f.moveY], `bouton ${i}`).toEqual([0, 0]);
       }
     }
   });
 
-  it('boutons « sans effet » = tous sauf A, X, Y, la croix (déplacement) : frame STRICTEMENT vide, y compris tous ensemble', () => {
-    const inert = ALL_BUTTONS.filter((i) => ![PAD_BUTTON.A, PAD_BUTTON.X, PAD_BUTTON.Y, ...DPAD].includes(i as never));
-    expect(inert).toEqual([1, 4, 5, 6, 7, 8, 9, 10, 11, 16]); // B, LB, RB, LT, RT, Back, Start, L3, R3, Home
+  it('boutons « sans effet » = tous sauf A, B, X, Y, la croix (déplacement) : frame STRICTEMENT vide, y compris tous ensemble', () => {
+    const inert = ALL_BUTTONS.filter((i) => ![PAD_BUTTON.A, PAD_BUTTON.B, PAD_BUTTON.X, PAD_BUTTON.Y, ...DPAD].includes(i as never));
+    expect(inert).toEqual([4, 5, 6, 7, 8, 9, 10, 11, 16]); // LB, RB, LT, RT, Back, Start, L3, R3, Home
     for (const i of inert) expect(gamepadToFrame(snap([i]), b), `bouton ${i}`).toEqual(emptyFrame());
     expect(gamepadToFrame(snap(inert), b)).toEqual(emptyFrame());
   });
@@ -80,26 +81,27 @@ describe('manette en jeu : seuls A, X, Y ont un effet (parcours des 17 boutons)'
   it('la croix déplace mais ne déclenche aucune action', () => {
     for (const i of DPAD) {
       const f = gamepadToFrame(snap([i]), b);
-      expect(actions(f), `bouton ${i}`).toEqual([false, false, false, false, false]);
+      expect(actions(f), `bouton ${i}`).toEqual([false, false, false, false, false, false]);
       expect(Math.hypot(f.moveX, f.moveY)).toBeCloseTo(1);
     }
   });
 
-  it('A + X + Y ensemble : action contextuelle, appel et spécial se cumulent sans parasite', () => {
-    expect(actions(gamepadToFrame(snap([PAD_BUTTON.A, PAD_BUTTON.X, PAD_BUTTON.Y]), b))).toEqual([true, true, true, true, true]);
+  it('A + B + X + Y ensemble : action contextuelle, cœur, appel et spécial se cumulent sans parasite', () => {
+    expect(actions(gamepadToFrame(snap([PAD_BUTTON.A, PAD_BUTTON.B, PAD_BUTTON.X, PAD_BUTTON.Y]), b))).toEqual([true, true, true, true, true, true]);
   });
 
-  it('manette non standard (mapping vide) : mêmes indices 0 / 2 / 3, B (1) et gâchettes sans effet', () => {
+  it('manette non standard (mapping vide) : mêmes indices 0 / 1 / 2 / 3, gâchettes sans effet', () => {
     for (const i of ALL_BUTTONS) {
       const f = gamepadToFrame(snap([i], [0, 0, 0, 0], ''), b);
-      expect(actions(f), `bouton ${i}`).toEqual(EXPECTED[i] ?? [false, false, false, false, false]);
+      expect(actions(f), `bouton ${i}`).toEqual(EXPECTED[i] ?? [false, false, false, false, false, false]);
     }
   });
 
-  it('bindings par défaut : seuls les indices 0 (A), 2 (X) et 3 (Y) sont liés à une action ; valides et gelés', () => {
+  it('bindings par défaut : seuls les indices 0 (A), 1 (B), 2 (X) et 3 (Y) sont liés à une action ; valides et gelés', () => {
     const used = new Set<number>();
-    for (const a of ['attack', 'interact', 'revive', 'special', 'call'] as const) for (const i of DEFAULT_BINDINGS[a].pad) used.add(i);
-    expect([...used].sort()).toEqual([PAD_BUTTON.A, PAD_BUTTON.X, PAD_BUTTON.Y]);
+    for (const a of ['attack', 'interact', 'revive', 'special', 'call', 'heart'] as const) for (const i of DEFAULT_BINDINGS[a].pad) used.add(i);
+    expect([...used].sort()).toEqual([PAD_BUTTON.A, PAD_BUTTON.B, PAD_BUTTON.X, PAD_BUTTON.Y]);
+    expect(DEFAULT_BINDINGS.heart.pad).toEqual([PAD_BUTTON.B]);
     expect(DEFAULT_BINDINGS.attack.pad).toEqual([PAD_BUTTON.A]);
     expect(DEFAULT_BINDINGS.interact.pad).toEqual([PAD_BUTTON.A]);
     expect(DEFAULT_BINDINGS.revive.pad).toEqual([PAD_BUTTON.A]);
@@ -130,12 +132,12 @@ describe('manette en jeu : seuls A, X, Y ont un effet (parcours des 17 boutons)'
       padLike(3, [PAD_BUTTON.X, PAD_BUTTON.Y]),
     ];
     const inp = mgr.poll();
-    expect(inp[0]).toEqual(emptyFrame());
+    expect(actions(inp[0]!)).toEqual([false, false, false, false, false, true]);
     expect(inp[1]).toEqual(emptyFrame());
-    expect(actions(inp[2]!)).toEqual([true, true, true, false, false]);
-    expect(actions(inp[3]!)).toEqual([false, false, false, true, true]);
+    expect(actions(inp[2]!)).toEqual([true, true, true, false, false, false]);
+    expect(actions(inp[3]!)).toEqual([false, false, false, true, true, false]);
     // la source seule (hors manager) donne la même chose
-    expect(new GamepadSource({ index: 0, provider: () => pads }).poll()).toEqual(emptyFrame());
+    expect(actions(new GamepadSource({ index: 0, provider: () => pads }).poll())).toEqual([false, false, false, false, false, true]);
     // Start (pause) n'est PAS une action de simulation : il est lu par GameScene.pollPadStart
     pads = [padLike(0, [PAD_BUTTON.START]), null, null, null];
     expect(mgr.poll()[0]).toEqual(emptyFrame());
@@ -143,13 +145,14 @@ describe('manette en jeu : seuls A, X, Y ont un effet (parcours des 17 boutons)'
     expect(new RemoteInputSource(1).poll()).toEqual(emptyFrame());
   });
 
-  it('clavier inchangé : Espace / E = action, F ou X = spécial, C = appel', () => {
+  it('clavier : Espace / E = action, B = cœur, F ou X = spécial, C = appel', () => {
     const keys = (...c: string[]): Set<string> => new Set(c);
-    expect(actions(keysToFrame(keys('Space'), b))).toEqual([true, true, true, false, false]);
-    expect(actions(keysToFrame(keys('KeyE'), b))).toEqual([true, true, true, false, false]);
-    expect(actions(keysToFrame(keys('KeyF'), b))).toEqual([false, false, false, true, false]);
-    expect(actions(keysToFrame(keys('KeyX'), b))).toEqual([false, false, false, true, false]);
-    expect(actions(keysToFrame(keys('KeyC'), b))).toEqual([false, false, false, false, true]);
+    expect(actions(keysToFrame(keys('Space'), b))).toEqual([true, true, true, false, false, false]);
+    expect(actions(keysToFrame(keys('KeyE'), b))).toEqual([true, true, true, false, false, false]);
+    expect(actions(keysToFrame(keys('KeyB'), b))).toEqual([false, false, false, false, false, true]);
+    expect(actions(keysToFrame(keys('KeyF'), b))).toEqual([false, false, false, true, false, false]);
+    expect(actions(keysToFrame(keys('KeyX'), b))).toEqual([false, false, false, true, false, false]);
+    expect(actions(keysToFrame(keys('KeyC'), b))).toEqual([false, false, false, false, true, false]);
   });
 });
 
@@ -218,15 +221,16 @@ describe('persistance : un ancien jeu de bindings sauvegardé ne ressuscite pas 
     expect(BINDINGS_STORAGE_KEY).not.toBe(LEGACY_BINDINGS_STORAGE_KEY);
   });
 
-  it('ancienne sauvegarde (clé v1) : IGNORÉE, bindings par défaut (B / LB / RB / RT toujours sans effet)', () => {
+  it('ancienne sauvegarde (clé v1) : IGNORÉE, bindings par défaut (LB / RB / LT / RT toujours sans effet, B = cœur)', () => {
     const storage = memoryStorage({ [LEGACY_BINDINGS_STORAGE_KEY]: OLD_SAVE });
     const mgr = manager(storage);
     expect(mgr.loadBindings()).toBe(false);
     expect(mgr.getBindings()).toEqual(DEFAULT_BINDINGS);
-    for (const i of [PAD_BUTTON.B, PAD_BUTTON.LB, PAD_BUTTON.RB, PAD_BUTTON.LT, PAD_BUTTON.RT]) {
+    for (const i of [PAD_BUTTON.LB, PAD_BUTTON.RB, PAD_BUTTON.LT, PAD_BUTTON.RT]) {
       expect(gamepadToFrame(snap([i]), mgr.getBindings()), `bouton ${i}`).toEqual(emptyFrame());
     }
-    expect(actions(gamepadToFrame(snap([PAD_BUTTON.X]), mgr.getBindings()))).toEqual([false, false, false, false, true]);
+    expect(actions(gamepadToFrame(snap([PAD_BUTTON.B]), mgr.getBindings()))).toEqual([false, false, false, false, false, true]);
+    expect(actions(gamepadToFrame(snap([PAD_BUTTON.X]), mgr.getBindings()))).toEqual([false, false, false, false, true, false]);
   });
 
   it('la sauvegarde écrit la clé v2 et ne touche JAMAIS l ancienne clé v1', () => {

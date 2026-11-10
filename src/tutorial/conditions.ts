@@ -53,6 +53,10 @@ export const LOGGED_EVENT_TYPES: ReadonlySet<SimEvent['type']> = new Set<SimEven
   'teamWipe',
   'callStarted',
   'mechanismChanged',
+  // emplacement cœur
+  'heartStored',
+  'heartUsed',
+  'autoCallStarted',
 ]);
 
 /** Taille maximale du journal d'événements d'une étape. */
@@ -73,6 +77,9 @@ export function eventActor(e: SimEvent): PlayerId | null {
     case 'brazierLit':
     case 'torchRefueled':
     case 'callStarted':
+    case 'autoCallStarted':
+    case 'heartStored':
+    case 'heartUsed':
     case 'objectiveCompleted':
     case 'playerDown':
     case 'playerAttack':
@@ -169,6 +176,8 @@ export function evalCondition(c: Condition, ctx: ConditionCtx): boolean {
       return !!human && human.torchMs < TORCH_MAX_MS - TORCH_USED_MARGIN_MS;
     case 'holdsKey':
       return !!human && human.keys.length > 0;
+    case 'holdsHeart':
+      return !!human && human.heart !== undefined;
     case 'blockDead':
       return isBlockDead(state, room, c.id);
     case 'regionVisible':

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SIM_STEP_MS } from '../core/constants';
 import type { ActionFrame, TickInputs } from '../core/types';
-import { MAX_FRAME_MS, MAX_STEPS_PER_FRAME, mergeTickInputs, planSteps } from './loopLogic';
+import { HeartInputGuard, MAX_FRAME_MS, MAX_STEPS_PER_FRAME, maskHeartInputs, mergeTickInputs, modeSimFlags, planSteps } from './loopLogic';
 
 const frame = (o: Partial<ActionFrame> = {}): ActionFrame => ({ moveX: 0, moveY: 0, attack: false, interact: false, revive: false, ...o });
 
@@ -148,4 +148,100 @@ describe('boucle simulée : un appui court est détecté une fois à 60/120/144/
       expect(simulateLoop(hz, 'special', 10, hz * 5, 0.1)).toBe(1);
     });
   }
+});
+
+// ───────────────────────────── B (utiliser le cœur) : fusion et garde ─────────────────────────────
+
+describe('mergeTickInputs : heart (B)', () => {
+  it('un appui court sur B entre deux pas n est pas perdu (OU des deux relevés)', () => {
+    expect(mergeTickInputs({ 0: frame({ heart: true }) }, { 0: frame({ heart: false }) })[0]?.heart).toBe(true);
+    expect(mergeTickInputs({ 0: frame({ heart: false }) }, { 0: frame({ heart: true }) })[0]?.heart).toBe(true);
+    expect(mergeTickInputs({ 0: frame() }, { 0: frame() })[0]?.heart).toBe(false);
+  });
+});
+
+describe('maskHeartInputs / HeartInputGuard : le B de la pause ne soigne jamais par ricochet', () => {
+  const B = (id: 0 | 1 = 0): TickInputs => ({ [id]: frame({ heart: true, attack: true }) });
+  const NONE: TickInputs = { 0: frame() };
+
+  it('maskHeartInputs : retire seulement heart (les autres boutons passent), sans muter l argument ; rend l argument tel quel s il n y a rien à masquer', () => {
+    const src: TickInputs = { 0: frame({ heart: true, attack: true, moveX: 1 }), 1: frame({ interact: true }) };
+    const out = maskHeartInputs(src);
+    expect(out[0]).toMatchObject({ heart: false, attack: true, moveX: 1 });
+    expect(out[1]).toBe(src[1]);
+    expect(src[0]?.heart).toBe(true); // argument intact
+    expect(maskHeartInputs(NONE)).toBe(NONE);
+  });
+
+  it('garde armée : B tenu est masqué ; elle se désarme dès que B est relâché ; un nouvel appui compte ensuite', () => {
+    const g = new HeartInputGuard(); // armée à la création (la scène démarre peut-être avec B tenu)
+    expect(g.isArmed).toBe(true);
+    expect(g.filter(B())[0]?.heart).toBe(false); // B tenu depuis la pause / le menu : masqué
+    expect(g.filter(B())[0]?.heart).toBe(false); // toujours tenu : toujours masqué
+    expect(g.isArmed).toBe(true);
+    expect(g.filter(NONE)).toBe(NONE); // relâché : la garde tombe
+    expect(g.isArmed).toBe(false);
+    expect(g.filter(B())[0]?.heart).toBe(true); // vrai nouvel appui
+  });
+
+  it('arm() après la fermeture de la pause : B tenu par-dessus la fermeture est masqué jusqu au relâchement (tous joueurs)', () => {
+    const g = new HeartInputGuard(false);
+    expect(g.filter(B())[0]?.heart).toBe(true);
+    g.arm(); // fermeture de la pause
+    expect(g.filter(B(1))[1]?.heart).toBe(false); // un autre joueur tient B : masqué aussi
+    expect(g.filter({ 0: frame(), 1: frame({ heart: true }) })[1]?.heart).toBe(false);
+    g.filter({ 0: frame(), 1: frame() });
+    expect(g.filter(B())[0]?.heart).toBe(true);
+  });
+});
+
+describe('HeartInputGuard : garde PAR joueur', () => {
+  const held = (id: 0 | 1 | 2 | 3, others: TickInputs = {}): TickInputs => ({ ...others, [id]: frame({ heart: true }) });
+
+  it('un joueur qui garde B enfoncé ne masque PAS le B (nouvel appui) des autres', () => {
+    const g = new HeartInputGuard();
+    // le joueur 0 tient B depuis la pause ; le joueur 1 ne le tient pas
+    expect(g.filter({ 0: frame({ heart: true }), 1: frame() })[0]?.heart).toBe(false);
+    // le joueur 1 appuie : son B passe (la garde de 1 est tombée dès qu'on l'a vu relâché), alors que celui du joueur 0 est toujours masqué
+    const out = g.filter({ 0: frame({ heart: true }), 1: frame({ heart: true }) });
+    expect(out[0]?.heart).toBe(false);
+    expect(out[1]?.heart).toBe(true);
+    expect(g.isArmed).toBe(true); // le joueur 0 est toujours gardé
+    g.filter({ 0: frame(), 1: frame() });
+    expect(g.isArmed).toBe(false);
+    expect(g.filter(held(0))[0]?.heart).toBe(true);
+  });
+
+  it('un joueur absent des relevés est désarmé ; la garde porte sur les 4 joueurs (MAX_PLAYERS)', () => {
+    const g = new HeartInputGuard();
+    const out = g.filter(held(3));
+    expect(out[3]?.heart).toBe(false);
+    expect(g.isArmed).toBe(true); // 3 reste gardé
+    expect(g.filter({ 3: frame() })[3]?.heart).toBeFalsy(); // relâché : rien à masquer, la garde de 3 tombe
+    expect(g.isArmed).toBe(false);
+    expect(maskHeartInputs(held(3))[3]?.heart).toBe(false); // le masquage global couvre aussi le joueur 3
+    expect(mergeTickInputs(held(3), held(3))[3]?.heart).toBe(true);
+  });
+
+  it('non armée : renvoie l argument tel quel ; sans mutation de l argument', () => {
+    const g = new HeartInputGuard(false);
+    const src = held(0);
+    expect(g.filter(src)).toBe(src);
+    g.arm();
+    const out = g.filter(src);
+    expect(out).not.toBe(src);
+    expect(src[0]?.heart).toBe(true);
+  });
+});
+
+describe('modeSimFlags : options de simulation selon le mode de la scène', () => {
+  it('partie normale : équipement, butin, appel automatique et emplacement cœur actifs', () => {
+    expect(modeSimFlags({ tutorial: false, demo: false })).toEqual({ gear: true, loot: true, autoCall: true, heartSlot: true });
+  });
+  it('tutoriel : emplacement cœur ET appel automatique actifs (il les enseigne), ni équipement ni butin aléatoire', () => {
+    expect(modeSimFlags({ tutorial: true, demo: false })).toEqual({ gear: false, loot: false, autoCall: true, heartSlot: true });
+  });
+  it('démo : ancien comportement (les pilotes automatiques n utilisent pas B) : pas d emplacement cœur, d appel automatique ni d équipement', () => {
+    expect(modeSimFlags({ tutorial: false, demo: true })).toEqual({ gear: false, loot: true, autoCall: false, heartSlot: false });
+  });
 });

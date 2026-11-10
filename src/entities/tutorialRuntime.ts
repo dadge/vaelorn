@@ -5,11 +5,24 @@
  * sous Node.
  */
 import { SIM_STEP_MS } from '../core/constants';
+import type { GameSimulation } from '../core/simulation';
 import type { ActionFrame, CharacterId, GameState, LevelDef, PlayerId, PlayerSetup, SimEvent, TickInputs } from '../core/types';
 import type { Bindings } from '../input/actions';
 import { TutorialDirector } from '../tutorial/TutorialDirector';
 import { buttonLabels, resolveDevice } from '../tutorial/deviceHints';
-import type { ButtonName, DeviceKind, HudRegionId, TutorialView } from '../tutorial/types';
+import type { ButtonName, DeviceKind, HudRegionId, ScriptedAction, TutorialView } from '../tutorial/types';
+
+/** Durée de vie (ms) des cœurs posés par le tutoriel : longue, pour qu'ils ne disparaissent pas pendant la lecture de la consigne. */
+export const TUTORIAL_HEART_TTL_MS = 10 * 60_000;
+
+/**
+ * Applique une mise en scène du directeur à la simulation (comme `knockDown`, ENTRE deux pas) : blessure d'un joueur ou cœur posé au sol. Partagée par la scène et le harnais de test.
+ * Retourne false si la simulation l'a refusée (hors phase 'playing', joueur déjà plus bas…).
+ */
+export function applyScripted(sim: GameSimulation, a: ScriptedAction): boolean {
+  if (a.k === 'wound') return sim.woundPlayer(a.id, a.fraction);
+  return sim.spawnScriptedHeart({ x: a.x, y: a.y }, a.kind, TUTORIAL_HEART_TTL_MS);
+}
 
 /** Ordre de préférence du partenaire scripté : le premier personnage de la famille différent de celui du joueur. */
 export const PARTNER_PREFERENCE: readonly CharacterId[] = ['sandrine', 'valentine', 'romain', 'david'];
@@ -97,6 +110,11 @@ export class TutorialRuntime {
 
   takeKnockDowns(): PlayerId[] {
     return this.director.takeKnockDowns();
+  }
+
+  /** Mises en scène du soin à appliquer ensuite par la scène (`applyScripted`). */
+  takeScripted(): ScriptedAction[] {
+    return this.director.takeScripted();
   }
 
   view(): TutorialView {

@@ -1,7 +1,7 @@
 /**
  * Manette virtuelle tactile (couche DOM mince). Toute la logique (état des boutons par pointeur, stick → axes,
  * instantané de manette standard) est dans `src/input/VirtualPad.ts` (pure, testée). Ce fichier ne fait que :
- *  - créer les éléments (stick à gauche ; losange A / B / X / Y à droite (A action, X appel, Y spécial, B retour dans les menus) ; PAUSE en haut au centre) ;
+ *  - créer les éléments (stick à gauche ; losange A / B / X / Y à droite (A action, B utiliser le cœur rangé — « retour » dans les menus —, X appel, Y spécial) ; PAUSE en haut au centre) ;
  *  - brancher les Pointer Events (multi-touch : chaque contrôle suit SON pointerId via `setPointerCapture`) ;
  *  - mettre à jour l'aspect (enfoncé) et décider de l'affichage (tactile + paysage, ou `?touch=1` ; masquée dès qu'une
  *    vraie manette est connectée ; `?touch=0` la force cachée) avec `shouldShowVirtualPad` (device.ts).
@@ -65,9 +65,9 @@ const STYLE = `
 }
 #touch-controls .vp-btn::before { content: ''; position: absolute; inset: -12%; border-radius: 50%; }
 #touch-controls .vp-a { --s: calc(var(--vp-base) * 0.5); --cx: calc(var(--vp-base) * 0.625); --cy: calc(var(--vp-base) * 0.995); border-color: #ffd27a; color: #ffd27a; }
-#touch-controls .vp-b { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.995); --cy: calc(var(--vp-base) * 0.625); }
-#touch-controls .vp-y { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.625); --cy: calc(var(--vp-base) * 0.255); }
-#touch-controls .vp-x { --s: max(36px, calc(var(--vp-base) * 0.38)); --cx: calc(var(--vp-base) * 0.255); --cy: calc(var(--vp-base) * 0.625); }
+#touch-controls .vp-b { --s: max(44px, calc(var(--vp-base) * 0.4)); --cx: calc(var(--vp-base) * 0.995); --cy: calc(var(--vp-base) * 0.625); }
+#touch-controls .vp-y { --s: max(44px, calc(var(--vp-base) * 0.4)); --cx: calc(var(--vp-base) * 0.625); --cy: calc(var(--vp-base) * 0.255); }
+#touch-controls .vp-x { --s: max(44px, calc(var(--vp-base) * 0.4)); --cx: calc(var(--vp-base) * 0.255); --cy: calc(var(--vp-base) * 0.625); }
 #touch-controls .vp-pause {
   --s: clamp(34px, calc(var(--vp-base) * 0.34), 46px); position: absolute; pointer-events: auto; border-radius: 50%;
   width: var(--s); height: var(--s); top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; margin-left: calc(var(--s) / -2);

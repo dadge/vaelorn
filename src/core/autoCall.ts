@@ -6,13 +6,14 @@
  *
  * ── Règles ──
  *  1. Déclencheur : un joueur VIVANT chevauche (même rayon que le ramassage : `PICKUP_RADIUS` / `GEAR_PICKUP_RADIUS`) un objet au sol qu'il ne prend pas :
- *      - cœur ou demi-cœur : il ne peut pas le consommer (`canConsumeHeart` : PV pleins ; aucun seuil, un seul PV manquant suffit à le consommer) ;
+ *      - cœur ou demi-cœur, règle d'ORIGINE (sans emplacement cœur) : il ne peut pas le consommer (`canConsumeHeart` : PV pleins ; aucun seuil, un seul PV manquant suffit à le consommer) ;
+ *      - cœur ou demi-cœur, règle de l'EMPLACEMENT CŒUR (`options.heartSlot`, `heartSlot.ts`) : son emplacement est PLEIN (`PlayerState.heart`), quels que soient ses PV : il ne peut pas le ranger ;
  *      - objet d'équipement : `pickupDecision(...) === 'ignore'` (même emplacement et niveau inférieur ou égal ; accessoire de même sorte de niveau inférieur ou
  *        égal ; anneau du vampire hors niveau III…). PAS de déclenchement pour un objet verrouillé pour lui (ses propres objets lâchés), une décision 'swap'
  *        (échange manuel au choix du joueur : ce n'est pas un refus), les bonus temporaires (toujours pris), un objet ramassé (il a disparu) ni un objet
  *        simplement attiré par un aimant sans chevauchement.
- *  2. Destinataires utiles : alliés VIVANTS pour qui l'objet serait réellement utile (cœur : un allié qui peut le consommer ; équipement : 'equip' ou 'upgrade' et pas
- *     verrouillé sur cet objet). La distance ne compte pas. Aucun destinataire → AUCUN appel. Évalués au déclenchement (`AutoCallState.to`).
+ *  2. Destinataires utiles : alliés VIVANTS pour qui l'objet serait réellement utile (cœur : un allié qui peut le consommer, ou avec l'emplacement cœur un allié dont l'emplacement est LIBRE ;
+ *     équipement : 'equip' ou 'upgrade' et pas verrouillé sur cet objet). La distance ne compte pas. Aucun destinataire → AUCUN appel. Évalués au déclenchement (`AutoCallState.to`).
  *  3. Signal automatique ≠ appel manuel : il ne fige pas le joueur, ne consomme pas le délai de l'appel manuel, dure `AUTO_CALL_DURATION_MS`. Un appel manuel
  *     en cours n'est jamais interrompu par un automatique ; un appel manuel qui démarre efface l'icône automatique (`startCall`).
  *  4. Anti-spam : un seul déclenchement par couple (joueur, objet) tant que le joueur reste dans le rayon (+ `AUTO_CALL_REARM_MARGIN`) ; par joueur, délai de
@@ -23,6 +24,7 @@
 import { AUTO_CALL_COOLDOWN_MS, AUTO_CALL_DURATION_MS, AUTO_CALL_REARM_MARGIN, GEAR_PICKUP_RADIUS, PICKUP_RADIUS } from './balance';
 import { ACCESSORY_KINDS, GEAR_LEVELS, GEAR_SLOTS, pickupDecision } from './gear';
 import { distSq } from './geometry';
+import { canStoreHeart } from './heartSlot';
 import { canConsumeHeart } from './loot';
 import { CALL_EPSILON_MS } from './players';
 import type { AutoCallIcon, AutoCallState, GearDropState, GearItem, PickupState, PlayerId, PlayerState, SimEvent } from './types';
@@ -37,9 +39,23 @@ export function gearRef(id: number): string {
   return `g${id}`;
 }
 
-/** Un cœur / demi-cœur est-il utile à ce joueur (vivant ET blessé) ? */
+/** Un cœur / demi-cœur est-il utile à ce joueur (vivant ET blessé) ? Règle d'origine (sans emplacement cœur). */
 export function heartUsefulTo(p: Pick<PlayerState, 'hp' | 'maxHp' | 'status'>): boolean {
   return canConsumeHeart(p);
+}
+
+/** Un cœur / demi-cœur est-il utile à ce joueur avec l'EMPLACEMENT CŒUR (vivant ET emplacement libre : il peut le ranger) ? */
+export function heartSlotUsefulTo(p: Pick<PlayerState, 'status' | 'heart'>): boolean {
+  return canStoreHeart(p);
+}
+
+/** Options de `stepAutoCalls`. */
+export interface AutoCallOptions {
+  /**
+   * Règle de l'EMPLACEMENT CŒUR (`SimConfig.heartSlot`) : l'appel de cœur part quand l'emplacement du joueur est PLEIN (quels que soient ses PV) et les destinataires sont les alliés vivants dont
+   * l'emplacement est LIBRE. Faux / absent : règle d'origine (PV pleins ; alliés blessés).
+   */
+  heartSlot?: boolean;
 }
 
 /** Ce joueur refuse-t-il (ne prend pas) cet objet d'équipement s'il le chevauche ? Vrai si vivant, non verrouillé et `pickupDecision` vaut 'ignore'. */
@@ -102,13 +118,16 @@ interface Candidate {
  * @param pickups nourriture au sol de la salle
  * @param gearDrops objets d'équipement au sol de la salle
  * @param events tableau où ajouter les événements (défaut : un nouveau tableau) ; retourné
+ * @param options règle des cœurs (voir `AutoCallOptions`)
  */
 export function stepAutoCalls(
   players: PlayerState[],
   pickups: readonly PickupState[],
   gearDrops: readonly GearDropState[],
   events: SimEvent[] = [],
+  options: AutoCallOptions = {},
 ): SimEvent[] {
+  const slot = options.heartSlot === true;
   if (players.length < 2) return events;
   if (pickups.length === 0 && gearDrops.length === 0) {
     // plus aucun objet au sol : les signaux en cours s'arrêtent et la mémoire des objets signalés est vidée
@@ -143,11 +162,11 @@ export function stepAutoCalls(
     const seen = p.autoCallSeen;
     let found: Candidate | null = null;
     // nourriture d'abord, puis équipement (ordre des tableaux : déterministe)
-    if (!canConsumeHeart(p)) {
+    if (slot ? p.heart !== undefined : !canConsumeHeart(p)) {
       for (const pk of pickups) {
         const ref = pickupRef(pk.id);
         if (seen?.includes(ref) || distSq(p.pos, pk.pos) > rr) continue;
-        const to = recipients(players, p.id, heartUsefulTo);
+        const to = recipients(players, p.id, slot ? heartSlotUsefulTo : heartUsefulTo);
         if (to.length === 0) continue;
         found = { ref, icon: heartIcon(pk.kind), to };
         break;

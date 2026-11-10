@@ -42,7 +42,7 @@ export function loadProgram(vm: VmState, ops: readonly PartnerOp[]): void {
 
 /** Frame vide (aucune entrée). */
 export function emptyPartnerFrame(): ActionFrame {
-  return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false };
+  return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false, heart: false };
 }
 
 /** Centre (px) de la tuile occupée par un mécanisme (2×2 : centre du carré ; porte : tuile du milieu). */
@@ -82,12 +82,25 @@ export function resolveTarget(target: Target, room: RoomDef, state: GameState): 
     const r = room.exit.rect;
     return { x: (r.x + r.w / 2) * TILE, y: (r.y + r.h / 2) * TILE };
   }
+  if ('pickup' in target) {
+    const me = state.players[PARTNER_ID];
+    let best: Vec2 | null = null;
+    let bestD = Infinity;
+    for (const pk of state.room.pickups ?? []) {
+      const d = me ? Math.hypot(pk.pos.x - me.pos.x, pk.pos.y - me.pos.y) : 0;
+      if (d < bestD) {
+        bestD = d;
+        best = { x: pk.pos.x, y: pk.pos.y };
+      }
+    }
+    return best;
+  }
   return state.players[HUMAN_ID]?.pos ?? null;
 }
 
 /** Rayon d'arrivée (px) pour une cible. */
 export function arrivalRadius(target: Target): number {
-  if ('tile' in target || 'spawn' in target) return ARRIVE_TILE_PX;
+  if ('tile' in target || 'spawn' in target || 'pickup' in target) return ARRIVE_TILE_PX;
   if ('exit' in target) return ARRIVE_EXIT_PX;
   if ('human' in target) return ARRIVE_HUMAN_PX;
   return ARRIVE_MECH_PX;

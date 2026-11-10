@@ -14,7 +14,7 @@ import { keyCodeLabel } from '../render/hud';
 import type { ButtonName, DeviceKind } from './types';
 
 /** Tous les noms de boutons (ordre stable). */
-export const BUTTON_NAMES: readonly ButtonName[] = ['move', 'action', 'attack', 'interact', 'special', 'call', 'skip', 'pause'];
+export const BUTTON_NAMES: readonly ButtonName[] = ['move', 'action', 'attack', 'interact', 'special', 'call', 'heart', 'skip', 'pause'];
 /** Toutes les familles d'appareils. */
 export const DEVICE_KINDS: readonly DeviceKind[] = ['keyboard', 'gamepad', 'gamepadPs', 'touch'];
 
@@ -117,6 +117,7 @@ export function buttonLabels(device: DeviceKind, bindings: Bindings = createDefa
       interact: t('tutorial.btn.key', { key: joinKeys(bindings.interact.keys) }),
       special: t('tutorial.btn.key', { key: joinKeys(bindings.special.keys) }),
       call: t('tutorial.btn.key', { key: joinKeys(bindings.call.keys) }),
+      heart: t('tutorial.btn.key', { key: joinKeys(bindings.heart.keys) }),
       skip: t('tutorial.btn.skip.keyboard'),
       pause: t('tutorial.btn.pause.keyboard'),
     };

@@ -88,12 +88,12 @@ export function padHasActivity(snapshot: GamepadSnapshot): boolean {
 
 /** Nouvelle frame vide (jamais l'objet gelé `EMPTY_ACTION_FRAME`, que l'appelant pourrait vouloir muter). */
 export function emptyFrame(): ActionFrame {
-  return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false };
+  return { moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false, heart: false };
 }
 
 /** true si la frame contient une entrée (déplacement ou bouton). */
 export function frameHasActivity(f: ActionFrame): boolean {
-  return f.moveX !== 0 || f.moveY !== 0 || f.attack || f.interact || f.revive || f.special === true || f.call === true;
+  return f.moveX !== 0 || f.moveY !== 0 || f.attack || f.interact || f.revive || f.special === true || f.call === true || f.heart === true;
 }
 
 function anyKey(pressed: ReadonlySet<string>, codes: readonly string[]): boolean {
@@ -133,6 +133,7 @@ export function keysToFrame(pressedKeyCodes: ReadonlySet<string>, bindings: Bind
     revive: anyKey(pressedKeyCodes, bindings.revive.keys),
     special: anyKey(pressedKeyCodes, bindings.special.keys),
     call: anyKey(pressedKeyCodes, bindings.call.keys),
+    heart: anyKey(pressedKeyCodes, bindings.heart.keys),
   };
 }
 
@@ -164,9 +165,9 @@ function clampDeadzone(dz: number): number {
  * - Sinon le stick gauche : zone morte RADIALE (`deadzone`, défaut `bindings.deadzone` = 0.25), puis
  *   l'amplitude est re-mappée de [deadzone, STICK_SATURATION] vers [0, 1] (mouvement progressif, sans à-coup).
  *   La simulation peut donc recevoir une amplitude analogique (0..1) ; la direction reste exacte.
- * - Boutons : voir `bindings.attack/interact/revive/special/call.pad`. Schéma par défaut : A = action contextuelle (attack +
- *   interact + revive), Y = attaque spéciale UNIQUEMENT (A ne la déclenche jamais), X = appel UNIQUEMENT ; B, LB, RB, LT, RT, Back,
- *   appuis de sticks… n'ont AUCUN effet en jeu (B n'est que « retour » dans les menus : voir `gamepadToMenuHeld`).
+ * - Boutons : voir `bindings.attack/interact/revive/special/call/heart.pad`. Schéma par défaut : A = action contextuelle (attack +
+ *   interact + revive), Y = attaque spéciale UNIQUEMENT (A ne la déclenche jamais), X = appel UNIQUEMENT, B = utiliser le cœur UNIQUEMENT ; LB, RB, LT, RT, Back,
+ *   appuis de sticks… n'ont AUCUN effet en jeu (B est AUSSI « retour » dans les menus : voir `gamepadToMenuHeld`).
  * - Manette non standard (`snapshot.mapping` ≠ 'standard') : mappage de repli (axes 0/1, croix sur l'axe 9, mêmes indices de
  *   boutons 0 / 2 / 3 = A / X / Y).
  */
@@ -204,6 +205,7 @@ export function gamepadToFrame(snapshot: GamepadSnapshot, bindings: Bindings, de
     revive: anyPadButton(snapshot, bindings.revive.pad),
     special: anyPadButton(snapshot, bindings.special.pad),
     call: anyPadButton(snapshot, bindings.call.pad),
+    heart: anyPadButton(snapshot, bindings.heart.pad),
   };
 }
 
@@ -331,6 +333,7 @@ export function mergeBindings(defaults: Bindings, overrides?: BindingsOverrides 
     revive: mergeButton(defaults.revive, o.revive),
     special: mergeButton(defaults.special, o.special),
     call: mergeButton(defaults.call, o.call),
+    heart: mergeButton(defaults.heart, o.heart), // ancien jeu de bindings sans cette action : valeurs par défaut
     menu: {
       confirm: mergeButton(defaults.menu.confirm, omenu.confirm),
       back: mergeButton(defaults.menu.back, omenu.back),

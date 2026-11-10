@@ -665,6 +665,7 @@ export function advanceLevel(session: GameSession): GameSession {
   const next: GameSession = { ...session, levelIndex: session.levelIndex + 1 };
   delete next.startRoomIndex;
   delete next.startGear; // l'équipement est réinitialisé au niveau suivant
+  delete next.startHearts; // le cœur rangé aussi
   return next;
 }
 
@@ -753,6 +754,7 @@ export function replaySession(session: GameSession, outcome: 'victory' | 'defeat
   };
   delete next.startRoomIndex;
   delete next.startGear;
+  delete next.startHearts;
   // Victoire : nouvelle partie complète, aucun niveau terminé ; défaite : on retente le niveau, la progression est conservée.
   if (outcome === 'victory') delete next.completedLevelIds;
   else if (session.completedLevelIds) next.completedLevelIds = session.completedLevelIds.slice();

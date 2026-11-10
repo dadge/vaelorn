@@ -104,12 +104,13 @@ describe('keysToFrame', () => {
       revive: true,
       special: false,
       call: false,
+      heart: false,
     });
   });
 
   it('disposition WASD + E', () => {
     const f = keysToFrame(keys('KeyW', 'KeyE'), b);
-    expect(f).toEqual({ moveX: 0, moveY: -1, attack: true, interact: true, revive: true, special: false, call: false });
+    expect(f).toEqual({ moveX: 0, moveY: -1, attack: true, interact: true, revive: true, special: false, call: false, heart: false });
     expect(keysToFrame(keys('KeyD'), b).moveX).toBe(1);
   });
 
@@ -184,8 +185,8 @@ describe('gamepadToFrame', () => {
     });
   });
 
-  it('B = AUCUN effet en jeu (n est que « retour » dans les menus)', () => {
-    expect(gamepadToFrame(snap({ pressed: [PAD_BUTTON.B] }), b)).toEqual(emptyFrame());
+  it('B = UTILISER LE CŒUR uniquement en jeu (et « retour » dans les menus) : aucune autre action', () => {
+    expect(gamepadToFrame(snap({ pressed: [PAD_BUTTON.B] }), b)).toEqual({ ...emptyFrame(), heart: true });
   });
 
   it('bouton analogique (value) et indices manquants gérés', () => {

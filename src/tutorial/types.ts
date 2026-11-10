@@ -13,10 +13,10 @@ import type { PlayerId, SimEvent, TileXY, Vec2 } from '../core/types';
 export type DeviceKind = 'keyboard' | 'gamepad' | 'gamepadPs' | 'touch';
 
 /** Noms de boutons utilisables dans les textes (jetons `{move}`, `{action}`…). */
-export type ButtonName = 'move' | 'action' | 'attack' | 'interact' | 'special' | 'call' | 'skip' | 'pause';
+export type ButtonName = 'move' | 'action' | 'attack' | 'interact' | 'special' | 'call' | 'heart' | 'skip' | 'pause';
 
 /** Zones du HUD que le tutoriel peut mettre en évidence (rectangles fournis par `PlayerHud.regions()`). */
-export type HudRegionId = 'roomGoals' | 'personalGoal' | 'hearts' | 'special' | 'keys' | 'torch' | 'prompt' | 'sign';
+export type HudRegionId = 'roomGoals' | 'personalGoal' | 'hearts' | 'heartSlot' | 'special' | 'keys' | 'torch' | 'prompt' | 'sign';
 
 /** Condition évaluée sur l'état de la simulation (lecture seule). */
 export type Condition =
@@ -43,6 +43,8 @@ export type Condition =
   | { k: 'torchUsed' }
   /** Le joueur porte au moins une clé. */
   | { k: 'holdsKey' }
+  /** Le joueur a un cœur / demi-cœur rangé dans son emplacement cœur. */
+  | { k: 'holdsHeart' }
   /** Le bloc poussable `id` est irrécupérable (collé à une paroi sur un axe où le socle est ailleurs : plus personne ne peut le ramener). */
   | { k: 'blockDead'; id: string }
   /** La zone du HUD est actuellement visible à l'écran. */
@@ -56,7 +58,9 @@ export type Target =
   | { zone: string }
   | { spawn: number }
   | { exit: true }
-  | { human: true };
+  | { human: true }
+  /** Le cœur / demi-cœur au sol le plus proche du partenaire (aucune cible = arrivé : rien à ramasser). */
+  | { pickup: true };
 
 /** Instruction de la machine virtuelle du partenaire. `essential` : doit être terminée même si l'étape est sautée. */
 export type PartnerOp =
@@ -118,7 +122,15 @@ export interface TutorialStepDef {
   partner?: PartnerOp[];
   /** Mise à terre scénarisée, `afterMs` après le début effectif de l'étape. */
   knockDown?: { afterMs: number; ids: PlayerId[] };
+  /**
+   * Mise en scène du SOIN, `afterMs` après le début effectif de l'étape (une seule fois) : blessure d'un joueur (PV ramenés à `fraction` de ses PV max, sans jamais le mettre à terre ni
+   * le soigner) et cœurs posés au sol (durée de vie longue, `TUTORIAL_HEART_TTL_MS`). Appliquée par la scène via `takeScripted()` (comme `knockDown`) : aucune règle de jeu ici.
+   */
+  script?: { afterMs: number; wound?: { id: PlayerId; fraction: number }[]; hearts?: { tile: TileXY; kind: 'half' | 'full' }[] };
 }
+
+/** Action de mise en scène à appliquer à la simulation (voir `TutorialStepDef.script`) : coordonnées déjà résolues en pixels. */
+export type ScriptedAction = { k: 'wound'; id: PlayerId; fraction: number } | { k: 'heart'; x: number; y: number; kind: 'half' | 'full' };
 
 /** Repère résolu en coordonnées monde (pixels). */
 export interface ResolvedMarker {
@@ -206,6 +218,10 @@ export interface TutorialState {
   knocked: boolean;
   /** Mises à terre à demander à la simulation (`takeKnockDowns`). */
   pendingKnock: PlayerId[];
+  /** La mise en scène du soin (`TutorialStepDef.script`) de l'étape courante a déjà été déclenchée. */
+  scripted: boolean;
+  /** Actions de mise en scène à appliquer à la simulation (`takeScripted`). */
+  pendingScript: ScriptedAction[];
   /** Carte d'interruption temporaire (relevage interrompu). */
   flash: { kind: 'reviveInterrupted'; ms: number } | null;
   /** Dernière phase de la simulation observée. */

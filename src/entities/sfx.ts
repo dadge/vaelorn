@@ -52,6 +52,10 @@ export type SfxName =
   | 'pickupDrop'
   | 'pickup'
   | 'crystalHeal'
+  // emplacement cœur
+  | 'heartStore'
+  | 'heartUse'
+  | 'heartRefuse'
   // équipement
   | 'gearDrop'
   | 'gearPick'
@@ -119,6 +123,10 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   pickupDrop: { f0: 700, f1: 980, durMs: 70, type: 'sine', vol: 0.025 },
   pickup: { f0: 620, f1: 930, durMs: 110, type: 'triangle', vol: 0.06, then: { f0: 930, f1: 1400, delayMs: 90 } },
   crystalHeal: { f0: 440, f1: 880, durMs: 240, type: 'sine', vol: 0.07, then: { f0: 660, f1: 1320, delayMs: 140 } },
+  // emplacement cœur (placeholders) : « tic » doux au rangement, carillon de soin à l'utilisation, petit « non » grave et très discret quand B ne sert à rien (jamais agressif)
+  heartStore: { f0: 520, f1: 760, durMs: 90, type: 'triangle', vol: 0.045 },
+  heartUse: { f0: 540, f1: 1080, durMs: 200, type: 'sine', vol: 0.06, then: { f0: 810, f1: 1620, delayMs: 110 } },
+  heartRefuse: { f0: 230, f1: 190, durMs: 70, type: 'sine', vol: 0.03 },
   // équipement (placeholders) : tintement à l'apparition, fanfare montante au ramassage, chute grave quand tout est perdu
   gearDrop: { f0: 820, f1: 1180, durMs: 80, type: 'triangle', vol: 0.03 },
   gearPick: { f0: 520, f1: 780, durMs: 110, type: 'square', vol: 0.05, then: { f0: 780, f1: 1170, delayMs: 100 } },
@@ -219,6 +227,12 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
       return 'pickup';
     case 'crystalUsed':
       return 'crystalHeal';
+    case 'heartStored':
+      return 'heartStore';
+    case 'heartUsed':
+      return 'heartUse';
+    case 'heartRefused':
+      return 'heartRefuse';
     case 'gearDropped':
       return 'gearDrop';
     case 'gearPicked':

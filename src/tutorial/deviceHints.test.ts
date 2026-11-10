@@ -120,3 +120,19 @@ describe('buttonLabels', () => {
     }
   });
 });
+
+describe('buttonLabels : bouton « utiliser le cœur » (B)', () => {
+  it('clavier : touche des bindings courants (B par défaut, remappage respecté) ; manette : bouton B ; PlayStation : rond ; tactile : bouton B du losange', () => {
+    expect(buttonLabels('keyboard').heart).toContain('B');
+    const b = createDefaultBindings();
+    b.heart.keys = ['KeyV'];
+    expect(buttonLabels('keyboard', b).heart).toContain('V');
+    expect(buttonLabels('gamepad').heart).toBe('le bouton B');
+    expect(buttonLabels('gamepadPs').heart).toBe('le rond');
+    expect(buttonLabels('touch').heart).toContain('B');
+    setLanguage('en');
+    expect(buttonLabels('gamepad').heart).toBe('the B button');
+    expect(buttonLabels('gamepadPs').heart).toBe('the circle');
+    expect(buttonLabels('touch').heart).toContain('B button');
+  });
+});

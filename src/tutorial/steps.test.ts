@@ -8,7 +8,7 @@ import type { Condition, PartnerOp } from './types';
 const fr = getDictionary('fr') as Record<string, string>;
 const en = getDictionary('en') as Record<string, string>;
 
-const TOKENS = new Set(['move', 'action', 'attack', 'interact', 'special', 'call', 'skip', 'pause', 'name', 'specialName']);
+const TOKENS = new Set(['move', 'action', 'attack', 'interact', 'special', 'call', 'heart', 'skip', 'pause', 'name', 'specialName']);
 
 function placeholders(s: string): string[] {
   return Array.from(new Set(Array.from(s.matchAll(/\{(\w+)\}/g), (m) => m[1]))).sort();
@@ -22,9 +22,9 @@ function walkConditions(c: Condition | undefined, out: Condition[] = []): Condit
 }
 
 describe('étapes du tutoriel : données', () => {
-  it('31 étapes aux ids uniques, regroupées par salle dans l ordre du niveau', () => {
-    expect(TUTORIAL_STEPS.length).toBe(31);
-    expect(new Set(TUTORIAL_STEPS.map((s) => s.id)).size).toBe(31);
+  it('36 étapes aux ids uniques, regroupées par salle dans l ordre du niveau', () => {
+    expect(TUTORIAL_STEPS.length).toBe(36);
+    expect(new Set(TUTORIAL_STEPS.map((s) => s.id)).size).toBe(36);
     const roomOrder = tutorialLevel.rooms.map((r) => r.id);
     let last = -1;
     for (const s of TUTORIAL_STEPS) {
@@ -52,11 +52,11 @@ describe('étapes du tutoriel : données', () => {
 
   it('couvre toutes les mécaniques demandées (relevage, appel, panneaux, objectifs de salle et personnel)', () => {
     const ids = TUTORIAL_STEPS.map((s) => s.id);
-    for (const must of ['move', 'sign', 'roomGoals', 'personalGoal', 'attack', 'special', 'specialRecharge', 'hearts', 'lever', 'plates', 'block', 'keyPick', 'keyDoor', 'refuel', 'lightBrazier', 'revive', 'callReceive', 'callSend', 'wipe', 'finalGoals']) {
+    for (const must of ['move', 'sign', 'roomGoals', 'personalGoal', 'attack', 'special', 'specialRecharge', 'hearts', 'lever', 'plates', 'block', 'keyPick', 'keyDoor', 'refuel', 'lightBrazier', 'revive', 'heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'callReceive', 'callSend', 'wipe', 'finalGoals']) {
       expect(ids, must).toContain(must);
     }
     const highlights = new Set(TUTORIAL_STEPS.flatMap((s) => s.highlights ?? []));
-    for (const h of ['roomGoals', 'personalGoal', 'hearts', 'special', 'keys', 'torch']) expect(highlights.has(h as never), h).toBe(true);
+    for (const h of ['roomGoals', 'personalGoal', 'hearts', 'heartSlot', 'special', 'keys', 'torch']) expect(highlights.has(h as never), h).toBe(true);
   });
 
   it('les références (panneaux, mécanismes, zones, objectifs) existent dans la salle de l étape', () => {
@@ -135,5 +135,55 @@ describe('étapes du tutoriel : i18n fr / en', () => {
     for (const k of ['tutorial.btn.key', 'tutorial.btn.move.custom']) {
       expect(placeholders(fr[k])).toEqual(placeholders(en[k]));
     }
+  });
+});
+
+describe('étapes du tutoriel : emplacement cœur (salle t_heart)', () => {
+  const heartSteps = TUTORIAL_STEPS.filter((s) => s.room === 't_heart');
+
+  it('5 étapes dans l ordre : ranger, B sur soi, B sur un coéquipier blessé, emplacement plein = appel automatique, sortie', () => {
+    expect(heartSteps.map((s) => s.id)).toEqual(['heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'exit.heart']);
+    expect(tutorialLevel.rooms.map((r) => r.id)).toContain('t_heart');
+  });
+
+  it('les cœurs posés par le script sont sur la rangée 6, dans la salle, et reconnaissables (cœur / demi-cœur) ; les blessures visent le joueur ou le partenaire', () => {
+    const room = tutorialLevel.rooms.find((r) => r.id === 't_heart')!;
+    for (const s of heartSteps) {
+      for (const h of s.script?.hearts ?? []) {
+        expect(h.tile[1], s.id).toBe(6);
+        expect(room.layout[h.tile[1]][h.tile[0]], s.id).toBe('.');
+        expect(['half', 'full']).toContain(h.kind);
+      }
+      for (const w of s.script?.wound ?? []) {
+        expect([0, 1]).toContain(w.id);
+        expect(w.fraction).toBeGreaterThan(0);
+        expect(w.fraction).toBeLessThan(1);
+      }
+    }
+  });
+
+  it('chaque étape de soin nomme le bouton B quand elle demande de l utiliser, et son texte emploie le jeton {heart}', () => {
+    for (const id of ['heartSelf', 'heartAlly']) {
+      const s = heartSteps.find((x) => x.id === id)!;
+      expect(s.buttons, id).toContain('heart');
+      expect(fr[s.textKey], id).toContain('{heart}');
+      expect(en[s.textKey], id).toContain('{heart}');
+    }
+  });
+
+  it('les conditions de réussite sont des ACTIONS du joueur (événements de l emplacement), jamais une simple lecture', () => {
+    const done = (id: string): Condition | undefined => heartSteps.find((s) => s.id === id)?.done;
+    expect(JSON.stringify(done('heartSelf'))).toContain('heartUsed');
+    expect(JSON.stringify(done('heartAlly'))).toContain('"targetId":1');
+    expect(JSON.stringify(done('heartFull'))).toContain('autoCallStarted');
+  });
+
+  it('chaque étape i18n de la salle a son texte en fr et en ; le partenaire de heartFull vient prendre le cœur resté au sol après l appel automatique', () => {
+    for (const s of heartSteps) {
+      expect(fr[s.textKey], s.id).toBeTruthy();
+      expect(en[s.textKey], s.id).toBeTruthy();
+    }
+    const full = heartSteps.find((s) => s.id === 'heartFull')!;
+    expect(full.partner?.some((op) => op.op === 'walk' && 'pickup' in op.at)).toBe(true);
   });
 });

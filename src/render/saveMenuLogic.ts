@@ -216,6 +216,8 @@ export function sessionFromSave(save: SaveGame, ctx: SaveContext): GameSession |
   };
   // « Continuer » restitue l'équipement sauvegardé (champ absent si personne n'en porte)
   if (save.players.some((p) => p.gear)) session.startGear = save.players.map((p) => (p.gear ? cloneGear(p.gear) : undefined));
+  // idem pour le cœur rangé (emplacement cœur)
+  if (save.players.some((p) => p.heart)) session.startHearts = save.players.map((p) => p.heart);
   return session;
 }
 

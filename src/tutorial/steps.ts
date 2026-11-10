@@ -1,12 +1,13 @@
 /**
- * Les 31 étapes du tutoriel (DONNÉES). Chaque étape `do` est validée par une ACTION du joueur ; une étape `tip` se ferme seule.
+ * Les 36 étapes du tutoriel (DONNÉES). Chaque étape `do` est validée par une ACTION du joueur ; une étape `tip` se ferme seule.
  * Les textes sont des clés i18n `tutorial.step.<id>` (src/i18n/parts/tutorial.*.json) avec jetons de boutons résolus par appareil
  * (`deviceHints.ts`). Les conditions de réussite sont fondées sur l'ÉTAT quand c'est possible (pas seulement sur un événement) :
  * un joueur qui a déjà accompli l'action avant que l'étape ne s'affiche n'est jamais bloqué.
  *
  * Couverture : déplacement, panneaux, bloc « Objectifs de la salle » (haut à droite), « Ton objectif » (haut à gauche), attaque,
  * cœurs, spécial et recharge, ennemis restants, levier, plaques, porte, objectif d'équipe, bloc poussable, clé et porte de couleur,
- * torche et braseros (salle sombre), RELEVAGE, APPEL (recevoir puis lancer), mort d'équipe, sortie scellée.
+ * torche et braseros (salle sombre), RELEVAGE, EMPLACEMENT CŒUR (ranger, se soigner avec B, soigner un coéquipier blessé, emplacement plein = appel automatique),
+ * APPEL (recevoir puis lancer), mort d'équipe, sortie scellée.
  */
 import type { PartnerOp, TutorialStepDef } from './types';
 
@@ -55,7 +56,7 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
     done: { k: 'objective', id: 'o_kills' },
     highlights: ['personalGoal'],
   }),
-  step({ id: 'hearts', room: 't_yard', kind: 'tip', minMs: 6000, highlights: ['hearts'] }),
+  step({ id: 'hearts', room: 't_yard', kind: 'tip', minMs: 8000, highlights: ['hearts'] }),
   step({
     id: 'special',
     room: 't_yard',
@@ -227,6 +228,72 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
     markers: [{ exit: true }],
     // la herse de sortie ne s'ouvre que par le levier du partenaire : relevé, il va le tirer puis rejoint la sortie
     partner: [{ op: 'walk', at: { mech: 'lv_r' }, essential: true }, { op: 'press', button: 'interact', essential: true }, ...goExit],
+  }),
+
+  // ───────── t_heart : EMPLACEMENT CŒUR (ranger, B sur soi, B sur un coéquipier blessé, emplacement plein = appel automatique) ─────────
+  step({
+    id: 'heartStore',
+    room: 't_heart',
+    kind: 'do',
+    minMs: 1500,
+    done: { k: 'any', of: [{ k: 'holdsHeart' }, { k: 'event', type: 'heartStored', by: 0 }] },
+    markers: [{ tile: [8, 6] }],
+    highlights: ['heartSlot'],
+    script: { afterMs: 0, hearts: [{ tile: [8, 6], kind: 'full' }] },
+  }),
+  step({
+    id: 'heartSelf',
+    room: 't_heart',
+    kind: 'do',
+    minMs: 1500,
+    // la blessure n'est mise en scène que quand le joueur tient un cœur (porte ouverte) : jamais de blessure sans de quoi se soigner
+    gate: { k: 'holdsHeart' },
+    done: { k: 'event', type: 'heartUsed', by: 0, match: { targetId: 0 } },
+    buttons: ['heart'],
+    noCompact: true, // « jamais tout seul, c'est toi qui décides » doit rester lisible
+    highlights: ['heartSlot'],
+    script: { afterMs: 0, wound: [{ id: 0, fraction: 0.5 }] },
+  }),
+  step({
+    id: 'heartAlly',
+    room: 't_heart',
+    kind: 'do',
+    minMs: 2000,
+    done: { k: 'event', type: 'heartUsed', by: 0, match: { targetId: 1 } },
+    buttons: ['heart'],
+    noCompact: true, // priorité allié blessé > soi : à garder sous les yeux
+    markers: [{ partner: true }, { tile: [12, 6] }],
+    highlights: ['heartSlot'],
+    script: { afterMs: 0, wound: [{ id: 1, fraction: 0.4 }], hearts: [{ tile: [12, 6], kind: 'full' }] },
+  }),
+  step({
+    id: 'heartFull',
+    room: 't_heart',
+    kind: 'do',
+    minMs: 2500,
+    // validée quand l appel automatique est parti ET que le partenaire a pris le cœur resté au sol (il vient de lui-même : l appel a un effet visible)
+    done: { k: 'all', of: [{ k: 'event', type: 'autoCallStarted', by: 0 }, { k: 'event', type: 'heartStored', by: 1 }] },
+    noCompact: true,
+    markers: [{ tile: [8, 6] }, { tile: [12, 6] }],
+    highlights: ['heartSlot'],
+    script: {
+      afterMs: 0,
+      hearts: [
+        { tile: [8, 6], kind: 'half' },
+        { tile: [12, 6], kind: 'half' },
+      ],
+    },
+    // l'appel automatique du joueur prévient le partenaire (emplacement libre) : il vient ramasser le cœur resté au sol
+    partner: [{ op: 'idle', until: { k: 'event', type: 'autoCallStarted', by: 0 } }, { op: 'walk', at: { pickup: true } }],
+  }),
+  step({
+    id: 'exit.heart',
+    room: 't_heart',
+    kind: 'do',
+    minMs: 0,
+    done: { k: 'event', type: 'roomCleared' },
+    markers: [{ exit: true }],
+    partner: goExit,
   }),
 
   // ───────── t_call : APPEL (recevoir, puis lancer) ─────────

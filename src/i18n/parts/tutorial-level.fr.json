@@ -7,6 +7,7 @@
   "room.tutorial.t_vault.name": "La voûte",
   "room.tutorial.t_dark.name": "La salle sombre",
   "room.tutorial.t_revive.name": "L'infirmerie",
+  "room.tutorial.t_heart.name": "La réserve",
   "room.tutorial.t_call.name": "Le grand couloir",
   "room.tutorial.t_seal.name": "La salle du sceau",
   "sign.tutorial.s_yard": "Objectif de la salle : vaincre tous les ennemis, puis rejoindre la sortie à droite.",

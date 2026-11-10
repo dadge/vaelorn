@@ -151,7 +151,7 @@ describe('TutorialDirector : salles, défaite, interruptions', () => {
   });
 
   it('la démonstration de mort d équipe ne se rejoue pas : après `wipe`, un restart revient à `finalGoals`', () => {
-    const run = new TutorialRun({ startRoomIndex: 6, strategy: 'idle' });
+    const run = new TutorialRun({ startRoomIndex: 7, strategy: 'idle' });
     runUntilStep(run, 'finalGoals');
     expect(run.director.snapshot().wipeDone).toBe(true);
     run.sim.knockDown(0);
@@ -161,7 +161,7 @@ describe('TutorialDirector : salles, défaite, interruptions', () => {
   });
 
   it('démonstration `wipe` : les deux joueurs tombent 4 s après le début de l étape, puis la salle redémarre', () => {
-    const run = new TutorialRun({ startRoomIndex: 6, strategy: 'idle' });
+    const run = new TutorialRun({ startRoomIndex: 7, strategy: 'idle' });
     expect(run.director.step.id).toBe('wipe');
     ticks(run, Math.floor(3900 / SIM_STEP_MS));
     expect(run.events.some((e) => e.type === 'teamWipe')).toBe(false);
@@ -238,7 +238,7 @@ describe('TutorialDirector : salles, défaite, interruptions', () => {
   });
 
   it('étape à porte fermée : carte « en attente » et temps d affichage figé (callSend avant que le partenaire s éloigne)', () => {
-    const run = new TutorialRun({ startRoomIndex: 5, strategy: 'solver' });
+    const run = new TutorialRun({ startRoomIndex: 6, strategy: 'solver' });
     runUntilStep(run, 'callSend');
     const v = run.director.view();
     expect(v.waiting).toBe(true);

@@ -140,3 +140,48 @@ describe('tutoriel : partenaire', () => {
     }
   }, T);
 });
+
+describe('tutoriel : emplacement cœur', () => {
+  it('le parcours complet range un cœur, se soigne avec B, soigne le partenaire blessé et déclenche l appel automatique de cœur', () => {
+    const run = new TutorialRun();
+    run.run(MAX_MS);
+    expect(run.done).toBe(true);
+    const ev = run.events;
+    // rangement
+    expect(ev.some((e) => e.type === 'heartStored' && e.playerId === 0)).toBe(true);
+    // B sur soi (blessure scénarisée) puis B sur le coéquipier blessé : jamais consommé au contact
+    const used = ev.filter((e) => e.type === 'heartUsed');
+    expect(used.some((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 0)).toBe(true);
+    expect(used.some((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 1)).toBe(true);
+    expect(ev.some((e) => e.type === 'pickupCollected')).toBe(false);
+    // emplacement plein : appel automatique avec le symbole du cœur / demi-cœur vers le partenaire, qui prend ensuite le cœur resté au sol
+    const calls = ev.filter((e) => e.type === 'autoCallStarted');
+    expect(calls.some((e) => e.type === 'autoCallStarted' && e.playerId === 0 && (e.icon === 'half' || e.icon === 'heart') && e.to.includes(1))).toBe(true);
+    expect(ev.some((e) => e.type === 'heartStored' && e.playerId === 1)).toBe(true);
+    const done = new Set(run.director.snapshot().done);
+    for (const id of ['heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'exit.heart']) expect(done.has(id), id).toBe(true);
+  }, T);
+
+  it('la simulation du tutoriel a l emplacement cœur actif, l appel automatique actif et aucun butin aléatoire', () => {
+    const run = new TutorialRun();
+    expect(run.state.heartSlot).toBe(true);
+    expect(run.state.autoCallDisabled).toBeUndefined();
+    expect(run.state.lootEnabled).toBe(false);
+  });
+
+  it('le joueur ne se soigne jamais tout seul : sans appuyer sur B, ses PV restent ceux de la blessure scénarisée', () => {
+    const run = new TutorialRun({ startRoomIndex: 5 });
+    // l humain scripté joue la salle ; on vérifie qu aucun PV n est jamais rendu sans événement heartUsed
+    let last = run.state.players[0].hp;
+    let unexplained = 0;
+    for (let i = 0; i < 60 * 60 && run.state.roomIndex === 5; i++) {
+      const before = last;
+      const nEv = run.events.length;
+      run.tick();
+      const used = run.events.slice(nEv).some((e) => e.type === 'heartUsed' && e.targetId === 0);
+      if (run.state.players[0].hp > before && !used) unexplained++;
+      last = run.state.players[0].hp;
+    }
+    expect(unexplained).toBe(0);
+  }, T);
+});

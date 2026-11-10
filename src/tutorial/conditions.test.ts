@@ -62,7 +62,7 @@ describe('evalCondition sur un état réel', () => {
   });
 
   it('near / far : distance joueur ↔ partenaire (en tuiles)', () => {
-    const run = new TutorialRun({ startRoomIndex: 5 }); // t_call : 47 tuiles d écart
+    const run = new TutorialRun({ startRoomIndex: 6 }); // t_call : 47 tuiles d écart
     run.tick();
     expect(humanPartnerDistancePx(run.state) / 16).toBeGreaterThan(40);
     expect(evalCondition({ k: 'far', tiles: 16 }, ctxOf(run))).toBe(true);
@@ -103,5 +103,26 @@ describe('evalCondition sur un état réel', () => {
     expect(s).toEqual({ id: 's_yard', ms: 100 });
     run.state.players[0].pos = { x: 20 * 16, y: 6 * 16 };
     expect(stepSignNear(s, run.state, room, 100)).toEqual({ id: null, ms: 0 });
+  });
+});
+
+describe('emplacement cœur : holdsHeart et acteurs des événements', () => {
+  it('holdsHeart : vrai quand le joueur a un cœur / demi-cœur rangé', () => {
+    const run = new TutorialRun({ startRoomIndex: 5 });
+    run.tick();
+    expect(evalCondition({ k: 'holdsHeart' }, ctxOf(run))).toBe(false);
+    run.state.players[0].heart = 'half';
+    expect(evalCondition({ k: 'holdsHeart' }, ctxOf(run))).toBe(true);
+  });
+
+  it('eventActor : heartStored / heartUsed / autoCallStarted = le joueur qui agit ; countEvents sait filtrer la cible', () => {
+    const pos = { x: 0, y: 0 };
+    const used = (targetId: 0 | 1): SimEvent => ({ type: 'heartUsed', playerId: 0, targetId, kind: 'full', amount: 10, pos });
+    expect(eventActor({ type: 'heartStored', playerId: 1, pickupId: 3, kind: 'half', pos })).toBe(1);
+    expect(eventActor(used(1))).toBe(0);
+    expect(eventActor({ type: 'autoCallStarted', playerId: 0, icon: 'heart', to: [1] })).toBe(0);
+    const log: SimEvent[] = [used(0), used(1), used(1)];
+    expect(countEvents(log, { k: 'event', type: 'heartUsed', by: 0, match: { targetId: 1 } })).toBe(2);
+    expect(countEvents(log, { k: 'event', type: 'heartUsed', by: 1 })).toBe(0);
   });
 });

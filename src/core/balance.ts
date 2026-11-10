@@ -36,13 +36,14 @@
  *        BUFF_BUDGET_PER_PLAYER (~0,3 par héros et par salle), BUFF_KIND_WEIGHTS, BUFF_SPEED_TOTAL_CAP (plafond de TOUTES les sources de vitesse)
  *  [B28] AUTO_CALL_* ............... appel AUTOMATIQUE (objet laissé aux coéquipiers) : durée du signal (= celle de l'appel manuel, 3 s), délai de récupération
  *        propre au joueur (4 s, distinct de celui de l'appel manuel) et marge de ré-armement par couple (joueur, objet au sol)
+ *  [B29] HEART_HEAL_RADIUS ......... EMPLACEMENT CŒUR : rayon de contact (px) pour soigner un coéquipier blessé avec B (= portée du relevage, `REVIVE_RANGE`)
  *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
  *
  * La difficulté n'affecte JAMAIS : les PV du joueur, le nombre d'ennemis, les mécanismes.
  */
-import { CALL_DURATION_MS } from './constants';
+import { CALL_DURATION_MS, REVIVE_RANGE } from './constants';
 import type { BasicGearSlot, CharacterDef, Difficulty } from './types';
 
 // ───────────────────────── Constantes d'équilibrage ─────────────────────────
@@ -304,6 +305,12 @@ export const AUTO_CALL_COOLDOWN_MS = 4_000;
  * être sorti du rayon de contact + cette marge puis y être revenu (pas de va-et-vient au bord du rayon).
  */
 export const AUTO_CALL_REARM_MARGIN = 4;
+
+/**
+ * [B29] EMPLACEMENT CŒUR : rayon de contact (px, centre à centre) dans lequel un joueur qui appuie sur B soigne un coéquipier VIVANT et BLESSÉ avec le cœur rangé : la portée du relevage
+ * (`REVIVE_RANGE`, 22 px), pour que « se placer sur l'allié » soit le même geste dans les deux cas. À valider à la main (ergonomie, voir TODO.md).
+ */
+export const HEART_HEAL_RADIUS = REVIVE_RANGE;
 
 /** Multiplicateurs de difficulté appliqués aux ENNEMIS (du point de vue d'un joueur donné). */
 export interface DifficultyMultipliers {

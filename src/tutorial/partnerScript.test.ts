@@ -46,9 +46,10 @@ describe('partenaire scripté : machine virtuelle', () => {
       [1, { op: 'walk', at: { mech: 'pB' } }],
       [1, { op: 'walk', at: { mech: 'lv1' } }],
       [3, { op: 'walk', at: { tile: [14, 5] } }], // un brasero est solide : on vise la tuile voisine
-      [6, { op: 'walk', at: { zone: 'z_seal' } }],
+      [7, { op: 'walk', at: { zone: 'z_seal' } }],
       [0, { op: 'goExit' }],
-      [5, { op: 'goExit' }],
+      [5, { op: 'walk', at: { tile: [12, 6] } }], // t_heart : un cœur posé par le script
+      [6, { op: 'goExit' }],
     ];
     for (const [room, op] of targets) {
       const r = tutorialLevel.rooms[room];
@@ -69,7 +70,7 @@ describe('partenaire scripté : machine virtuelle', () => {
   });
 
   it('callEvery : n appelle jamais avant le délai de récupération (aucun appel perdu) et s arrête avec `until`', () => {
-    const { frames, events } = play([{ op: 'callEvery', ms: 5200, until: { k: 'near', tiles: 0.1 } }], { room: 5, maxMs: 20_000 });
+    const { frames, events } = play([{ op: 'callEvery', ms: 5200, until: { k: 'near', tiles: 0.1 } }], { room: 6, maxMs: 20_000 });
     const callFrames = frames.map((f, i) => (f.call ? i : -1)).filter((i) => i >= 0);
     expect(callFrames.length).toBeGreaterThanOrEqual(3);
     for (let i = 1; i < callFrames.length; i++) expect((callFrames[i] - callFrames[i - 1]) * SIM_STEP_MS).toBeGreaterThanOrEqual(CALL_COOLDOWN_MS);
@@ -116,7 +117,7 @@ describe('partenaire scripté : machine virtuelle', () => {
     loadProgram(vm, [{ op: 'walk', at: { tile: [30, 6] } }]);
     const state = sim.state;
     const f = stepVm(vm, { dtMs: SIM_STEP_MS, state, room: tutorialLevel.rooms[0], level: tutorialLevel, evalCond: () => false });
-    expect(f).toEqual({ moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false });
+    expect(f).toEqual({ moveX: 0, moveY: 0, attack: false, interact: false, revive: false, special: false, call: false, heart: false });
   });
 
   it('n attaque jamais et n utilise jamais le spécial (toutes les frames de tous les programmes des étapes)', async () => {

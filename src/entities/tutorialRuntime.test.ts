@@ -4,7 +4,7 @@ import { createSimulation } from '../core/simulation';
 import type { TickInputs } from '../core/types';
 import { VIRTUAL_PAD_INDEX } from '../input/VirtualPad';
 import { TUTORIAL_LEVEL_ID, TUTORIAL_SEED, tutorialLevel } from '../levels/tutorial';
-import { PARTNER_PREFERENCE, TutorialRuntime, pickPartnerCharacter, tutorialPlayers } from './tutorialRuntime';
+import { PARTNER_PREFERENCE, TUTORIAL_HEART_TTL_MS, TutorialRuntime, applyScripted, pickPartnerCharacter, tutorialPlayers } from './tutorialRuntime';
 
 describe('partenaire et joueurs simulés', () => {
   it('le partenaire est le premier personnage de la famille différent du joueur', () => {
@@ -85,5 +85,21 @@ describe('TutorialRuntime', () => {
     }
     expect(downs).toEqual([1]);
     expect(sim.state.players[1].status).toBe('down');
+  });
+});
+
+describe('applyScripted : mise en scène du soin', () => {
+  it('une blessure ramène le joueur à la fraction demandée (jamais de soin) ; un cœur est posé à la position, durée de vie longue', () => {
+    const sim = createSimulation({ levelId: TUTORIAL_LEVEL_ID, players: tutorialPlayers(undefined), seed: TUTORIAL_SEED, startRoomIndex: 5, heartSlot: true, loot: false }, tutorialLevel);
+    sim.step(SIM_STEP_MS, {});
+    const partner = sim.state.players[1];
+    expect(applyScripted(sim, { k: 'wound', id: 1, fraction: 0.4 })).toBe(true);
+    expect(partner.hp).toBe(Math.floor(partner.maxHp * 0.4));
+    expect(applyScripted(sim, { k: 'wound', id: 1, fraction: 0.9 })).toBe(false);
+    expect(applyScripted(sim, { k: 'heart', x: 8.5 * 16, y: 6.5 * 16, kind: 'full' })).toBe(true);
+    sim.step(SIM_STEP_MS, {});
+    const pk = sim.state.room.pickups?.[0];
+    expect(pk?.kind).toBe('full');
+    expect(pk?.ttlMs).toBeGreaterThan(TUTORIAL_HEART_TTL_MS - 200);
   });
 });

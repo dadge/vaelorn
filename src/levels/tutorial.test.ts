@@ -40,8 +40,8 @@ describe('niveau-tutoriel : données', () => {
     expect(isSavingAllowed({ quick: false, search: '' })).toBe(true);
   });
 
-  it('a 7 salles, la dernière est finale, aucune n a de bandeau d indice (la carte du tutoriel en tient lieu)', () => {
-    expect(tutorialLevel.rooms.map((r) => r.id)).toEqual(['t_yard', 't_workshop', 't_vault', 't_dark', 't_revive', 't_call', 't_seal']);
+  it('a 8 salles, la dernière est finale, aucune n a de bandeau d indice (la carte du tutoriel en tient lieu)', () => {
+    expect(tutorialLevel.rooms.map((r) => r.id)).toEqual(['t_yard', 't_workshop', 't_vault', 't_dark', 't_revive', 't_heart', 't_call', 't_seal']);
     expect(tutorialLevel.rooms[tutorialLevel.rooms.length - 1].exit.final).toBe(true);
     for (const r of tutorialLevel.rooms) expect(r.introHintKey).toBeUndefined();
   });

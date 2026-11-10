@@ -41,6 +41,7 @@ import {
   type HourglassLevel,
 } from './mechHud';
 import { edgeIndicator } from './camera';
+import { heartSlotBorderColor, heartSlotHintText, heartSlotSignature, heartSlotView } from './heartSlotHud';
 import { BUFF_HUD_ORDER, buffHudEntries, buffHudSignature, gearEmptyFrame, gearHudSignature, gearHudSlots } from './gearFx';
 import { CallEdgeHud } from './callHud';
 import { hex } from './palettes';
@@ -435,7 +436,7 @@ export function specialHintLabel(assignment: HintAssignment | undefined, binding
   const kb = keys.slice(0, 2).map(keyCodeLabel).join('/');
   const pd = padButtonLabel(pad[0]);
   if (!assignment) return kb;
-  if (assignment.anyDevice) return `${kb} / ${pd}`;
+  if (assignment.anyDevice) return kb === pd ? kb : `${kb} / ${pd}`; // « B / B » (clavier et manette identiques, ex. cœur) : une seule fois
   return assignment.label === 'gamepad' ? pd : kb;
 }
 
@@ -517,6 +518,10 @@ export interface HudEnv {
   specialHint?: (playerId: PlayerId) => string;
   /** false : l'équipement est désactivé (démo, tutoriel) : ni rangée de 6 cases ni bonus temporaires (absent = true). */
   gear?: boolean;
+  /** true : l'EMPLACEMENT CŒUR est actif (jeu, tutoriel) : petit emplacement à droite de la rangée de cœurs (absent / false = aucun, démo). */
+  heartSlot?: boolean;
+  /** Rappel du bouton « utiliser le cœur » pour un joueur (« B »...), fourni par la scène (absent = « B »). */
+  heartHint?: (playerId: PlayerId) => string;
 }
 
 /** Rectangle en coordonnées écran. */
@@ -560,6 +565,12 @@ export class PlayerHud {
   private readonly hp: Text;
   private readonly hearts: Img[] = [];
   private readonly heartFramesCache: string[] = [];
+  /** Emplacement cœur (option `HudEnv.heartSlot`) : cadre, icône du cœur / demi-cœur rangé (silhouette atténuée si vide) et rappel de la touche. */
+  private heartSlotBg: Rect | null = null;
+  private heartSlotIcon: Img | null = null;
+  private heartSlotHint: Text | null = null;
+  private heartSlotSig = '';
+  private heartSlotHintAccumMs = 1e9;
   private readonly keyIcons: Img[] = [];
   /** Rangée d'équipement (6 cases sous les cœurs) : fond, icône et 3 pastilles de niveau par case. */
   private readonly gearBgs: Rect[] = [];
@@ -713,8 +724,25 @@ export class PlayerHud {
     const gy = hy + 8 * u + 4;
     const pipH = Math.max(3, u + 1);
     const pipW = Math.max(4, Math.floor((8 * u - 2) / 3));
+    // EMPLACEMENT CŒUR : en tête de la 2e ligne (celle de l'équipement, pas à la fin de la rangée de cœurs qui peut passer sous le bloc « Objectifs de la salle »), cadre discret de la même
+    // hauteur que les cases d'équipement : cœur / demi-cœur rangé ou silhouette atténuée, suivi du rappel du bouton en petit (police >= 11 px, lisible à l'échelle mobile) ; l'équipement
+    // et les bonus se décalent à sa droite. Absent (démo) : aucune position ne change.
+    const slotOn = env.heartSlot === true;
+    const slotH = 8 * u + pipH + 4;
+    const hintSize = Math.max(12, this.fs - 3);
+    const slotW = 8 * u + 5 + Math.round(hintSize * 0.62) * 2 + 4; // place du libellé du bouton ET du « ½ » d'un demi-cœur rangé (lisible quand l'écran est réduit)
+    if (slotOn) {
+      const sx = vx + m;
+      const bg = hudRect(ctx, sx - 1, gy - 1, slotW, slotH, 0x0b0912, 0.7);
+      bg.setOrigin(0, 0).setStrokeStyle(1, heartSlotBorderColor(undefined, false), 0.9);
+      this.heartSlotBg = bg;
+      const v0 = heartSlotView(undefined);
+      this.heartSlotIcon = hudIcon(ctx, sx, gy, v0.frame, u).setTint(v0.tint ?? 0xffffff).setAlpha(v0.alpha);
+      this.heartSlotHint = hudText(ctx, sx + 8 * u + 3, gy + 4 * u, 'B', { size: hintSize, originY: 0.5, color: 0xcfc8e8, depth: HUD_DEPTH.content });
+    }
+    const gearX0 = vx + m + (slotOn ? slotW + 7 : 0);
     for (let i = 0; gearOn && i < 6; i++) {
-      const gx = vx + m + i * (8 * u + u + 3);
+      const gx = gearX0 + i * (8 * u + u + 3);
       const bg = hudRect(ctx, gx - 1, gy - 1, 8 * u + 2, 8 * u + pipH + 4, 0x0b0912, 0.7);
       bg.setOrigin(0, 0);
       const ic = hudIcon(ctx, gx, gy, 'gear_icon_boots_1', u);
@@ -731,7 +759,7 @@ export class PlayerHud {
     }
     // bonus temporaires (potion, rage, étoile, cor) : icônes avec anneau de compte à rebours et secondes, à droite de la rangée d'équipement
     this.buffCell = 8 * u + 8;
-    this.buffX0 = vx + m + 6 * (8 * u + u + 3) + 8;
+    this.buffX0 = gearX0 + 6 * (8 * u + u + 3) + 8;
     this.buffY0 = gy;
     this.buffRing = ctx.scene.add.graphics();
     this.buffRing.setDepth(HUD_DEPTH.content + 0.6);
@@ -746,7 +774,7 @@ export class PlayerHud {
       this.buffTexts.push(tx);
     }
     // indicateur d'attaque spéciale : icône + jauge + texte, sous la rangée d'équipement (équipement désactivé : directement sous les cœurs)
-    const sy = gearOn ? gy + 8 * u + pipH + 7 : hy + 8 * u + 6;
+    const sy = gearOn ? gy + 8 * u + pipH + 7 : slotOn ? gy + slotH + 6 : hy + 8 * u + 6;
     const rowMid = sy + 4 * u;
     this.spBarW = Math.max(64, Math.min(96, Math.floor(vw * 0.2)));
     this.spIcon = hudIcon(ctx, vx + m, sy, 'ui_special', u);
@@ -899,6 +927,10 @@ export class PlayerHud {
     if (this.spBarBg.visible) {
       const right = Math.max(this.spBarBg.x + this.spBarBg.width, this.spText.visible ? this.spText.x + this.spText.width : 0);
       out.special = box(this.spIcon.x - 3, this.spBarBg.y - this.spBarBg.height / 2 - 2, right + 3, this.spBarBg.y + this.spBarBg.height / 2 + 2);
+    }
+    if (this.heartSlotBg && this.heartSlotHint) {
+      const bg = this.heartSlotBg;
+      out.heartSlot = box(bg.x - 3, bg.y - 3, this.heartSlotHint.x + this.heartSlotHint.width + 3, bg.y + bg.height + 3);
     }
     const k0 = this.keyIcons[0];
     const kN = this.keyIcons[this.keyIcons.length - 1];
@@ -1104,6 +1136,25 @@ export class PlayerHud {
       if (f !== this.heartFramesCache[i]) {
         this.hearts[i].setFrame(f);
         this.heartFramesCache[i] = f;
+      }
+    }
+
+    // emplacement cœur : cœur / demi-cœur rangé (silhouette atténuée si vide), rafraîchi seulement quand le contenu change ; rappel du bouton relu ~4 fois par seconde
+    if (this.heartSlotIcon && this.heartSlotHint) {
+      const hSig = heartSlotSignature(p.heart, p.hp < p.maxHp);
+      if (hSig !== this.heartSlotSig) {
+        this.heartSlotSig = hSig;
+        this.heartSlotBg?.setStrokeStyle(1, heartSlotBorderColor(p.heart, p.status === 'alive' && p.hp < p.maxHp), 0.9); // rappel FIXE (jamais clignotant) : liseré doré quand un cœur rangé peut servir
+        this.heartSlotHintAccumMs = 1e9; // le « ½ » du rappel suit le contenu sans attendre le rafraîchissement du libellé
+        const v = heartSlotView(p.heart);
+        this.heartSlotIcon.setFrame(v.frame).setAlpha(v.alpha);
+        if (v.tint === null) this.heartSlotIcon.clearTint();
+        else this.heartSlotIcon.setTint(v.tint);
+      }
+      this.heartSlotHintAccumMs += a.dtMs;
+      if (this.heartSlotHintAccumMs >= 250) {
+        this.heartSlotHintAccumMs = 0;
+        setTextIfChanged(this.heartSlotHint, heartSlotHintText(this.env.heartHint ? this.env.heartHint(this.playerId) : 'B', p.heart));
       }
     }
 
@@ -1514,8 +1565,12 @@ export class PlayerHud {
       this.barBg, this.barFill, this.toastBg, this.toastText, ...this.arrows, ...this.enemyArrows, this.goalBg, this.goalHeader, ...this.goalIcons, ...this.goalTexts, this.torchIcon, this.torchBarBg, this.torchBarFill, this.spIcon, this.spBarBg, this.spBarFill, this.spText,
       this.puzBg, this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText, this.lanBg, this.lanIcon, this.lanText,
       ...this.gearBgs, ...this.gearIcons, ...this.gearPips.flat(), ...this.buffIcons, ...this.buffTexts, this.buffRing,
+      ...(this.heartSlotBg ? [this.heartSlotBg] : []), ...(this.heartSlotIcon ? [this.heartSlotIcon] : []), ...(this.heartSlotHint ? [this.heartSlotHint] : []),
     ];
     for (const o of all) o.destroy();
+    this.heartSlotBg = null;
+    this.heartSlotIcon = null;
+    this.heartSlotHint = null;
     this.gearBgs.length = 0;
     this.gearIcons.length = 0;
     this.gearPips.length = 0;
@@ -1552,6 +1607,9 @@ interface TeamRow {
   name: Text;
   state: Text;
   hearts: Img[];
+  /** Mini emplacement cœur (option `HudEnv.heartSlot`) : à droite de la ligne des cœurs. */
+  slot: Img | null;
+  slotSig: string;
   keys: Img[];
   obj: Text;
   frames: string[];
@@ -1588,6 +1646,7 @@ export class TeamPanelHud {
       const hearts: Img[] = [];
       const n = heartCount(p.maxHp);
       for (let k = 0; k < n; k++) hearts.push(hudIcon(ctx, x + 26 + k * 13, ry + 20, 'ui_heart_full', 1.5));
+      const slot = env.heartSlot === true ? hudIcon(ctx, x + 26 + n * 13 + 6, ry + 20, 'ui_heart_full', 1.5).setTint(heartSlotView(undefined).tint ?? 0xffffff).setAlpha(heartSlotView(undefined).alpha) : null;
       const keys: Img[] = [];
       for (let k = 0; k < 3; k++) {
         const ic = hudIcon(ctx, x + 26 + k * 14, ry + 38, 'ui_key_0', 1.5);
@@ -1613,7 +1672,7 @@ export class TeamPanelHud {
       const tFill = hudRect(ctx, spX, ry + 42, tW, 6, torchBarColor('full'), 1, HUD_DEPTH.content);
       tFill.setOrigin(0, 0.5);
       for (const o of [tIcon, tBg, tFill]) o.setVisible(false);
-      this.rows.push({ spIcon, spBg, spFill, spW, tIcon, tBg, tFill, tW, tShown: false, tLvl: 'full', tW0: -1, tFrame: '', swatch, name, state, hearts, keys, obj, frames: hearts.map(() => 'ui_heart_full'), sig: '' });
+      this.rows.push({ spIcon, spBg, spFill, spW, tIcon, tBg, tFill, tW, tShown: false, tLvl: 'full', tW0: -1, tFrame: '', swatch, name, state, hearts, slot, slotSig: '', keys, obj, frames: hearts.map(() => 'ui_heart_full'), sig: '' });
     });
   }
 
@@ -1645,6 +1704,16 @@ export class TeamPanelHud {
         if (f !== row.frames[k]) {
           row.hearts[k].setFrame(f);
           row.frames[k] = f;
+        }
+      }
+      if (row.slot) {
+        const hSig = heartSlotSignature(p.heart);
+        if (hSig !== row.slotSig) {
+          row.slotSig = hSig;
+          const v = heartSlotView(p.heart);
+          row.slot.setFrame(v.frame).setAlpha(v.alpha);
+          if (v.tint === null) row.slot.clearTint();
+          else row.slot.setTint(v.tint);
         }
       }
       const sp = specialStatus(p);
@@ -1711,6 +1780,7 @@ export class TeamPanelHud {
       r.name.destroy();
       r.state.destroy();
       for (const h of r.hearts) h.destroy();
+      r.slot?.destroy();
       for (const k of r.keys) k.destroy();
       r.obj.destroy();
       r.spIcon.destroy();

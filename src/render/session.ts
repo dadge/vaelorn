@@ -1,4 +1,4 @@
-import type { PlayerGear, PlayerId, PlayerSetup } from '../core/types';
+import type { PickupKind, PlayerGear, PlayerId, PlayerSetup } from '../core/types';
 import type { DeviceKind } from '../tutorial/types';
 
 /** Clés de scènes Phaser (une seule source de vérité). */
@@ -43,6 +43,11 @@ export interface GameSession {
    * seulement par la reprise ; supprimé au niveau suivant et à une nouvelle tentative (l'équipement dure jusqu'à la fin du niveau).
    */
   startGear?: (PlayerGear | undefined)[];
+  /**
+   * Cœur rangé de départ de chaque joueur (reprise « Continuer », emplacement cœur) : lu par GameScene (`SimConfig.initialHearts`). Renseigné seulement par la reprise ; supprimé au niveau
+   * suivant et à une nouvelle tentative (comme l'équipement : il dure jusqu'à la fin du niveau).
+   */
+  startHearts?: (PickupKind | undefined)[];
   /**
    * Niveaux (identifiants) déjà terminés dans cette partie : reportés dans la sauvegarde (voir src/core/save.ts).
    * Renseigné à la reprise (« Continuer ») ; GameScene le met à jour à la fin de chaque niveau pour le niveau suivant.

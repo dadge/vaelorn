@@ -32,7 +32,7 @@ export type Difficulty = 1 | 2 | 3;
 // ───────────────────────────── Entrées (abstraites) ─────────────────────────────
 
 /** Noms des actions de jeu (couche d'abstraction, remappables, branchables sur tactile/réseau). */
-export type ActionName = 'move' | 'attack' | 'interact' | 'revive' | 'special' | 'call';
+export type ActionName = 'move' | 'attack' | 'interact' | 'revive' | 'special' | 'call' | 'heart';
 
 /**
  * État des entrées d'UN joueur pour UN pas de simulation. Valeurs « tenues » (held) :
@@ -49,6 +49,11 @@ export interface ActionFrame {
   special?: boolean;
   /** Appel (bouton dédié ; absent = false) : signal vers l'équipe, voir `CALL_*` (constants.ts). Front montant détecté par la simulation. */
   call?: boolean;
+  /**
+   * Utiliser le cœur rangé (bouton DÉDIÉ : clavier B, manette B ; absent = false). Front montant détecté par la simulation ; sans effet si `SimConfig.heartSlot` est faux
+   * (voir `heartSlot.ts`). Jamais lié à l'action contextuelle (attaque / interaction / relevage) : B ne déclenche aucune autre action.
+   */
+  heart?: boolean;
 }
 
 export const EMPTY_ACTION_FRAME: Readonly<ActionFrame> = Object.freeze({
@@ -381,7 +386,7 @@ export interface PlayerState {
   /** Nombre de fois à terre dans le niveau (stat). */
   downCount: number;
   /** Mémoire des entrées du pas précédent (détection de fronts montants). */
-  prev: { attack: boolean; interact: boolean; revive: boolean; special?: boolean; call?: boolean };
+  prev: { attack: boolean; interact: boolean; revive: boolean; special?: boolean; call?: boolean; heart?: boolean };
   /** Dernier mouvement effectif (pour animation de marche) : true si le joueur s'est déplacé ce pas. */
   moving: boolean;
   /** Temps de recharge restant de l'attaque spéciale (ms) ; 0 = prête. */
@@ -409,6 +414,11 @@ export interface PlayerState {
   autoCallCooldownMs?: number;
   /** Objets au sol (références 'p<id>' / 'g<id>') déjà signalés par ce joueur et dont il n'est pas encore sorti du rayon : un seul appel par couple (joueur, objet). Absent = aucun. */
   autoCallSeen?: string[];
+  /**
+   * EMPLACEMENT CŒUR (`heartSlot.ts`, option `SimConfig.heartSlot`) : le cœur (10 PV) ou demi-cœur (5 PV) rangé, utilisé volontairement avec le bouton B. Un seul objet, jamais cumulé.
+   * Champ OPTIONNEL : absent = emplacement vide, donc un état sans cœur rangé (ou sans l'option) est identique à celui d'avant l'ajout. Perdu à la chute (il tombe alors au sol).
+   */
+  heart?: PickupKind;
   /**
    * Équipement et bonus temporaires (vides par défaut). Perdus à la chute du joueur (RÈGLE STRICTE, y compris à la défaite d'équipe),
    * conservés d'une salle à l'autre, réinitialisés au niveau suivant. Un ancien snapshot n'a pas ce champ : valeur par défaut posée à la restauration.
@@ -977,6 +987,11 @@ export interface GameState {
    * donc un état de partie normale reste identique à celui d'avant l'ajout.
    */
   autoCallDisabled?: boolean;
+  /**
+   * Emplacement cœur actif ? (`SimConfig.heartSlot === true`). Champ posé UNIQUEMENT quand il vaut true : absent = ancien comportement exact (cœur consommé au contact, cristal au
+   * contact, aucun bouton B), donc un état sans l'option est identique à celui d'avant son ajout.
+   */
+  heartSlot?: boolean;
 }
 
 // ───────────────────────────── Événements (sons, FX, HUD) ─────────────────────────────
@@ -1019,6 +1034,15 @@ export type SimEvent =
   | { type: 'pickupDropped'; pickupId: number; kind: PickupKind; pos: Vec2 }
   | { type: 'pickupCollected'; pickupId: number; playerId: PlayerId; kind: PickupKind; healed: number; pos: Vec2 }
   | { type: 'crystalUsed'; crystalId: string; playerId: PlayerId; healed: number; pos: Vec2 }
+  // ── Emplacement cœur (`SimConfig.heartSlot`) ──
+  /** Un joueur RANGE le cœur / demi-cœur qu'il touche dans son emplacement (il disparaît du sol, aucun soin). */
+  | { type: 'heartStored'; playerId: PlayerId; pickupId: number; kind: PickupKind; pos: Vec2 }
+  /** B : `playerId` utilise le cœur rangé sur `targetId` (lui-même ou un allié blessé) : `amount` PV rendus (plafonnés au manque), le cœur est consommé. */
+  | { type: 'heartUsed'; playerId: PlayerId; targetId: PlayerId; kind: PickupKind; amount: number; pos: Vec2 }
+  /** B sans effet (personne n'a besoin de soin, ou emplacement vide) : rien n'est consommé ; retour discret. */
+  | { type: 'heartRefused'; playerId: PlayerId }
+  /** Un joueur tombé perd le cœur rangé : il tombe au sol à ses pieds (`pickupDropped` suit). Sert à la sauvegarde (la perte est écrite dès la chute). */
+  | { type: 'heartLost'; playerId: PlayerId; kind: PickupKind; pos: Vec2 }
   // ── Équipement ──
   /** Un objet d'équipement apparaît au sol (butin d'un ennemi, ou `scattered` : équipement perdu éparpillé par un joueur tombé). */
   | { type: 'gearDropped'; dropId: number; item: GearItem; pos: Vec2; scattered: boolean }
@@ -1068,6 +1092,13 @@ export interface SimConfig {
    * prévient ses coéquipiers pour qui il serait utile. false = désactivé (démo, tutoriel, bots). Purement informatif : n'a AUCUN effet sur le gameplay ni sur les flux aléatoires.
    */
   autoCall?: boolean;
+  /**
+   * Emplacement CŒUR (défaut false pour le cœur du moteur, TRUE posé par le jeu et le tutoriel) : un cœur / demi-cœur touché est rangé (jamais consommé au contact), le bouton B l'utilise
+   * (voir `heartSlot.ts`), l'appel automatique part quand l'emplacement est plein, le cristal de soin devient volontaire. false / absent = ancien comportement exact (bots, calibration, démo).
+   */
+  heartSlot?: boolean;
+  /** Cœur rangé au départ par indice de joueur (reprise d'une sauvegarde « Continuer ») : 'half' | 'full' ; absent, indéfini ou valeur inconnue = emplacement vide. Sans effet si `heartSlot` est faux. */
+  initialHearts?: readonly (PickupKind | undefined)[];
   /** Équipement de départ par indice de joueur (reprise d'une sauvegarde « Continuer ») ; absent / indéfini = équipement vide. */
   initialGear?: readonly (PlayerGear | undefined)[];
 }

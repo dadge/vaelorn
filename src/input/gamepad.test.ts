@@ -157,13 +157,13 @@ describe('manettes non standard (mappage de repli)', () => {
     expect(gamepadToMenuHeld(nonStd({ axes: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.1429] }), b).has('down')).toBe(true);
   });
 
-  it('stick 0/1 et boutons 0/2/3 = A/X/Y en repli (B sans effet en jeu)', () => {
+  it('stick 0/1 et boutons 0/1/2/3 = A/B/X/Y en repli (B = utiliser le cœur en jeu)', () => {
     const f = gamepadToFrame(nonStd({ axes: [1, 0], pressed: [0] }), b);
     expect(f.moveX).toBeCloseTo(1);
     expect(f.attack && f.interact && f.revive).toBe(true);
     expect(gamepadToFrame(nonStd({ pressed: [2] }), b)).toMatchObject({ attack: false, interact: false, call: true });
     expect(gamepadToFrame(nonStd({ pressed: [3] }), b)).toMatchObject({ attack: false, interact: false, special: true });
-    expect(gamepadToFrame(nonStd({ pressed: [1] }), b)).toMatchObject({ attack: false, interact: false, revive: false, special: false, call: false });
+    expect(gamepadToFrame(nonStd({ pressed: [1] }), b)).toMatchObject({ attack: false, interact: false, revive: false, special: false, call: false, heart: true });
     expect(gamepadToMenuHeld(nonStd({ pressed: [0] }), b).has('confirm')).toBe(true);
     expect(gamepadToMenuHeld(nonStd({ pressed: [1] }), b).has('back')).toBe(true);
   });

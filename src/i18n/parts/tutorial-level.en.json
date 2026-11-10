@@ -7,6 +7,7 @@
   "room.tutorial.t_vault.name": "The vault",
   "room.tutorial.t_dark.name": "The dark room",
   "room.tutorial.t_revive.name": "The infirmary",
+  "room.tutorial.t_heart.name": "The reserve",
   "room.tutorial.t_call.name": "The long hall",
   "room.tutorial.t_seal.name": "The seal room",
   "sign.tutorial.s_yard": "Room goal: defeat every enemy, then reach the exit on the right.",

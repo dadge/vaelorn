@@ -23,11 +23,15 @@
  *  - v3 (courante) : v2 + ÉQUIPEMENT par joueur (`players[i].gear`, optionnel : absent = équipement vide). L'équipement dure jusqu'à la fin du
  *    niveau : il est écrit au début de chaque salle (l'équipement perdu n'y est évidemment plus), remis à zéro à la fin d'un niveau, et restitué
  *    par « Continuer ». Migration v2 → v3 : aucun équipement.
+ *    EMPLACEMENT CŒUR (champ optionnel de la même version, SANS changement de schéma : une lecture ancienne ignore le champ, une lecture récente tolère son absence) : `players[i].heart`
+ *    = 'half' | 'full', omis quand l'emplacement est vide, valeur inconnue = vide (jamais une erreur : c'est un bonus facultatif). Même cycle de vie que l'équipement : écrit au début de
+ *    chaque salle, vidé dès la chute (`heartLost`, comme `gearLost`), remis à zéro à la fin d'un niveau, restitué par « Continuer ».
  */
 import { CHARACTERS, CHARACTER_IDS } from './characters';
 import { MAX_PLAYERS } from './constants';
 import { ACCESSORY_KINDS, cloneGear, isGearEmpty, normalizeGear, sameGear } from './gear';
-import type { CharacterId, Difficulty, PlayerGear, PlayerId, PlayerSetup, SimConfig, SimEvent } from './types';
+import { isHeartKind } from './heartSlot';
+import type { CharacterId, Difficulty, PickupKind, PlayerGear, PlayerId, PlayerSetup, SimConfig, SimEvent } from './types';
 
 // ───────────────────────────── Types ─────────────────────────────
 
@@ -40,6 +44,16 @@ export interface SavedPlayer {
   difficulty: Difficulty;
   /** Équipement du joueur au début de la salle de reprise (v3). Absent = vide (jamais écrit quand il est vide : une sauvegarde sans équipement reste identique à celle d'avant). */
   gear?: PlayerGear;
+  /** Cœur rangé dans l'emplacement du joueur au début de la salle de reprise ('half' | 'full'). Absent = vide (jamais écrit quand il est vide). */
+  heart?: PickupKind;
+}
+
+/** Joueur sauvegardé construit sans champ superflu : `gear` et `heart` ne sont présents que s'ils ne sont pas vides (une sauvegarde sans eux reste identique à celle d'avant). */
+function makeSavedPlayer(characterId: CharacterId, difficulty: Difficulty, gear?: PlayerGear, heart?: PickupKind): SavedPlayer {
+  const out: SavedPlayer = { characterId, difficulty };
+  if (gear) out.gear = gear;
+  if (heart) out.heart = heart;
+  return out;
 }
 
 /** Sauvegarde de progression (JSON pur). Le nombre de joueurs est `players.length` (1..4). */
@@ -207,7 +221,8 @@ export function validateSave(data: unknown, ctx: SaveContext): ParseSaveResult {
     // équipement invalide : traité comme VIDE (la progression - niveau, salle, équipe - reste lisible)
     const gearChecked = validateGear(p.gear);
     const gear = gearChecked === null ? undefined : gearChecked;
-    players.push(gear ? { characterId: p.characterId, difficulty: p.difficulty, gear } : { characterId: p.characterId, difficulty: p.difficulty });
+    // cœur rangé inconnu (ou absent) : emplacement vide, jamais une erreur
+    players.push(makeSavedPlayer(p.characterId, p.difficulty, gear, isHeartKind(p.heart) ? p.heart : undefined));
   }
 
   if (!('completedLevelIds' in data)) return fail('missingField', 'completedLevelIds');
@@ -380,6 +395,8 @@ export function buildResumeSimConfig(save: SaveGame, seed: number): SimConfig {
   const config: SimConfig = { levelId: save.levelId, players: playersOfSave(save), seed, startRoomIndex: save.roomIndex };
   // « Continuer » restitue l'équipement (champ absent quand personne n'en porte : la configuration reste celle d'avant)
   if (save.players.some((p) => p.gear)) config.initialGear = save.players.map((p) => (p.gear ? cloneGear(p.gear) : undefined));
+  // idem pour le cœur rangé (champ absent quand personne n'en porte)
+  if (save.players.some((p) => p.heart)) config.initialHearts = save.players.map((p) => p.heart);
   return config;
 }
 
@@ -430,9 +447,9 @@ export function withLevelCompleted(save: SaveGame, levelId: string, ctx: SaveCon
   if (index < 0) return save;
   const next = ctx.levels[index + 1] ?? ctx.levels[index];
   const completedLevelIds = save.completedLevelIds.includes(levelId) ? save.completedLevelIds : [...save.completedLevelIds, levelId];
-  if (completedLevelIds === save.completedLevelIds && save.levelId === next.id && save.roomIndex === 0 && save.players.every((p) => !p.gear)) return save;
-  // l'équipement dure jusqu'à la FIN DU NIVEAU : il est réinitialisé au niveau suivant
-  const players = save.players.map((p) => ({ characterId: p.characterId, difficulty: p.difficulty }));
+  if (completedLevelIds === save.completedLevelIds && save.levelId === next.id && save.roomIndex === 0 && save.players.every((p) => !p.gear && !p.heart)) return save;
+  // l'équipement ET le cœur rangé durent jusqu'à la FIN DU NIVEAU : ils sont réinitialisés au niveau suivant
+  const players = save.players.map((p) => makeSavedPlayer(p.characterId, p.difficulty));
   return { ...save, levelId: next.id, roomIndex: 0, completedLevelIds, players };
 }
 
@@ -448,8 +465,37 @@ export function withGear(save: SaveGame, gears: readonly PlayerGear[]): SaveGame
     const before = p.gear ?? normalizeGear(undefined);
     if (sameGear(before, g)) return p;
     changed = true;
-    const base = { characterId: p.characterId, difficulty: p.difficulty };
-    return isGearEmpty(g) ? base : { ...base, gear: cloneGear(g) };
+    return makeSavedPlayer(p.characterId, p.difficulty, isGearEmpty(g) ? undefined : cloneGear(g), p.heart);
+  });
+  return changed ? { ...save, players } : save;
+}
+
+/**
+ * Met à jour le cœur rangé sauvegardé (un élément par joueur, dans l'ordre de `players` ; indéfini = emplacement vide, valeur inconnue = vide) : un emplacement vide n'est pas stocké. Même
+ * référence si rien ne change (ou si le nombre de joueurs ne correspond pas : donnée ignorée).
+ */
+export function withHearts(save: SaveGame, hearts: readonly (PickupKind | undefined)[]): SaveGame {
+  if (hearts.length !== save.players.length) return save;
+  let changed = false;
+  const players = save.players.map((p, i) => {
+    const h = isHeartKind(hearts[i]) ? hearts[i] : undefined;
+    if (h === p.heart) return p;
+    changed = true;
+    return makeSavedPlayer(p.characterId, p.difficulty, p.gear, h);
+  });
+  return changed ? { ...save, players } : save;
+}
+
+/**
+ * Cœur rangé PERDU : vide l'emplacement sauvegardé des joueurs indiqués (identifiant = indice dans `players`) sans toucher à la salle de reprise ni à l'équipement. Même garantie que
+ * `withGearLost` : quitter puis « Continuer » ne restitue pas le cœur perdu. Même référence si rien ne change.
+ */
+export function withHeartLost(save: SaveGame, playerIds: readonly number[]): SaveGame {
+  let changed = false;
+  const players = save.players.map((p, i) => {
+    if (!playerIds.includes(i) || !p.heart) return p;
+    changed = true;
+    return makeSavedPlayer(p.characterId, p.difficulty, p.gear);
   });
   return changed ? { ...save, players } : save;
 }
@@ -463,7 +509,7 @@ export function withGearLost(save: SaveGame, playerIds: readonly number[]): Save
   const players = save.players.map((p, i) => {
     if (!playerIds.includes(i) || !p.gear) return p;
     changed = true;
-    return { characterId: p.characterId, difficulty: p.difficulty };
+    return makeSavedPlayer(p.characterId, p.difficulty, undefined, p.heart);
   });
   return changed ? { ...save, players } : save;
 }
@@ -473,7 +519,9 @@ export function withGearLost(save: SaveGame, playerIds: readonly number[]): Save
  *  - `roomEntered` 'start' | 'next' → salle atteinte (niveau `levelId` de la partie en cours) ;
  *  - `roomEntered` 'restart' (défaite collective) → IGNORÉ : la sauvegarde ne change pas ;
  *  - `levelCompleted` → niveau terminé (reprise = salle 0 du niveau suivant) ;
- *  - `gearLost` → l'équipement sauvegardé du joueur tombé est vidé (règle stricte : pas de point de reprise).
+ *  - `gearLost` → l'équipement sauvegardé du joueur tombé est vidé (règle stricte : pas de point de reprise) ;
+ *  - `heartLost` → le cœur rangé sauvegardé du joueur tombé est vidé (même règle) ;
+ *  - `heartUsed` → le cœur rangé sauvegardé de l'utilisateur est vidé AUSSI (un cœur utilisé ne revient jamais après « quitter puis Continuer » : aucune duplication).
  * Retourne la sauvegarde mise à jour (même référence si rien n'a changé). Les autres événements sont ignorés.
  *
  * @param levelId niveau joué par la simulation qui émet ces événements
@@ -487,6 +535,8 @@ export function applySimEvents(save: SaveGame, levelId: string, events: readonly
       current = withLevelCompleted(current, e.levelId, ctx);
     } else if (e.type === 'gearLost') {
       current = withGearLost(current, [e.playerId]);
+    } else if (e.type === 'heartLost' || e.type === 'heartUsed') {
+      current = withHeartLost(current, [e.playerId]);
     }
   }
   return current;

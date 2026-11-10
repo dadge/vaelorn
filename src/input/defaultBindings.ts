@@ -5,17 +5,19 @@
  * Les codes sont des `KeyboardEvent.code` PHYSIQUES : sur un clavier AZERTY, la disposition « WASD »
  * correspond donc aux touches ZQSD sans rien configurer.
  *
- * Manette (mapping « standard »), schéma à TROIS boutons (demande du joueur) :
+ * Manette (mapping « standard »), schéma à QUATRE boutons (A B X Y) :
  *   A (0) = action contextuelle (attack + interact + revive : relever, interagir, attaquer) ;
+ *   B (1) = UTILISER LE CŒUR rangé dans l'emplacement cœur (se soigner, ou soigner le coéquipier blessé sur lequel on se place) ;
  *   X (2) = APPEL des alliés ; Y (3) = ATTAQUE SPÉCIALE (rechargeable) ; Start (9) = pause (lu par GameScene, pas par les bindings).
- * TOUS les autres boutons (B, LB, RB, LT, RT, Back, appuis de sticks, croix hors déplacement…) sont SANS EFFET en jeu.
+ * TOUS les autres boutons (LB, RB, LT, RT, Back, appuis de sticks, croix hors déplacement…) sont SANS EFFET en jeu.
  * Stick gauche + croix = déplacement (zone morte 0.25).
  * Exceptions (hors jeu, donc hors bindings d'action) : dans les MENUS, A = confirmer et B = retour (sinon on ne pourrait plus
  * annuler ni libérer une place à l'écran de sélection) ; Select / Back (8) reste le « passer » du tutoriel sur manette
- * (GameScene.pollTutorialPad) ; B sert aussi de « retour » dans la pause et les dialogues.
- * Clavier (inchangé) : Espace / E = action ; F ou X = spécial ; C = appel ; Entrée / Échap / M (menus, pause, son).
- * Un seul clavier existe (un seul joueur à la fois, dispositions flèches ET WASD en parallèle) : « C » ne figure dans aucune
- * autre action ni direction.
+ * (GameScene.pollTutorialPad) ; B sert aussi de « retour » dans la pause et les dialogues (l'action « utiliser le cœur » n'existe qu'en jeu actif :
+ * GameScene filtre le B qui vient de fermer la pause ou d'ouvrir la scène tant qu'il n'est pas relâché).
+ * Clavier : Espace / E = action ; B = utiliser le cœur ; F ou X = spécial ; C = appel ; Entrée / Échap / M (menus, pause, son).
+ * Un seul clavier existe (un seul joueur à la fois, dispositions flèches ET WASD en parallèle) : « B » et « C » ne figurent dans aucune
+ * autre action ni direction, quelle que soit la disposition (`createKeyboardLayoutBindings`).
  */
 import type { Bindings } from './actions';
 
@@ -23,7 +25,7 @@ import type { Bindings } from './actions';
 export const DEFAULT_DEADZONE = 0.25;
 
 /**
- * Indices du mapping standard des manettes. Seuls A, X, Y (jeu), Start (pause), A / B (menus), Back (« passer » du tutoriel)
+ * Indices du mapping standard des manettes. Seuls A, B, X, Y (jeu), Start (pause), A / B (menus), Back (« passer » du tutoriel)
  * et la croix (déplacement / menus) ont un rôle ; LB / RB / LT / RT restent déclarés pour les tests (« sans effet »).
  */
 export const PAD_BUTTON = {
@@ -70,6 +72,8 @@ export function createDefaultBindings(): Bindings {
     special: { keys: ['KeyF', 'KeyX'], pad: [PAD_BUTTON.Y] },
     // Appel : bouton dédié (clavier C ; manette X SEUL). Aucune autre action n'utilise ces entrées.
     call: { keys: ['KeyC'], pad: [PAD_BUTTON.X] },
+    // Utiliser le cœur rangé : bouton dédié (clavier B ; manette B SEUL, qui reste « retour » dans les menus). Aucune autre action n'utilise ces entrées en jeu.
+    heart: { keys: ['KeyB'], pad: [PAD_BUTTON.B] },
     menu: {
       confirm: { keys: ['Enter', 'NumpadEnter', 'Space'], pad: [PAD_BUTTON.A] },
       back: { keys: ['Escape', 'Backspace'], pad: [PAD_BUTTON.B] },

@@ -57,7 +57,7 @@ export function deviceToId(device: DeviceAssignment): DeviceId {
 export interface ButtonBinding {
   /** Codes physiques (ex. 'Space', 'KeyE', 'ArrowUp'). Indépendants de la disposition AZERTY/QWERTY. */
   keys: string[];
-  /** Indices de boutons du mapping « standard » des manettes (0 = A, 1 = B, 2 = X, 3 = Y…) ; en jeu seuls A (action), X (appel) et Y (spécial) sont liés par défaut. */
+  /** Indices de boutons du mapping « standard » des manettes (0 = A, 1 = B, 2 = X, 3 = Y…) ; en jeu seuls A (action), B (utiliser le cœur), X (appel) et Y (spécial) sont liés par défaut. */
   pad: number[];
 }
 
@@ -73,7 +73,7 @@ export interface MoveBinding {
 
 /**
  * Configuration complète des entrées. JSON pur (sérialisable dans localStorage) et remappable.
- * Pour chaque `ActionName` ('move' | 'attack' | 'interact' | 'revive' | 'special' | 'call') : les entrées clavier ET manette.
+ * Pour chaque `ActionName` ('move' | 'attack' | 'interact' | 'revive' | 'special' | 'call' | 'heart') : les entrées clavier ET manette.
  */
 export interface Bindings {
   version: 1;
@@ -88,6 +88,12 @@ export interface Bindings {
    * Clavier C ; manette X seul.
    */
   call: ButtonBinding;
+  /**
+   * Utiliser le cœur rangé dans l'emplacement cœur (bouton DÉDIÉ : soigne soi-même ou un coéquipier blessé sur lequel on se place ; ni Espace ni A ne le déclenchent).
+   * Clavier B ; manette B seul. EN JEU uniquement : dans les menus, la pause et les dialogues, B reste « retour » (`menu.back`). Un ancien jeu de bindings sans cette action reçoit les valeurs
+   * par défaut (`mergeBindings`).
+   */
+  heart: ButtonBinding;
   /** Navigation de menu : confirmer / retour (les directions réutilisent `move`). */
   menu: { confirm: ButtonBinding; back: ButtonBinding };
   /** Zone morte radiale du stick, 0..0.95 (défaut 0.25). */
@@ -103,8 +109,8 @@ export type DeepPartial<T> = T extends readonly unknown[]
 export type BindingsOverrides = DeepPartial<Bindings>;
 
 /** Clés de `Bindings` qui sont des actions « bouton » (par opposition à `move`). */
-export type ButtonActionName = 'attack' | 'interact' | 'revive' | 'special' | 'call';
-export const BUTTON_ACTIONS: readonly ButtonActionName[] = ['attack', 'interact', 'revive', 'special', 'call'];
+export type ButtonActionName = 'attack' | 'interact' | 'revive' | 'special' | 'call' | 'heart';
+export const BUTTON_ACTIONS: readonly ButtonActionName[] = ['attack', 'interact', 'revive', 'special', 'call', 'heart'];
 
 /** Code d'erreur de validation (diagnostic technique, jamais affiché tel quel). */
 export type BindingsErrorCode = 'missing' | 'type' | 'empty' | 'range' | 'conflict';

@@ -45,19 +45,20 @@ import { GameOverlay, PauseMenu } from '../entities/overlay';
 import { getMusic, TUTORIAL_MUSIC_LEVEL } from '../audio/music';
 import { Sfx, sfxForEvent } from '../entities/sfx';
 import type { ViewContext } from '../entities/common';
-import { MAX_STEPS_PER_FRAME, mergeTickInputs, planSteps } from '../entities/loopLogic';
+import { HeartInputGuard, MAX_STEPS_PER_FRAME, mergeTickInputs, modeSimFlags, planSteps } from '../entities/loopLogic';
 import { effectivePauseOwner, pauseIntentAllowed, pauseOwnerForPad, resolvePauseBack, resolvePauseConfirm } from '../entities/pauseLogic';
 import { t, onLanguageChange } from '../i18n/i18n';
 import { MenuNavigator, VIRTUAL_PAD_INDEX, inputManager, listGamepads } from '../input';
 import { getLevelByIndex } from '../levels';
 import { TUTORIAL_SEED, tutorialLevel } from '../levels/tutorial';
-import { TutorialRuntime, tutorialPlayers } from '../entities/tutorialRuntime';
+import { TutorialRuntime, applyScripted, tutorialPlayers } from '../entities/tutorialRuntime';
 import { TutorialHud } from '../render/tutorialHud';
 import { visibleRegionIds } from '../render/tutorialHudLogic';
 import type { ButtonName } from '../tutorial/types';
 import { ViewRig } from '../render/camera';
 import { DEPTH_LABELS, FxManager, damageNumberColor, ensureFxTextures } from '../render/fx';
 import { SpecialFx } from '../render/specialFx';
+import { heartStoredTextKey, heartUsedFx } from '../render/heartSlotFx';
 import { CRYSTAL_HALO_COLOR, pickupHaloColor, pickupTextColor, pickupTextFor } from '../render/lifeFx';
 import { GEAR_FLOAT_WRAP_PX, buffColor, buffStartedText, gearLevelColor, gearPickedColor, gearPickedText, gearSwappedText } from '../render/gearFx';
 import { CallWorldFx } from '../render/callHud';
@@ -135,6 +136,8 @@ export class GameScene extends Phaser.Scene {
 
   private accumulatorMs = 0;
   private latched: TickInputs | null = null;
+  /** Garde du bouton B (« utiliser le cœur ») : masque B tant qu'il n'a pas été relâché après l'ouverture de la scène ou la fermeture de la pause (B y est « retour »). */
+  private readonly heartGuard = new HeartInputGuard();
   private lastPolled: TickInputs = {};
   private paused = false;
   private snapCameras = true;
@@ -240,6 +243,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseOwner = null;
     this.accumulatorMs = 0;
     this.latched = null;
+    this.heartGuard.arm(); // la scène démarre peut-être avec B encore tenu (retour d'un menu / dialogue) : aucun soin tant qu'il n'est pas relâché
     this.lastPolled = {};
     this.paused = false;
     this.snapCameras = true;
@@ -295,10 +299,21 @@ export class GameScene extends Phaser.Scene {
     const seed = tut ? TUTORIAL_SEED : demo ? demo.seed : (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
     // Salle de départ : reprise d'une sauvegarde ou dev `?room=N` (honorée par la simulation, voir SimConfig.startRoomIndex).
     const players = setups.slice(0, playerCount);
-    // Appel automatique (objet laissé aux coéquipiers) : partie normale uniquement (le tutoriel et la démo n'en ont pas) ; aucun effet sur le jeu.
+    // Appel automatique (objet laissé aux coéquipiers) : partie normale ET tutoriel (il y enseigne « emplacement plein = appel »), pas en démo ; aucun autre effet sur le jeu.
     // Équipement : actif en partie normale uniquement (la démo et le tutoriel ignorent les objets) ; « Continuer » restitue l'équipement sauvegardé.
+    // Emplacement cœur : partie normale et tutoriel (le tutoriel l'enseigne) ; PAS en démo (les pilotes automatiques n'utilisent pas B : ancien comportement, soin au contact) ;
+    // « Continuer » restitue aussi le cœur rangé.
     this.sim = createSimulation(
-      { levelId: level.id, players, seed, startRoomIndex: this.session.startRoomIndex, gear: !tut && !demo, autoCall: !tut && !demo, initialGear: tut || demo ? undefined : this.session.startGear },
+      {
+        levelId: level.id,
+        players,
+        seed,
+        startRoomIndex: this.session.startRoomIndex,
+        // gear / loot / autoCall / heartSlot selon le mode (testé : `modeSimFlags`). Tutoriel : aucun butin aléatoire (les cœurs sont posés par le script : l'emplacement est vide à l'arrivée dans la salle du cœur).
+        ...modeSimFlags({ tutorial: !!tut, demo: !!demo }),
+        initialGear: tut || demo ? undefined : this.session.startGear,
+        initialHearts: tut || demo ? undefined : this.session.startHearts,
+      },
       level,
     );
 
@@ -313,6 +328,7 @@ export class GameScene extends Phaser.Scene {
         players,
         completedLevelIds: this.session.completedLevelIds,
         gearProvider: () => this.sim.state.players.map((p) => cloneGear(p.loadout)), // équipement porté, sauvegardé au début de chaque salle
+        heartProvider: () => this.sim.state.players.map((p) => p.heart), // cœur rangé, sauvegardé au début de chaque salle (la perte est écrite dès la chute)
         enabled: isSavingAllowed({ quick: getQuickParams()?.quick === true, search }),
         onError: (err) => {
           const text = err.code === 'quota' ? t('save.error.quota') : t('save.error.unavailable');
@@ -347,6 +363,8 @@ export class GameScene extends Phaser.Scene {
       layout: this.layout,
       specialHint: (id) => specialHintLabel(inputManager.getAssignments()[id], inputManager.getBindings().special),
       gear: state.gearEnabled !== false, // démo et tutoriel : pas de rangée d'équipement
+      heartSlot: state.heartSlot === true, // emplacement cœur (partie et tutoriel, pas la démo)
+      heartHint: (id) => specialHintLabel(inputManager.getAssignments()[id], inputManager.getBindings().heart),
     };
     createSeparators(this.ctx, this.layout);
     this.huds = state.players.slice(0, viewCount).map((p) => new PlayerHud(env, p.id, p));
@@ -490,7 +508,8 @@ export class GameScene extends Phaser.Scene {
 
     const state = this.sim.state;
     // Démo : les entrées humaines ne sont JAMAIS lues (le pilote automatique joue seul) ; elles ne servent qu'à sortir.
-    const cur: TickInputs = demoFlow ? {} : inputManager.poll();
+    // B (utiliser le cœur) est masqué tant qu'il n'a pas été relâché après l'ouverture de la scène / la fermeture de la pause : B y est « retour », il ne doit jamais soigner par ricochet
+    const cur: TickInputs = demoFlow ? {} : this.heartGuard.filter(inputManager.poll());
     this.lastPolled = cur;
     this.latched = mergeTickInputs(this.latched, cur);
     const plan = planSteps(this.accumulatorMs, dt, SIM_STEP_MS, MAX_STEPS_PER_FRAME);
@@ -514,6 +533,7 @@ export class GameScene extends Phaser.Scene {
         if (tutorial) {
           tutorial.observe(events, state, regionIds);
           for (const id of tutorial.takeKnockDowns()) this.sim.knockDown(id); // chute scénarisée (relevage, mort d'équipe)
+          for (const a of tutorial.takeScripted()) applyScripted(this.sim, a); // blessure / cœurs posés (soin d'un coéquipier)
         }
       }
     }
@@ -669,7 +689,8 @@ export class GameScene extends Phaser.Scene {
         fx.spawnPoof(e.pos.x, e.pos.y, 0xc8b0ff);
         break;
       case 'pickupDropped':
-        // la nourriture apparaît dans un éclat doré (le halo permanent est dessiné par LifeViews)
+        // la nourriture apparaît dans un éclat doré (le halo permanent est dessiné par LifeViews) ; pas d'éclat pendant la défaite d'équipe (le cœur perdu n'existera plus à la reprise : salle neuve)
+        if (state.phase === 'wipe') break;
         fx.sparkles(e.pos.x, e.pos.y - 4, pickupHaloColor(e.kind), 7, 6);
         break;
       case 'pickupCollected': {
@@ -679,6 +700,22 @@ export class GameScene extends Phaser.Scene {
         // « +½ ♥ » / « +♥ » si le soin est complet, « +N PV » quand il est plafonné au manque du joueur
         const txt = pickupTextFor(e.kind, e.healed);
         fx.floatText(pos.x, pos.y - 12, t(txt.key, txt.params), pickupTextColor(e.kind), 900, 16, 8);
+        break;
+      }
+      case 'heartStored': {
+        // le cœur / demi-cœur est RANGÉ dans l'emplacement (aucun soin) : petit éclat et texte flottant discret
+        const pos = this.playerPos(e.playerId, state);
+        fx.sparkles(pos.x, pos.y - 6, pickupHaloColor(e.kind), 6, 6);
+        fx.floatText(pos.x, pos.y - 12 - e.playerId * 9, t(heartStoredTextKey(e.kind)), pickupTextColor(e.kind), 900, 15, 8); // décalé par joueur : deux rangements côte à côte restent lisibles
+        break;
+      }
+      case 'heartUsed': {
+        // B : le cœur rangé soigne `targetId` (soi ou un allié) : éclat sur la cible, anneau et « +N PV » (même texte que les autres soins)
+        const fxSpec = heartUsedFx(e.kind, e.amount);
+        const dest = this.playerPos(e.targetId, state);
+        fx.sparkles(dest.x, dest.y - 6, fxSpec.color, fxSpec.sparkles, 7);
+        fx.ring(dest.x, dest.y, 0xffe27a, 18, 360);
+        fx.floatText(dest.x, dest.y - 12, t('loot.crystal.heal', { n: Math.round(e.amount) }), fxSpec.color, 1000, 18, 8);
         break;
       }
       case 'crystalUsed': {
@@ -1081,6 +1118,7 @@ export class GameScene extends Phaser.Scene {
     inputManager.reset();
     this.latched = null;
     this.accumulatorMs = 0;
+    this.heartGuard.arm(); // le B qui ferme la pause (« retour ») ne soigne pas ; il faut le relâcher avant le prochain appui
   }
 
   private updatePause(): void {
