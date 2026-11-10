@@ -62,6 +62,7 @@ export class TutorialRun {
         startRoomIndex: opts.startRoomIndex,
         // comme GameScene : le tutoriel ne produit ni n'accepte d'objets d'équipement
         gear: false,
+        autoCall: false, // idem : le tutoriel n'a pas d'appel automatique
       },
       tutorialLevel,
     );

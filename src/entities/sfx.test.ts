@@ -35,6 +35,12 @@ describe('sons : appel', () => {
     expect(sfxForEvent({ type: 'specialReady', playerId: 0 })).toBe('specialReady');
   });
 
+  it("autoCallStarted produit le son discret « autoCall », distinct de « call » (qui accompagne l'immobilisation de l'appel manuel)", () => {
+    expect(sfxForEvent({ type: 'autoCallStarted', playerId: 0, icon: 'heart', to: [1] })).toBe('autoCall');
+    expect(sfxForEvent({ type: 'autoCallStarted', playerId: 1, icon: 'gear', to: [0, 2] })).toBe('autoCall');
+    expect(() => new Sfx().play('autoCall')).not.toThrow();
+  });
+
   it('le son « call » peut être joué sans audio disponible (Node) sans lever', () => {
     const s = new Sfx();
     expect(() => s.play('call')).not.toThrow();

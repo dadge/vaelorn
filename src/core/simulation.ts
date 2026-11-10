@@ -33,6 +33,9 @@
  *      (`pickupCollected`) par le joueur vivant blessé le plus proche, usage des cristaux de soin (`crystalUsed`) ;
  *  (i3) équipement au sol (phase 'playing') : vieillissement / péremption des objets, verrous, ramassage automatique (`gearPicked`) par le joueur
  *      vivant le plus proche pour qui l'objet est STRICTEMENT meilleur (`gear.ts` `pickupDecision`) ;
+ *  (i4) appel AUTOMATIQUE (phases 'playing' et 'roomCleared', option `SimConfig.autoCall`, 2 joueurs ou plus ; `autoCall.ts`, [B28]) : un joueur vivant qui chevauche un cœur qu'il ne
+ *      peut pas consommer ou un objet d'équipement qu'il ne prend pas (décision 'ignore') prévient les alliés pour qui l'objet serait utile (`autoCallStarted`).
+ *      Purement informatif : ne fige personne, ne consomme pas le délai de l'appel manuel, aucun tirage aléatoire, aucun effet sur le jeu ;
  *  (j) morts d'ennemis (enemyDied, kills du tueur, retrait) ; BUTIN : chaque mort d'ennemi non invoqué tire son butin de vie avec le PRNG
  *      DÉDIÉ (`lootRngState`, jamais `rngState`) → `pickupDropped` (voir `loot.ts`, `balance.ts` [B10]-[B17]) ; puis, s'il ne laisse pas de cœur,
  *      son objet d'ÉQUIPEMENT avec le PRNG ISOLÉ `gearRngState` (budget par salle, `gear.ts`, [B18]-[B25]) → `gearDropped` ;
@@ -64,6 +67,9 @@
  *    avec les autres timers (a). Immobile tant que `callMs > CALL_DURATION_MS - CALL_FREEZE_MS`. Annulé si l'appelant tombe à terre ;
  *    tout (re)démarrage de salle (start / next / restart, donc défaite collective incluse) remet les deux à 0. Un joueur qui appelle reste
  *    vulnérable, sa torche continue de s'user et il compte normalement pour les zones d'objectif et de sortie.
+ *  - appel AUTOMATIQUE (`autoCall`, `autoCallCooldownMs`, `autoCallSeen` : champs OPTIONNELS créés au déclenchement et supprimés à leur terme) : signal de 3 s qui
+ *    NE fige PAS le joueur et ne touche pas aux champs de l'appel manuel ; un appel manuel qui démarre l'efface (`startCall`) ; remis à zéro à chaque entrée de salle et à la
+ *    chute ; désactivé par `SimConfig.autoCall === false` (`GameState.autoCallDisabled`). Un état sans appel automatique est identique à celui d'avant son ajout.
  *  - sources de vie : nourriture (`room.pickups`) et cristaux (`room.healCrystals`) sont remis à zéro / à neuf à chaque entrée de salle (start /
  *    next / restart), comme le compteur anti-malchance (`lootDryKills`) ; leur flux aléatoire (`lootRngState`) et leurs ids (`nextPickupId`) sont
  *    DISTINCTS de ceux du reste de la partie : sans ramassage, une partie est strictement identique à celle d'avant leur ajout ;
@@ -95,6 +101,7 @@ import {
   SUMMON_WAVE,
   WIPE_RESTART_DELAY_MS,
 } from './constants';
+import { normalizeAutoCallFields, stepAutoCalls } from './autoCall';
 import { createEnemyState, knockEnemy, onEnemyHit, stunEnemy, updateEnemy } from './ai';
 import { getCharacter } from './characters';
 import { canOccupy, moveCircle, resolveOverlap, type PixelRect } from './collision';
@@ -163,6 +170,8 @@ import {
   reviveAllDowned,
   stepPlayerTimers,
   isCallFrozen,
+  resetAutoCall,
+  cancelAutoCall,
   markPlayerDown,
   canStartCall,
   startCall,
@@ -364,6 +373,7 @@ export class GameSimulation implements IGameSimulation {
     this.pending = pendingEvents;
     normalizeLootState(state, level.rooms[state.roomIndex]);
     normalizeGearState(state);
+    for (const p of state.players) normalizeAutoCallFields(p); // champs d'appel automatique : absents = valides, mal formés = supprimés
     this.gearRng = {
       get rngState(): number {
         return state.gearRngState as number;
@@ -598,6 +608,12 @@ export class GameSimulation implements IGameSimulation {
     // (aussi pendant 'roomCleared' : l'objet laissé par le dernier ennemi reste ramassable et vieillit pendant le délai avant la salle suivante)
     if (s.phase === 'playing' || s.phase === 'roomCleared') this.stepGear(dt, events, arb);
 
+    // (i4) appel automatique : objets au sol qu'un joueur ne prend pas (après les ramassages : un objet pris a disparu). Aussi en 'roomCleared' : l'équipement y reste
+    // ramassable (le butin du dernier ennemi) et le signal d'un objet pris pendant ce délai doit être purgé.
+    if ((s.phase === 'playing' || s.phase === 'roomCleared') && s.autoCallDisabled !== true) {
+      stepAutoCalls(players, s.room.pickups as PickupState[], s.room.gearDrops as GearDropState[], events);
+    }
+
     // (j) morts
     const deaths = this.collectDeaths(events, killers);
 
@@ -634,7 +650,10 @@ export class GameSimulation implements IGameSimulation {
       p.prev.revive = f.revive;
       p.prev.special = f.special === true;
       p.prev.call = f.call === true;
-      if (p.status !== 'alive') cancelCall(p); // garde-fou : un joueur à terre n'appelle pas (quelle que soit la cause de la chute)
+      if (p.status !== 'alive') {
+        cancelAutoCall(p);
+        cancelCall(p);
+      } // garde-fou : un joueur à terre n'appelle pas (quelle que soit la cause de la chute)
     }
     return events;
   }
@@ -1474,6 +1493,7 @@ export class GameSimulation implements IGameSimulation {
       p.torchMs = TORCH_MAX_MS; // torche pleine à l'entrée de chaque salle (start / next / restart)
       p.callMs = 0; // appel et délai remis à zéro à l'entrée de chaque salle (start / next / restart)
       p.callCooldownMs = 0;
+      resetAutoCall(p); // appel automatique (signal, délai, objets signalés) aussi
     }
     if (reason !== 'start') {
       for (const p of s.players) p.invulnMs = Math.max(p.invulnMs, ROOM_ENTER_INVULN_MS);
@@ -1540,6 +1560,7 @@ export function createSimulation(config: SimConfig, level: LevelDef): GameSimula
     lootRngState: seedToState((Number.isFinite(config.seed) ? Math.floor(config.seed) | 0 : 0) ^ LOOT_SEED_XOR),
     lootDryKills: 0,
     nextPickupId: 1,
+    ...(config.autoCall === false ? { autoCallDisabled: true } : {}),
     gearEnabled: config.gear !== false,
     gearRngState: seedToState((Number.isFinite(config.seed) ? Math.floor(config.seed) | 0 : 0) ^ GEAR_SEED_XOR),
     nextGearDropId: 1,

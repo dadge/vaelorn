@@ -331,6 +331,27 @@ export interface PlayerLoadout extends PlayerGear {
   ringKills?: number;
 }
 
+/** Symbole d'un appel AUTOMATIQUE : cœur entier, demi-cœur, ou objet d'équipement (icône 8×8 de l'objet, voir `AutoCallState.item`). */
+export type AutoCallIcon = 'heart' | 'half' | 'gear';
+
+/**
+ * Signal d'APPEL AUTOMATIQUE d'un joueur : il vient de passer sur un objet au sol qu'il ne prend pas (cœur alors qu'il est plein, objet d'équipement
+ * pas meilleur que le sien) et prévient ses coéquipiers, pour qui l'objet serait utile, de le leur laisser. Contrairement à l'appel manuel, il ne fige
+ * pas le joueur et ne consomme pas son délai de récupération d'appel. JSON pur, transitoire (jamais sauvegardé par l'autosave).
+ */
+export interface AutoCallState {
+  /** Symbole affiché à la place du point de l'indicateur d'appel. */
+  icon: AutoCallIcon;
+  /** Pour `icon === 'gear'` : l'objet (emplacement, niveau, sorte d'accessoire) dont on affiche l'icône ; absent pour un cœur. */
+  item?: GearItem;
+  /** Référence de l'objet au sol : 'p<id>' (nourriture) ou 'g<id>' (équipement). Le signal s'arrête quand l'objet disparaît (ramassé, périmé). */
+  ref: string;
+  /** Durée restante du signal (ms) : `AUTO_CALL_DURATION_MS` au déclenchement, 0 = terminé (le champ est alors supprimé). */
+  ms: number;
+  /** Ids des alliés vivants pour qui l'objet est utile au déclenchement : seuls eux voient l'indicateur et entendent le son. */
+  to: PlayerId[];
+}
+
 export interface PlayerState {
   id: PlayerId;
   characterId: CharacterId;
@@ -379,6 +400,15 @@ export interface PlayerState {
   callMs: number;
   /** Délai de récupération restant (ms) avant de pouvoir rappeler (`CALL_COOLDOWN_MS` à l'appui, décompté depuis l'appui). */
   callCooldownMs: number;
+  /**
+   * Appel AUTOMATIQUE en cours (objet laissé aux coéquipiers), voir `AutoCallState`. Absent = aucun. Champ optionnel, créé au déclenchement puis supprimé à son terme :
+   * un état sans appel automatique est identique à celui d'avant l'ajout. Remis à zéro à chaque (re)démarrage de salle, à la chute et quand le joueur lance un appel manuel.
+   */
+  autoCall?: AutoCallState;
+  /** Délai de récupération restant (ms) de l'appel AUTOMATIQUE (distinct de `callCooldownMs`, celui de l'appel manuel). Absent = 0. */
+  autoCallCooldownMs?: number;
+  /** Objets au sol (références 'p<id>' / 'g<id>') déjà signalés par ce joueur et dont il n'est pas encore sorti du rayon : un seul appel par couple (joueur, objet). Absent = aucun. */
+  autoCallSeen?: string[];
   /**
    * Équipement et bonus temporaires (vides par défaut). Perdus à la chute du joueur (RÈGLE STRICTE, y compris à la défaite d'équipe),
    * conservés d'une salle à l'autre, réinitialisés au niveau suivant. Un ancien snapshot n'a pas ce champ : valeur par défaut posée à la restauration.
@@ -942,6 +972,11 @@ export interface GameState {
   gearRngState?: number;
   /** Prochain id d'objet d'équipement au sol. Absent = 1. */
   nextGearDropId?: number;
+  /**
+   * Appel AUTOMATIQUE désactivé ? (`SimConfig.autoCall === false` : démo, tutoriel, bots de calibration). Champ posé UNIQUEMENT quand il vaut false : absent = actif,
+   * donc un état de partie normale reste identique à celui d'avant l'ajout.
+   */
+  autoCallDisabled?: boolean;
 }
 
 // ───────────────────────────── Événements (sons, FX, HUD) ─────────────────────────────
@@ -978,6 +1013,8 @@ export type SimEvent =
   | { type: 'hourglassEmpty'; mechanismId: string }
   | { type: 'gateClosed'; mechanismId: string; closedCount: number }
   | { type: 'callStarted'; playerId: PlayerId }
+  /** Appel AUTOMATIQUE : `playerId` laisse un objet (`icon`) à ses coéquipiers `to` (alliés vivants pour qui il est utile). Aucune immobilisation, aucune animation d'appel manuel. */
+  | { type: 'autoCallStarted'; playerId: PlayerId; icon: AutoCallIcon; to: PlayerId[] }
   // ── Sources de vie (butin des ennemis, cristaux de soin) ──
   | { type: 'pickupDropped'; pickupId: number; kind: PickupKind; pos: Vec2 }
   | { type: 'pickupCollected'; pickupId: number; playerId: PlayerId; kind: PickupKind; healed: number; pos: Vec2 }
@@ -1026,6 +1063,11 @@ export interface SimConfig {
    * objet (mesures « avec / sans » de la calibration) ; les parties sont alors strictement celles d'avant l'ajout de l'équipement.
    */
   gear?: boolean;
+  /**
+   * Appel AUTOMATIQUE actif (défaut true) : un joueur qui passe sur un objet qu'il ne prend pas (cœur alors qu'il est plein, objet d'équipement pas meilleur que le sien)
+   * prévient ses coéquipiers pour qui il serait utile. false = désactivé (démo, tutoriel, bots). Purement informatif : n'a AUCUN effet sur le gameplay ni sur les flux aléatoires.
+   */
+  autoCall?: boolean;
   /** Équipement de départ par indice de joueur (reprise d'une sauvegarde « Continuer ») ; absent / indéfini = équipement vide. */
   initialGear?: readonly (PlayerGear | undefined)[];
 }

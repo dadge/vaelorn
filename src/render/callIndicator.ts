@@ -9,14 +9,23 @@
  *  - si l'appelant est VISIBLE dans leur vue : aucun indicateur de bord, mais des anneaux concentriques qui s'étendent autour
  *    de l'appelant dans le monde (vus par tous les joueurs dont la vue le contient, l'appelant compris).
  *
+ * APPEL AUTOMATIQUE (objet laissé aux coéquipiers, `AutoCallState`) : même indicateur de bord, mais le POINT d'origine est remplacé par un petit SYMBOLE
+ * (cœur, demi-cœur ou icône 8×8 de l'objet) sur un disque sombre cerclé de la couleur de l'émetteur ; seuls les destinataires utiles (`AutoCallState.to`) le voient.
+ * Le symbole est FIXE (aucun clignotement) ; les 3 arcs sont inchangés. Si l'émetteur est VISIBLE dans la vue d'un destinataire, il n'y a pas d'arcs ni d'anneaux (ils seraient
+ * vus par TOUTES les caméras, destinataires ou non) : le même symbole, sur son disque, flotte au-dessus de la tête de l'émetteur, dans le HUD de ce seul destinataire
+ * (`autoCallOverheadPos`).
+ *
  * La géométrie de projection au bord est celle des flèches existantes vers les alliés à terre et les ennemis restants
  * (`edgeIndicator`, camera.ts) : on ne la duplique pas. Le temps d'animation est DÉRIVÉ de l'état de simulation
  * (`CALL_DURATION_MS - callMs`) : l'animation se fige avec la pause et ne dépend d'aucune horloge de rendu.
  * `callHud.ts` (Phaser) ne fait que dessiner ce que ce module calcule.
  */
+import { AUTO_CALL_DURATION_MS } from '../core/balance';
 import { CALL_DURATION_MS, PLAYER_COLORS } from '../core/constants';
-import type { PlayerState, Vec2 } from '../core/types';
+import { hasAutoCall } from '../core/players';
+import type { AutoCallState, PlayerState, Vec2 } from '../core/types';
 import { edgeIndicator, type EdgeIndicator } from './camera';
+import { gearIconFrameOf } from './gearFx';
 
 // ───────────────────────────── Constantes ─────────────────────────────
 
@@ -56,6 +65,26 @@ export const CALL_MIN_SEPARATION = Math.ceil(2 * (CALL_RADII[CALL_WAVE_COUNT - 1
 /** Nombre maximal d'appelants simultanés pour un spectateur (4 joueurs − lui-même). */
 export const CALL_MAX_CALLERS = 3;
 
+/**
+ * Taille (px logiques de base, avant `callHudScale`) d'un symbole d'appel automatique : l'icône de 8 px est agrandie à cette largeur (lisible sans masquer les arcs). 16 = ×2 EXACT
+ * à l'échelle 1 (zoom 2) et ×3 à l'échelle 1,5 (zoom 3) : facteurs entiers, donc pixels de l'icône réguliers en rendu pixel-art ; ~12 px CSS sur un téléphone en paysage.
+ */
+export const CALL_SYMBOL_SIZE = 16;
+/** Rayon (px logiques de base) du disque derrière le symbole (lisibilité sur tout fond) ; son liseré a la couleur de l'émetteur. */
+export const CALL_SYMBOL_BACK_RADIUS = 9;
+/** Épaisseur (px logiques de base) du liseré coloré du disque. */
+export const CALL_SYMBOL_RING_WIDTH = 1.5;
+/** Opacité du disque sombre derrière le symbole. */
+export const CALL_SYMBOL_BACK_ALPHA = 0.8;
+/** Couleur du disque derrière un CŒUR / DEMI-CŒUR : claire, pour que la moitié « vide » (sombre) du demi-cœur se distingue d'un cœur plein sur un disque sombre. */
+export const CALL_SYMBOL_HEART_BACK_COLOR = 0xe6dcea;
+/** Opacité du disque clair derrière un cœur. */
+export const CALL_SYMBOL_HEART_BACK_ALPHA = 0.92;
+/** Distance (px MONDE) entre la position de l'émetteur et le centre du symbole flottant au-dessus de sa tête (émetteur visible dans la vue du destinataire). */
+export const CALL_SYMBOL_OVERHEAD_WORLD = 16;
+/** Largeur (px) des frames d'icône de l'atlas (cœurs de l'interface et icônes d'équipement : 8 px). */
+export const CALL_SYMBOL_FRAME_PX = 8;
+
 /** Rayon minimal / maximal (px monde) des anneaux d'onde autour d'un appelant visible. */
 export const CALL_WORLD_RADIUS_MIN = 6;
 export const CALL_WORLD_RADIUS_MAX = 44;
@@ -72,6 +101,66 @@ export function callHudScale(zoom: number): number {
 /** Le signal d'appel de ce joueur est-il affichable ? (vivant et `callMs > 0`) */
 export function isCallSignalActive(p: Pick<PlayerState, 'status' | 'callMs'>): boolean {
   return p.status === 'alive' && Number.isFinite(p.callMs) && p.callMs > 0;
+}
+
+/**
+ * L'appel AUTOMATIQUE de `p` est-il affichable pour le spectateur `viewerId` ? Vrai si `p` est vivant, émet un signal (`autoCall.ms > 0`), N'est PAS en train de lancer un appel
+ * manuel (l'appel manuel l'emporte : le point reste un point), et si le spectateur est l'un des destinataires utiles (`autoCall.to`) ; jamais pour l'émetteur lui-même.
+ */
+export function isAutoCallVisibleTo(p: Pick<PlayerState, 'id' | 'status' | 'callMs' | 'autoCall'>, viewerId: number): boolean {
+  return p.id !== viewerId && hasAutoCall(p) && !isCallSignalActive(p) && !!p.autoCall && (p.autoCall.to as readonly number[]).includes(viewerId);
+}
+
+/** Frame d'atlas du symbole d'un appel automatique : `ui_heart_full`, `ui_heart_half` ou l'icône 8×8 de l'objet (`gear_icon_*`). */
+export function autoCallSymbolFrame(ac: Pick<AutoCallState, 'icon' | 'item'>): string {
+  if (ac.icon === 'heart') return 'ui_heart_full';
+  if (ac.icon === 'half') return 'ui_heart_half';
+  return ac.item ? gearIconFrameOf(ac.item) : 'ui_heart_full';
+}
+
+/**
+ * Symbole à afficher à la place du point pour l'émetteur `p` vu par `viewerId` : la frame d'atlas, ou null (appel manuel : le point habituel, inchangé).
+ */
+export function callSymbolFor(p: Pick<PlayerState, 'id' | 'status' | 'callMs' | 'autoCall'>, viewerId: number): string | null {
+  return isAutoCallVisibleTo(p, viewerId) && p.autoCall ? autoCallSymbolFrame(p.autoCall) : null;
+}
+
+/**
+ * Disque derrière un symbole : couleur et opacité (avant fondu). Cœurs / demi-cœurs (frames `ui_heart_*`) : disque clair ; icônes d'objet : disque sombre
+ * (`darkColor`, la couleur de contour du HUD, fournie par l'appelant).
+ */
+export function callSymbolBack(frame: string, darkColor: number): { color: number; alpha: number } {
+  return frame.startsWith('ui_heart') ? { color: CALL_SYMBOL_HEART_BACK_COLOR, alpha: CALL_SYMBOL_HEART_BACK_ALPHA } : { color: darkColor, alpha: CALL_SYMBOL_BACK_ALPHA };
+}
+
+/**
+ * Position d'écran (repère de la vue, px) du symbole flottant au-dessus d'un émetteur VISIBLE : `CALL_SYMBOL_OVERHEAD_WORLD` px monde au-dessus de lui, ramenée dans le
+ * rectangle intérieur (marge `margin`) pour que le disque ne déborde jamais de la vue. Écrit dans `out` (retourné).
+ */
+export function autoCallOverheadPos(callerPos: Vec2, camCenter: Vec2, zoom: number, viewW: number, viewH: number, margin: number, out: Vec2): Vec2 {
+  const x = viewW / 2 + (callerPos.x - camCenter.x) * zoom;
+  const y = viewH / 2 + (callerPos.y - CALL_SYMBOL_OVERHEAD_WORLD - camCenter.y) * zoom;
+  out.x = Math.max(margin, Math.min(viewW - margin, x));
+  out.y = Math.max(margin, Math.min(viewH - margin, y));
+  return out;
+}
+
+/** Échelle d'affichage (Phaser) du symbole : l'icône de `CALL_SYMBOL_FRAME_PX` px est agrandie à `CALL_SYMBOL_SIZE × scale` px d'écran. */
+export function callSymbolDisplayScale(scale: number): number {
+  return (CALL_SYMBOL_SIZE * scale) / CALL_SYMBOL_FRAME_PX;
+}
+
+/** Marge (px d'écran) entre le bord de la vue et le centre d'un SYMBOLE : le disque (et son liseré) reste entièrement dans la vue. */
+export function callSymbolEdgeMargin(scale: number): number {
+  return (CALL_SYMBOL_BACK_RADIUS + CALL_SYMBOL_RING_WIDTH / 2 + 1) * scale;
+}
+
+/** Temps écoulé (ms) depuis le déclenchement du signal affiché de `p` (manuel : `callElapsedMs` ; automatique : `AUTO_CALL_DURATION_MS - autoCall.ms`). */
+export function callSignalElapsedMs(p: Pick<PlayerState, 'callMs' | 'autoCall'>): number {
+  if (!(Number.isFinite(p.callMs) && p.callMs > 0) && p.autoCall && Number.isFinite(p.autoCall.ms)) {
+    return Math.max(0, Math.min(AUTO_CALL_DURATION_MS, AUTO_CALL_DURATION_MS - p.autoCall.ms));
+  }
+  return callElapsedMs(p);
 }
 
 /** Temps écoulé (ms) depuis l'appui, dérivé de `callMs` : 0 à l'appui, jusqu'à `CALL_DURATION_MS`. */
@@ -131,14 +220,14 @@ export function callColor(callerId: number): number {
 // ───────────────────────────── Spectateurs / appelants ─────────────────────────────
 
 /**
- * Remplit `out` avec les joueurs dont le signal d'appel est en cours, SAUF le spectateur `viewerId` (l'appelant ne voit pas
+ * Remplit `out` avec les joueurs dont le signal d'appel est en cours (manuel, ou automatique destiné à `viewerId`), SAUF le spectateur `viewerId` (l'appelant ne voit pas
  * d'indicateur de bord de son propre appel). Retourne leur nombre. Sans allocation (`out` est réutilisé par l'appelant).
  */
 export function collectCallers(players: readonly PlayerState[], viewerId: number, out: PlayerState[]): number {
   let n = 0;
   for (let i = 0; i < players.length; i++) {
     const q = players[i];
-    if (q.id === viewerId || !isCallSignalActive(q)) continue;
+    if (q.id === viewerId || !(isCallSignalActive(q) || isAutoCallVisibleTo(q, viewerId))) continue;
     out[n++] = q;
   }
   out.length = n;

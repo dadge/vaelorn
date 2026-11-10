@@ -155,6 +155,14 @@ export function pickupHealValue(kind: PickupKind): number {
 }
 
 /**
+ * Ce joueur peut-il CONSOMMER un cœur / demi-cœur au sol ? Vrai s'il est vivant et blessé (PV < max) : aucun seuil, un seul PV manquant suffit (le soin est
+ * alors plafonné au manque, `healAmountFor`). Faux : PV pleins ou à terre. Règle unique, partagée par le ramassage (`collectorFor`) et l'appel automatique.
+ */
+export function canConsumeHeart(p: Pick<PlayerState, 'hp' | 'maxHp' | 'status'>): boolean {
+  return p.status === 'alive' && p.hp < p.maxHp;
+}
+
+/**
  * Soin effectif d'un joueur au contact d'une source de `value` PV : min(valeur, manque). 0 si le joueur n'est pas vivant ou a ses PV pleins
  * (la source n'est alors PAS consommée).
  */
@@ -172,7 +180,7 @@ export function collectorFor(players: readonly PlayerState[], pos: Vec2, radius:
   let bestD = Infinity;
   const r2 = radius * radius;
   for (const p of players) {
-    if (p.status !== 'alive' || !(p.hp < p.maxHp)) continue;
+    if (!canConsumeHeart(p)) continue;
     const dx = p.pos.x - pos.x;
     const dy = p.pos.y - pos.y;
     const d = dx * dx + dy * dy;

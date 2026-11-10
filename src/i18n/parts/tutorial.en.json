@@ -97,7 +97,7 @@
   "tutorial.step.revive": "{name} is about to fall. As soon as that happens, go next to them (if they are off screen, an arrow at the edge shows where) and HOLD {action} for about 3 seconds. If you let go, the revive starts over. Back on their feet, they will open the exit portcullis.",
   "tutorial.step.exit.revive": "They are back up! They pull the lever of the exit portcullis: reach the exit together.",
   "tutorial.step.callReceive": "{name} is far away, off screen, and is CALLING you: spot the signal at the screen edge (a dot and 3 arcs, in their color, with a sound). Head toward them.",
-  "tutorial.step.callSend": "Your turn to call: {call}. You stand still for 1 s and the signal lasts 3 s; you can call again 5 s after pressing. Your allies see a dot and 3 arcs at the edge of their screen.",
+  "tutorial.step.callSend": "Your turn to call: {call}. You stand still for 1 s and the signal lasts 3 s; you can call again 5 s after pressing. Your allies see a dot and 3 arcs at the edge of their screen. A symbol in place of the dot = an item left for teammates.",
   "tutorial.step.exit.call": "Call received! Reach the exit with {name}.",
   "tutorial.step.wipe": "Watch: if all heroes fall at the same time, the room restarts. Cleared rooms and completed goals are kept.",
   "tutorial.step.finalGoals": "Last room: {name} holds the seal circle for 4 seconds. The sealed exit opens once the 4 personal goals are done (x/4).",

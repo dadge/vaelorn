@@ -462,7 +462,7 @@ export class BotRun {
       characterId: chars[i] ?? CHARACTER_IDS[i % CHARACTER_IDS.length],
       difficulty: diffs[i] ?? 2,
     }));
-    let sim = createSimulation({ levelId: level.id, players, seed: opts.seed ?? 1, loot: opts.loot === true, gear: opts.gear === true }, level);
+    let sim = createSimulation({ levelId: level.id, players, seed: opts.seed ?? 1, loot: opts.loot === true, gear: opts.gear === true, autoCall: false }, level); // appel automatique désactivé : purement informatif, les mesures ne changent pas
     const start = Math.max(0, Math.min(level.rooms.length - 1, Math.floor(opts.startRoomIndex ?? 0)));
     if (start > 0) sim = jumpToRoom(sim, level, start);
     this.sim = sim;

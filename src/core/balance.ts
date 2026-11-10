@@ -34,12 +34,15 @@
  *        ACCESSORY_KIND_WEIGHTS (tirage de la sorte, anneau du vampire rare), MAGNET_PULL_SPEED, HORN_DURATION_MS / HORN_RADIUS_PX, VAMPIRE_* (+1 PV tous les 3 ennemis tués)
  *  [B27] BUFF_* .................... bonus temporaires : potion de vitesse (+40 %), éclair de rage (+50 % dégâts) 8 s, étoile (invulnérabilité) 4 s ;
  *        BUFF_BUDGET_PER_PLAYER (~0,3 par héros et par salle), BUFF_KIND_WEIGHTS, BUFF_SPEED_TOTAL_CAP (plafond de TOUTES les sources de vitesse)
+ *  [B28] AUTO_CALL_* ............... appel AUTOMATIQUE (objet laissé aux coéquipiers) : durée du signal (= celle de l'appel manuel, 3 s), délai de récupération
+ *        propre au joueur (4 s, distinct de celui de l'appel manuel) et marge de ré-armement par couple (joueur, objet au sol)
  *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
  *
  * La difficulté n'affecte JAMAIS : les PV du joueur, le nombre d'ennemis, les mécanismes.
  */
+import { CALL_DURATION_MS } from './constants';
 import type { BasicGearSlot, CharacterDef, Difficulty } from './types';
 
 // ───────────────────────── Constantes d'équilibrage ─────────────────────────
@@ -286,6 +289,21 @@ export const BUFF_SPEED_TOTAL_CAP = 0.6;
 export const BUFF_BUDGET_PER_PLAYER = 0.3;
 /** [B27] Poids de tirage de la sorte de bonus temporaire (l'étoile est la plus rare). */
 export const BUFF_KIND_WEIGHTS: Readonly<Record<'speed' | 'rage' | 'star', number>> = { speed: 40, rage: 40, star: 20 };
+
+// ───────────────────────── Appel automatique (objet laissé aux coéquipiers) ─────────────────────────
+
+/** [B28] Durée (ms) du signal d'appel AUTOMATIQUE : celle du signal de l'appel manuel (3 s), sans l'immobilisation. */
+export const AUTO_CALL_DURATION_MS = CALL_DURATION_MS;
+/**
+ * [B28] Délai de récupération (ms) de l'appel AUTOMATIQUE d'un joueur, mesuré depuis son déclenchement : traverser une rangée d'objets ne fait pas clignoter
+ * l'indicateur, et un signal en cours n'est jamais remplacé par un autre objet (le délai est supérieur à la durée du signal). Distinct du délai de l'appel manuel.
+ */
+export const AUTO_CALL_COOLDOWN_MS = 4_000;
+/**
+ * [B28] Marge (px) ajoutée au rayon de contact d'un objet pour le ré-armer : un joueur qui a déclenché un appel sur un objet ne le redéclenche qu'après
+ * être sorti du rayon de contact + cette marge puis y être revenu (pas de va-et-vient au bord du rayon).
+ */
+export const AUTO_CALL_REARM_MARGIN = 4;
 
 /** Multiplicateurs de difficulté appliqués aux ENNEMIS (du point de vue d'un joueur donné). */
 export interface DifficultyMultipliers {

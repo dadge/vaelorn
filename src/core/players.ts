@@ -72,6 +72,7 @@ export function markPlayerDown(p: PlayerState): void {
   p.attackAnimMs = 0;
   p.specialAnimMs = 0;
   p.callMs = 0;
+  resetAutoCall(p);
   p.moving = false;
   p.revivingId = null;
   p.reviverId = null;
@@ -280,7 +281,7 @@ export interface ResetPlayersOptions {
  * Réinitialise les joueurs pour (re)démarrer une salle : position (`spawnsPx[i % spawnsPx.length]`, i = index du joueur
  * dans le tableau), PV pleins, `status:'alive'`, timers (invuln, cooldown, anim) à 0, liens de relevage effacés,
  * `moving=false`, `keys=[]` (les clés sont propres à une salle), spécial PRÊT (`specialCooldownMs = specialAnimMs = 0`),
- * torche REMPLIE (`torchMs = TORCH_MAX_MS`), appel remis à zéro (`callMs = callCooldownMs = 0`).
+ * torche REMPLIE (`torchMs = TORCH_MAX_MS`), appel remis à zéro (`callMs = callCooldownMs = 0`) ainsi que l'appel automatique (`resetAutoCall`).
  *
  * CONSERVÉS : `downCount` (stat de niveau), `kills` (sauf `opts.resetKills`), `facing`/`attackDir`, `prev` (pas de faux front
  * montant si un bouton est tenu pendant le chargement). MUTE les joueurs.
@@ -305,6 +306,7 @@ export function resetPlayersForRoom(players: PlayerState[], spawnsPx: readonly V
     p.torchMs = TORCH_MAX_MS;
     p.callMs = 0;
     p.callCooldownMs = 0;
+    resetAutoCall(p);
     p.revivingId = null;
     p.reviverId = null;
     p.reviveProgressMs = 0;
@@ -316,7 +318,8 @@ export function resetPlayersForRoom(players: PlayerState[], spawnsPx: readonly V
 
 /**
  * Décrémente les timers d'un joueur de `dtMs` (planchers à 0) : `invulnMs`, `attackCooldownMs`, `attackAnimMs`,
- * `specialCooldownMs` (recharge du spécial), `specialAnimMs`, `callMs` (signal d'appel) et `callCooldownMs` (délai de récupération de l'appel).
+ * `specialCooldownMs` (recharge du spécial), `specialAnimMs`, `callMs` (signal d'appel), `callCooldownMs` (délai de récupération de l'appel) et ceux de
+ * l'appel automatique (`autoCall.ms`, `autoCallCooldownMs`, champs supprimés à zéro).
  * S'applique aussi aux joueurs à terre. MUTE `p`.
  */
 export function stepPlayerTimers(p: PlayerState, dtMs: number): void {
@@ -327,6 +330,7 @@ export function stepPlayerTimers(p: PlayerState, dtMs: number): void {
   p.specialAnimMs = Math.max(0, (Number.isFinite(p.specialAnimMs) ? p.specialAnimMs : 0) - dtMs);
   p.callMs = stepCallTimer(p.callMs, dtMs);
   p.callCooldownMs = stepCallTimer(p.callCooldownMs, dtMs);
+  stepAutoCallTimers(p, dtMs);
   if (p.loadout) stepBuffs(p.loadout, dtMs); // bonus temporaires (potion, rage, étoile, cor)
 }
 
@@ -369,11 +373,45 @@ export function canStartCall(p: Pick<PlayerState, 'status' | 'callMs' | 'callCoo
 export function startCall(p: PlayerState): void {
   p.callMs = CALL_DURATION_MS;
   p.callCooldownMs = CALL_COOLDOWN_MS;
+  cancelAutoCall(p); // l'appel manuel l'emporte : l'icône de l'appel automatique est effacée (son délai de récupération reste, il est distinct)
 }
 
 /** Annule le signal d'appel en cours (le délai de récupération n'est pas modifié). MUTE `p`. */
 export function cancelCall(p: PlayerState): void {
   p.callMs = 0;
+}
+
+// ───────────────────────────── Appel automatique ─────────────────────────────
+
+/** Décrémente les minuteurs de l'appel AUTOMATIQUE (`autoCall.ms`, `autoCallCooldownMs`) ; un minuteur à zéro SUPPRIME son champ (l'état redevient identique à celui d'avant). MUTE `p`. */
+export function stepAutoCallTimers(p: PlayerState, dtMs: number): void {
+  if (p.autoCall) {
+    const ms = stepCallTimer(p.autoCall.ms, dtMs);
+    if (ms > 0) p.autoCall.ms = ms;
+    else delete p.autoCall;
+  }
+  if (p.autoCallCooldownMs !== undefined) {
+    const cd = stepCallTimer(p.autoCallCooldownMs, dtMs);
+    if (cd > 0) p.autoCallCooldownMs = cd;
+    else delete p.autoCallCooldownMs;
+  }
+}
+
+/** Efface le signal d'appel automatique en cours (délai de récupération et mémoire des objets signalés inchangés). MUTE `p`. */
+export function cancelAutoCall(p: PlayerState): void {
+  delete p.autoCall;
+}
+
+/** Remet à zéro tout l'appel automatique : signal, délai de récupération, objets signalés (chute, entrée de salle). MUTE `p`. */
+export function resetAutoCall(p: PlayerState): void {
+  delete p.autoCall;
+  delete p.autoCallCooldownMs;
+  delete p.autoCallSeen;
+}
+
+/** Le joueur émet-il un signal d'appel AUTOMATIQUE affichable ? (vivant, `autoCall.ms > 0`) */
+export function hasAutoCall(p: Pick<PlayerState, 'status' | 'autoCall'>): boolean {
+  return p.status === 'alive' && !!p.autoCall && p.autoCall.ms > CALL_EPSILON_MS;
 }
 
 /**

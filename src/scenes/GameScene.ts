@@ -295,9 +295,10 @@ export class GameScene extends Phaser.Scene {
     const seed = tut ? TUTORIAL_SEED : demo ? demo.seed : (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
     // Salle de départ : reprise d'une sauvegarde ou dev `?room=N` (honorée par la simulation, voir SimConfig.startRoomIndex).
     const players = setups.slice(0, playerCount);
+    // Appel automatique (objet laissé aux coéquipiers) : partie normale uniquement (le tutoriel et la démo n'en ont pas) ; aucun effet sur le jeu.
     // Équipement : actif en partie normale uniquement (la démo et le tutoriel ignorent les objets) ; « Continuer » restitue l'équipement sauvegardé.
     this.sim = createSimulation(
-      { levelId: level.id, players, seed, startRoomIndex: this.session.startRoomIndex, gear: !tut && !demo, initialGear: tut || demo ? undefined : this.session.startGear },
+      { levelId: level.id, players, seed, startRoomIndex: this.session.startRoomIndex, gear: !tut && !demo, autoCall: !tut && !demo, initialGear: tut || demo ? undefined : this.session.startGear },
       level,
     );
 

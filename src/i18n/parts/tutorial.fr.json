@@ -97,7 +97,7 @@
   "tutorial.step.revive": "{name} va tomber à terre. Dès que c'est le cas, va près de cet allié (hors de l'écran, une flèche au bord te le montre) et MAINTIENS {action} environ 3 secondes. Si tu lâches, le relevage recommence à zéro. Une fois relevé, cet allié ouvrira la herse de sortie.",
   "tutorial.step.exit.revive": "L'allié est debout ! Il tire le levier de la herse de sortie : rejoignez la sortie ensemble.",
   "tutorial.step.callReceive": "{name} est loin, hors de l'écran, et t'APPELLE : repère le signal au bord de l'écran (un point et 3 arcs, de sa couleur, avec un son). Va vers cet allié.",
-  "tutorial.step.callSend": "À toi d'appeler : {call}. Tu restes immobile 1 s et le signal dure 3 s ; tu pourras rappeler 5 s après l'appui. Tes alliés voient un point et 3 arcs au bord de leur écran.",
+  "tutorial.step.callSend": "À toi d'appeler : {call}. Tu restes immobile 1 s et le signal dure 3 s ; tu pourras rappeler 5 s après l'appui. Tes alliés voient un point et 3 arcs au bord de leur écran. Un symbole à la place du point = un objet laissé aux coéquipiers.",
   "tutorial.step.exit.call": "Appel reçu ! Rejoins la sortie avec {name}.",
   "tutorial.step.wipe": "Regarde : si tous les héros tombent en même temps, la salle recommence. Les salles réussies et les objectifs accomplis sont conservés.",
   "tutorial.step.finalGoals": "Dernière salle : {name} tient le cercle du sceau 4 secondes. La sortie scellée s'ouvre quand les 4 objectifs personnels sont accomplis (x/4).",
