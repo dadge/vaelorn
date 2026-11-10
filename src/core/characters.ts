@@ -7,6 +7,7 @@
  *
  * Pour ranged : `attack.range` ≈ projectile.speed × lifeMs / 1000.
  */
+import { AUTO_CALL_COOLDOWN_MS_CHATTY, CALL_COOLDOWN_MS_CHATTY, CROSS_CALL_REPEAT_MS_CHATTY } from './balance';
 import { effectiveSpecialCooldownMs } from './gear';
 import type { CharacterDef, CharacterId, PlayerState, SpecialDef } from './types';
 
@@ -70,7 +71,7 @@ export const CHARACTERS: Readonly<Record<CharacterId, CharacterDef>> = {
     },
     special: { kind: 'fireNova', nameKey: sKey('sandrine', 'name'), descKey: sKey('sandrine', 'desc'), cooldownMs: 18000, damageMult: 6, radius: 58, range: 64, animMs: 400 },
   },
-  // Éclaireur : le plus rapide, lame courte et vive.
+  // Éclaireur : le plus rapide, lame courte et vive. Il PARLE BEAUCOUP : aucune attente entre ses appels (manuel et d'objet), croix rouge répétée toutes les 3 s (trait d'appel, balance.ts [B31]).
   romain: {
     id: 'romain',
     nameKey: key('romain', 'name'),
@@ -84,6 +85,12 @@ export const CHARACTERS: Readonly<Record<CharacterId, CharacterDef>> = {
     reviveTimeMult: 1,
     attack: { kind: 'melee', cooldownMs: 320, range: 18, arcDeg: 90, animMs: 140, damageMult: 0.8 },
     special: { kind: 'dash', nameKey: sKey('romain', 'name'), descKey: sKey('romain', 'desc'), cooldownMs: 9000, damageMult: 3, radius: 10, range: 90, animMs: 250, invulnMs: 350 },
+    callTraits: {
+      manualCooldownMs: CALL_COOLDOWN_MS_CHATTY,
+      autoCooldownMs: AUTO_CALL_COOLDOWN_MS_CHATTY,
+      crossRepeatMs: CROSS_CALL_REPEAT_MS_CHATTY,
+      crossSoftRepeat: true,
+    },
   },
   // Guérisseuse-archère : projectile « heal » qui blesse peu, relève plus vite.
   valentine: {

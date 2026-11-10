@@ -261,7 +261,9 @@ export class TutorialRun {
         return pk ? this.walk(pos, pk.pos, 2).f : idleFrame();
       }
       case 'heartSelf': {
-        // blessé avec un cœur rangé : appui court sur B (front montant)
+        // blessé avec un cœur rangé : appui court sur B (front montant). Le joueur attend la blessure mise en scène par l'étape (PV à 50 %) : un héros déjà blessé en arrivant (Romain, 100 PV max)
+        // ne doit pas consommer son cœur AVANT elle (il ne serait plus « blessé par la mise en scène » et l'étape ne se validerait pas)
+        if (me.hp > me.maxHp * 0.5 + 1) return idleFrame();
         this.pulse++;
         return { ...idleFrame(), heart: this.pulse % 6 < 3 };
       }

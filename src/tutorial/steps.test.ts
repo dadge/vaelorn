@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { GAME_HEIGHT, GAME_WIDTH } from '../core/constants';
 import { getDictionary } from '../i18n/i18n';
+import { CARD_MARGIN, cardFontSize, cardWidth } from '../render/tutorialHudLogic';
 import { tutorialLevel } from '../levels/tutorial';
 import { BUTTON_NAMES, DEVICE_KINDS } from './deviceHints';
 import { TUTORIAL_STEPS, firstStepIndexOfRoom, isExitStep } from './steps';
@@ -299,6 +301,58 @@ describe('étapes du tutoriel : appels automatiques', () => {
     const en1 = recap(en);
     for (const w of ['full', 'no stronger', 'swapped', 'downed', 'red cross', '30%', 'symbol', 'dot', 'only the allies', 'valentine', '3 s', 'does not freeze', 'manual call', 'anti-spam', '4 s', '10 s', 'never in solo', 'locked', 'fall']) {
       expect(en1, w).toContain(w);
+    }
+  });
+
+  it('RÉCAPITULATIF : la règle de Romain (« parle beaucoup » : appels sans attente, croix rouge toutes les 3 s) figure en fr et en en ; l étape d appel et celle de la croix signalent l exception de Romain', () => {
+    expect(fr['tutorial.step.autoCallRecap1']).toContain("Romain parle beaucoup : ses appels n'ont aucune attente, et sa croix rouge se répète toutes les 3 s.");
+    expect(en['tutorial.step.autoCallRecap1']).toContain('Romain talks a lot: his calls have no wait, and his red cross repeats every 3 s.');
+    // la phrase n'est pas dupliquée sur la page 2 (page déjà longue : elle débordait de la carte en tactile)
+    expect(fr['tutorial.step.autoCallRecap2']).not.toContain('Romain');
+    expect(en['tutorial.step.autoCallRecap2']).not.toContain('Romain');
+    // l'appel manuel de Romain n'attend pas, mais ne se relance pas PENDANT son signal de 3 s : « dès la fin du signal », jamais « tout de suite »
+    expect(fr['tutorial.step.callSend']).toContain('Romain : dès la fin du signal');
+    expect(en['tutorial.step.callSend']).toContain('Romain: as soon as the signal ends');
+    expect(fr['tutorial.step.callSend']).not.toContain('tout de suite');
+    expect(en['tutorial.step.callSend']).not.toContain('right away');
+    expect(fr['tutorial.step.crossWho']).toContain('toutes les 10 s (Romain : 3 s)');
+    expect(en['tutorial.step.crossWho']).toContain('every 10 s (Romain: 3 s)');
+    // la règle générale (10 s, 4 s) reste présente : Romain est une exception, pas un remplacement
+    expect(fr['tutorial.step.autoCallRecap2']).toContain('10 s');
+    expect(en['tutorial.step.autoCallRecap2']).toContain('10 s');
+  });
+
+  it('LONGUEUR : chaque page du récapitulatif tient dans la carte du tutoriel (police à chasse fixe 0,6 em, interligne 1,25), sur la vue logique, au clavier (22 px) comme en tactile (26 px), dans les deux langues', () => {
+    /** Nombre de lignes après retour à la ligne aux espaces, à `cols` caractères par ligne. */
+    const lines = (text: string, cols: number): number => {
+      let n = 0;
+      for (const para of text.split(String.fromCharCode(10))) {
+        let len = 0;
+        let count = 1;
+        for (const w of para.split(' ')) {
+          if (len === 0) len = w.length;
+          else if (len + 1 + w.length <= cols) len += 1 + w.length;
+          else {
+            count++;
+            len = w.length;
+          }
+        }
+        n += count;
+      }
+      return n;
+    };
+    const vp = { x: 0, y: 0, w: GAME_WIDTH, h: GAME_HEIGHT };
+    for (const touch of [false, true]) {
+      const size = cardFontSize(touch);
+      const cols = Math.floor((cardWidth(vp, touch) - 28) / (size * 0.6));
+      const header = (touch ? 22 : 20) * 1.25 + 4;
+      for (const id of ['autoCallRecap1', 'autoCallRecap2']) {
+        for (const l of [fr, en]) {
+          const text = l[`tutorial.step.${id}`].replace(/{w+}/g, 'XXXXXXXX');
+          const h = lines(text, cols) * size * 1.25 + header + 28;
+          expect(h, `${id} touch=${touch}`).toBeLessThanOrEqual(GAME_HEIGHT - 2 * CARD_MARGIN);
+        }
+      }
     }
   });
 

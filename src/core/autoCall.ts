@@ -18,6 +18,9 @@
  *     en cours n'est jamais interrompu par un automatique ; un appel manuel qui démarre efface l'icône automatique (`startCall`).
  *  4. Anti-spam : un seul déclenchement par couple (joueur, objet) tant que le joueur reste dans le rayon (+ `AUTO_CALL_REARM_MARGIN`) ; par joueur, délai de
  *     récupération `AUTO_CALL_COOLDOWN_MS` (> durée du signal : un signal actif n'est jamais remplacé par un autre objet).
+ *     TRAIT « PARLE BEAUCOUP » (Romain, `callTraits.ts`, [B31]) : AUCUN délai entre deux appels d'objet (`autoCallCooldownMs` n'est jamais armé) ; son signal d'objet en cours PEUT être remplacé par
+ *     celui d'un autre objet dès qu'il a été AFFICHÉ `AUTO_CALL_MIN_SHOW_MS_CHATTY` (1 s : le temps d'être lu par ses destinataires ; ce n'est pas une attente entre deux appels) : nouvelle icône, signal relancé à 3 s ; l'objet remplacé n'est PAS « oublié » : l'anti-spam par couple reste, sinon deux objets voisins se remplaceraient en boucle. L'appel manuel en cours
+ *     n'est jamais interrompu et l'emporte, et une croix en cours n'est jamais remplacée, pour lui comme pour les autres.
  *  5. Un signal s'arrête quand son objet disparaît (ramassé par un allié, périmé).
  *  6. ÉCHANGE D'ACCESSOIRE : un joueur qui ÉCHANGE à la main un accessoire d'une autre sorte (bouton A, `swapAccessory` de la simulation) pose l'ANCIEN à ses pieds, verrouillé pour lui tant qu'il n'a pas quitté
  *     le rayon (`lockMode === 'leave'`) : c'est un objet qu'il LAISSE (`gearLeftBy`). Un appel part alors avec l'icône de l'objet posé, aux mêmes conditions que pour un objet refusé (destinataires : alliés vivants
@@ -26,7 +29,7 @@
  *  7. CROIX ROUGE = DEMANDE DE SOINS (`stepCross`, constantes [B30]) : un joueur VIVANT dont les PV tombent à `CROSS_CALL_THRESHOLD` (30 %) de ses PV max ou MOINS prévient les alliés VIVANTS qui PEUVENT réellement le
  *     soigner (`canHealWithCross` : emplacement cœur contenant un cœur utilisable — avec `options.heartSlot` —, ou VALENTINE, qui soigne avec sa flèche et son onde sans cœur), évalués au déclenchement ; aucun
  *     soigneur = aucun appel. Symbole : une croix rouge (`icon: 'cross'`, `ref: 'x'`). Un joueur à terre ne la déclenche pas (il a déjà sa flèche). Répétition : un nouvel appel au plus toutes les
- *     `CROSS_CALL_REPEAT_MS` (10 s) tant que le joueur reste à 30 % ou moins ; entre 30 % et 60 % le délai CONTINUE de courir (un rebond juste au-dessus du seuil ne fait pas taire la demande) ; le suivi (`PlayerState.autoCallCross`) est supprimé (croix réarmée)
+ *     `CROSS_CALL_REPEAT_MS` (10 s ; 3 s pour un héros qui parle beaucoup, Romain : `crossRepeatMsFor`, la croix est alors quasi continue, sans trou, et ses vraies répétitions jouent un son plus doux ; une nouvelle alerte après une longue pause garde le son complet : `autoCallCross.idleMs`) tant que le joueur reste à 30 % ou moins ; entre 30 % et 60 % le délai CONTINUE de courir (un rebond juste au-dessus du seuil ne fait pas taire la demande) ; le suivi (`PlayerState.autoCallCross`) est supprimé (croix réarmée)
  *     quand les PV remontent à `CROSS_CALL_REARM_FRACTION` (60 %) ou plus et à chaque entrée de salle. Un signal de croix en cours s'arrête dès que le joueur repasse au-dessus du seuil (soigné). Priorité : la croix PEUT remplacer un appel automatique d'objet en cours (plus urgent) ; un appel MANUEL
  *     en cours n'est jamais interrompu et l'emporte (un signal d'objet remplacé par la croix est « oublié » et repart ensuite) ; elle n'est pas soumise au délai de `AUTO_CALL_COOLDOWN_MS` (4 s) des objets et ne le consomme pas, ni celui de l'appel manuel.
  * Solo (un seul joueur) : aucun appel. L'activation (démo, bots) est décidée par l'appelant (`GameState.autoCallDisabled`) ; le tutoriel l'active.
@@ -34,6 +37,7 @@
 import {
   AUTO_CALL_COOLDOWN_MS,
   AUTO_CALL_DURATION_MS,
+  AUTO_CALL_MIN_SHOW_MS_CHATTY,
   AUTO_CALL_REARM_MARGIN,
   CROSS_CALL_REARM_FRACTION,
   CROSS_CALL_REPEAT_MS,
@@ -45,6 +49,7 @@ import { ACCESSORY_KINDS, GEAR_LEVELS, GEAR_SLOTS, pickupDecision } from './gear
 import { distSq } from './geometry';
 import { canStoreHeart, heartUseAmount } from './heartSlot';
 import { canConsumeHeart } from './loot';
+import { autoCallCooldownFor, autoCallsWithoutWait, crossRepeatMsFor, crossSoftRepeatFor, crossSoftWindowMs } from './callTraits';
 import { CALL_EPSILON_MS } from './players';
 import type { AutoCallIcon, AutoCallState, GearDropState, GearItem, PickupState, PlayerId, PlayerState, SimEvent } from './types';
 
@@ -225,7 +230,11 @@ export function stepAutoCalls(
     if (p.callMs > CALL_EPSILON_MS || p.autoCall?.icon === 'cross') continue;
     // un signal d'objet actif n'est pas remplacé par un autre objet ; délai de récupération propre à l'appel automatique. Seul l'appel APRÈS ÉCHANGE d'accessoire (règle 6) y échappe : il part
     // à l'instant du geste du joueur, qui s'éloigne naturellement de l'objet (le verrou 'leave' tombe alors et l'appel serait perdu s'il devait attendre la fin d'un délai) ; il REMPLACE un signal d'objet en cours
-    const busy = p.autoCall !== undefined || (p.autoCallCooldownMs ?? 0) > CALL_EPSILON_MS;
+    // Trait « sans attente » (Romain) : aucun délai armé, et un signal d'objet en cours peut être remplacé tout de suite par un autre objet (l'anti-spam par couple, `autoCallSeen`, reste)
+    const noWait = autoCallsWithoutWait(p);
+    // Un signal d'objet de ce héros doit avoir été AFFICHÉ au moins `AUTO_CALL_MIN_SHOW_MS_CHATTY` avant d'être remplacé (lisible par ses destinataires) : ce n'est pas une attente entre deux appels, seulement le temps de lire
+    const unreadable = noWait && p.autoCall !== undefined && AUTO_CALL_DURATION_MS - p.autoCall.ms < AUTO_CALL_MIN_SHOW_MS_CHATTY - CALL_EPSILON_MS;
+    const busy = (p.autoCall !== undefined && !noWait) || unreadable || (p.autoCallCooldownMs ?? 0) > CALL_EPSILON_MS;
 
     const seen = p.autoCallSeen;
     let found: Candidate | null = null;
@@ -254,9 +263,11 @@ export function stepAutoCalls(
     if (!found) continue;
     const call: AutoCallState = { icon: found.icon, ref: found.ref, ms: AUTO_CALL_DURATION_MS, to: found.to };
     if (found.item) call.item = found.item;
-    forgetReplacedRef(p); // un signal d'objet remplacé (appel après échange) pourra repartir
+    // un signal d'objet remplacé (appel après échange) pourra repartir ; sans attente (Romain) l'objet remplacé reste « vu » (le délai ne le ferait pas repartir, et l'oublier ferait se remplacer deux objets voisins en boucle)
+    if (!noWait) forgetReplacedRef(p);
     p.autoCall = call;
-    p.autoCallCooldownMs = AUTO_CALL_COOLDOWN_MS;
+    const cooldown = autoCallCooldownFor(p);
+    if (cooldown > 0) p.autoCallCooldownMs = cooldown; // sans attente : le champ n'est jamais armé
     p.autoCallSeen = p.autoCallSeen ? [...p.autoCallSeen, found.ref] : [found.ref];
     events.push({ type: 'autoCallStarted', playerId: p.id, icon: found.icon, to: found.to.slice() });
   }
@@ -303,8 +314,12 @@ function stepCross(p: PlayerState, players: readonly PlayerState[], heartSlot: b
   const to = recipients(players, p.id, (q) => canHealWithCross(q, p, heartSlot));
   forgetReplacedRef(p); // l'appel d'objet remplacé repartira après la croix (délai de récupération écoulé)
   p.autoCall = { icon: 'cross', ref: CROSS_REF, ms: AUTO_CALL_DURATION_MS, to };
-  p.autoCallCross = { ms: CROSS_CALL_REPEAT_MS };
-  events.push({ type: 'autoCallStarted', playerId: p.id, icon: 'cross', to: to.slice() });
+  p.autoCallCross = { ms: crossRepeatMsFor(p) };
+  const started: SimEvent = { type: 'autoCallStarted', playerId: p.id, icon: 'cross', to: to.slice() };
+  // vraie RÉPÉTITION d'un héros à croix fréquente (Romain, toutes les 3 s) : le son est plus court et plus doux (le champ n'existe jamais pour les autres héros). Une NOUVELLE alerte après une longue pause (PV remontés
+  // puis retombés, aucun soigneur pendant un moment : `idleMs` au-delà de la fenêtre) garde le son complet
+  if (tracking && crossSoftRepeatFor(p) && (tracking.idleMs ?? 0) <= crossSoftWindowMs(p)) started.repeat = true;
+  events.push(started);
 }
 
 /** L'objet d'un signal 'gear' désigne-t-il une frame d'icône existante (emplacement connu, niveau 1..3, accessoire connu pour un accessoire) ? */
@@ -339,13 +354,21 @@ export function normalizeAutoCallFields(p: PlayerState): void {
     if (!ok) delete p.autoCall;
   }
   const cd = p.autoCallCooldownMs as unknown;
-  if (cd !== undefined && !(typeof cd === 'number' && Number.isFinite(cd) && cd > 0 && cd <= AUTO_CALL_COOLDOWN_MS)) delete p.autoCallCooldownMs;
+  // bornes = le plus grand de la valeur par défaut et de celle du trait du héros (un trait data-driven peut en déclarer une plus grande)
+  const maxCd = Math.max(AUTO_CALL_COOLDOWN_MS, autoCallCooldownFor(p));
+  if (cd !== undefined && !(typeof cd === 'number' && Number.isFinite(cd) && cd > 0 && cd <= maxCd)) delete p.autoCallCooldownMs;
   const seen = p.autoCallSeen as unknown;
   if (seen !== undefined && !(Array.isArray(seen) && seen.length > 0 && seen.every((r) => typeof r === 'string'))) delete p.autoCallSeen;
   const cross = p.autoCallCross as unknown;
   if (cross !== undefined) {
-    const c = cross as { ms?: unknown } | null;
-    const ok = !!c && typeof c === 'object' && typeof c.ms === 'number' && Number.isFinite(c.ms) && c.ms >= 0 && c.ms <= CROSS_CALL_REPEAT_MS;
+    const c = cross as { ms?: unknown; idleMs?: unknown } | null;
+    const maxRepeat = Math.max(CROSS_CALL_REPEAT_MS, crossRepeatMsFor(p));
+    const ok = !!c && typeof c === 'object' && typeof c.ms === 'number' && Number.isFinite(c.ms) && c.ms >= 0 && c.ms <= maxRepeat;
     if (!ok) delete p.autoCallCross;
+    else if (c.idleMs !== undefined) {
+      // durée d'inactivité (héros à répétition douce) : un champ mal formé est supprimé (son complet), jamais ajouté
+      const idle = c.idleMs;
+      if (!(crossSoftRepeatFor(p) && typeof idle === 'number' && Number.isFinite(idle) && idle >= 0 && idle <= crossSoftWindowMs(p) * 2)) delete (c as { idleMs?: unknown }).idleMs;
+    }
   }
 }

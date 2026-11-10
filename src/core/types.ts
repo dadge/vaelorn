@@ -139,6 +139,21 @@ export interface SpecialDef {
   spreadDeg?: number;
 }
 
+/**
+ * TRAITS D'APPEL d'un personnage (DATA, voir `callTraits.ts` et `balance.ts` [B31]) : valeurs EXPLICITES qui remplacent, pour CE héros seulement, les délais de l'appel manuel et de l'appel automatique.
+ * Un personnage sans `callTraits` (ou avec un champ absent) garde exactement les valeurs par défaut (`DEFAULT_CALL_TRAITS`). Lu par des fonctions pures (`callCooldownFor`, `autoCallCooldownFor`, `crossRepeatMsFor`).
+ */
+export interface CallTraits {
+  /** Délai de récupération (ms) de l'appel MANUEL, mesuré depuis l'appui (0 = aucune attente : on relance dès que le signal en cours est fini). */
+  manualCooldownMs: number;
+  /** Délai de récupération (ms) de l'appel AUTOMATIQUE d'objet entre deux appels (0 = aucune attente : un signal d'objet peut être remplacé tout de suite par celui d'un autre objet). */
+  autoCooldownMs: number;
+  /** Répétition (ms) de la CROIX ROUGE tant que le joueur reste à 30 % de ses PV max ou moins. */
+  crossRepeatMs: number;
+  /** Les RÉPÉTITIONS de la croix (pas la première) jouent un son plus court et plus doux (`repeat` de l'événement `autoCallStarted`) : à un rythme rapide, le son ne doit pas devenir agressif. */
+  crossSoftRepeat: boolean;
+}
+
 export interface CharacterDef {
   id: CharacterId;
   /** Clés i18n : character.<id>.name / .class / .desc */
@@ -160,6 +175,8 @@ export interface CharacterDef {
   attack: AttackDef;
   /** Attaque spéciale du personnage. */
   special?: SpecialDef;
+  /** Traits d'appel propres au héros (ex. Romain « parle beaucoup ») : champs absents = valeurs par défaut. Absent = comportement standard. */
+  callTraits?: Partial<CallTraits>;
 }
 
 // ───────────────────────────── Ennemis ─────────────────────────────
@@ -406,7 +423,7 @@ export interface PlayerState {
    * Le joueur est immobilisé tant que `callMs > CALL_DURATION_MS - CALL_FREEZE_MS`. Remis à 0 s'il tombe à terre et à chaque (re)démarrage de salle.
    */
   callMs: number;
-  /** Délai de récupération restant (ms) avant de pouvoir rappeler (`CALL_COOLDOWN_MS` à l'appui, décompté depuis l'appui). */
+  /** Délai de récupération restant (ms) avant de pouvoir rappeler (`CALL_COOLDOWN_MS` à l'appui, décompté depuis l'appui ; toujours 0 pour un héros sans attente, Romain : `CallTraits.manualCooldownMs`). */
   callCooldownMs: number;
   /**
    * Appel AUTOMATIQUE en cours (objet laissé aux coéquipiers), voir `AutoCallState`. Absent = aucun. Champ optionnel, créé au déclenchement puis supprimé à son terme :
@@ -420,8 +437,10 @@ export interface PlayerState {
   /**
    * Suivi de la CROIX ROUGE (demande de soins, `autoCall.ts`) : présent = la croix est déjà partie pour ce joueur depuis qu'il est tombé à 30 % de ses PV max ou moins (désarmée) ; `ms` = temps restant avant sa prochaine
    * RÉPÉTITION (≥ 0 ; la croix ne repart que si ce délai est écoulé ET que le joueur est toujours à 30 % ou moins). Supprimé quand les PV remontent à 60 % ou plus et à chaque entrée de salle. Absent = armée.
+   * `idleMs` (héros à répétition douce SEULEMENT, Romain : `CallTraits.crossSoftRepeat`) : temps écoulé depuis que le délai de répétition est à 0 sans qu'une croix soit repartie (plafonné) ; sert à distinguer une
+   * vraie RÉPÉTITION (son doux) d'une nouvelle alerte après une longue pause (son complet). Absent pour tous les autres héros : leur état est inchangé.
    */
-  autoCallCross?: { ms: number };
+  autoCallCross?: { ms: number; idleMs?: number };
   /**
    * EMPLACEMENT CŒUR (`heartSlot.ts`, option `SimConfig.heartSlot`) : le cœur (10 PV) ou demi-cœur (5 PV) rangé, utilisé volontairement avec le bouton B. Un seul objet, jamais cumulé.
    * Champ OPTIONNEL : absent = emplacement vide, donc un état sans cœur rangé (ou sans l'option) est identique à celui d'avant l'ajout. Perdu à la chute (il tombe alors au sol).
@@ -1041,8 +1060,11 @@ export type SimEvent =
   | { type: 'hourglassEmpty'; mechanismId: string }
   | { type: 'gateClosed'; mechanismId: string; closedCount: number }
   | { type: 'callStarted'; playerId: PlayerId }
-  /** Appel AUTOMATIQUE : `playerId` laisse un objet (`icon`) à ses coéquipiers `to` (alliés vivants pour qui il est utile). Aucune immobilisation, aucune animation d'appel manuel. */
-  | { type: 'autoCallStarted'; playerId: PlayerId; icon: AutoCallIcon; to: PlayerId[] }
+  /**
+   * Appel AUTOMATIQUE : `playerId` laisse un objet (`icon`) à ses coéquipiers `to` (alliés vivants pour qui il est utile). Aucune immobilisation, aucune animation d'appel manuel.
+   * `repeat: true` : RÉPÉTITION d'une croix rouge d'un héros à répétition douce (`CallTraits.crossSoftRepeat`, Romain) : son plus doux ; absent pour tous les autres cas (événements des autres héros inchangés).
+   */
+  | { type: 'autoCallStarted'; playerId: PlayerId; icon: AutoCallIcon; to: PlayerId[]; repeat?: true }
   // ── Sources de vie (butin des ennemis, cristaux de soin) ──
   | { type: 'pickupDropped'; pickupId: number; kind: PickupKind; pos: Vec2 }
   | { type: 'pickupCollected'; pickupId: number; playerId: PlayerId; kind: PickupKind; healed: number; pos: Vec2 }

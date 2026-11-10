@@ -68,7 +68,7 @@
  *    les joueurs vivants conservent leurs PV d'une salle à l'autre (seuls les joueurs à terre sont relevés à PV pleins) ;
  *  - après un redémarrage, `player.kills` est remis à zéro (voir `resetPlayersForRoom`) ;
  *  - le spécial démarre PRÊT ; tout chargement/redémarrage de salle le remet PRÊT (recharge à 0, sans événement `specialReady`) ;
- *  - appel : `callMs` (signal restant, ≤ CALL_DURATION_MS) et `callCooldownMs` (≤ CALL_COOLDOWN_MS, décompté depuis l'appui) décroissent
+ *  - appel : `callMs` (signal restant, ≤ CALL_DURATION_MS) et `callCooldownMs` (≤ CALL_COOLDOWN_MS, décompté depuis l'appui ; toujours 0 pour Romain, trait « parle beaucoup » de `callTraits.ts` : il relance dès la fin de son signal, jamais pendant) décroissent
  *    avec les autres timers (a). Immobile tant que `callMs > CALL_DURATION_MS - CALL_FREEZE_MS`. Annulé si l'appelant tombe à terre ;
  *    tout (re)démarrage de salle (start / next / restart, donc défaite collective incluse) remet les deux à 0. Un joueur qui appelle reste
  *    vulnérable, sa torche continue de s'user et il compte normalement pour les zones d'objectif et de sortie.

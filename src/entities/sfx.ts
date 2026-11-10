@@ -39,6 +39,7 @@ export type SfxName =
   | 'call'
   | 'autoCall'
   | 'autoCallCross'
+  | 'autoCallCrossRepeat'
   | 'brazierLit'
   | 'torchRefuel'
   | 'torchLow'
@@ -111,6 +112,8 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   autoCall: { f0: 760, f1: 900, durMs: 90, type: 'sine', vol: 0.035 },
   // croix rouge (demande de soins) : deux petits « pips » rapprochés et montants, plus pressants que le « tic » d'un objet mais doux (sinusoïde, volume bas : moins fort que l'appel manuel)
   autoCallCross: { f0: 880, f1: 880, durMs: 80, type: 'sine', vol: 0.04, then: { f0: 1175, f1: 1175, delayMs: 110 } },
+  // RÉPÉTITION de la croix d'un héros qui parle beaucoup (Romain, toutes les 3 s) : un seul « pip » court et bas, pour ne pas devenir agressif à ce rythme (la 1re croix garde le son complet ci-dessus ; les autres héros ne l'entendent jamais)
+  autoCallCrossRepeat: { f0: 880, f1: 880, durMs: 60, type: 'sine', vol: 0.03 },
   // torches et braseros (salles sombres)
   brazierLit: { f0: 120, f1: 320, durMs: 260, type: 'sawtooth', vol: 0.06, then: { f0: 520, f1: 780, delayMs: 110 } },
   torchRefuel: { f0: 420, f1: 840, durMs: 200, type: 'triangle', vol: 0.06, then: { f0: 630, f1: 1260, delayMs: 100 } },
@@ -220,7 +223,7 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
     case 'callStarted':
       return 'call';
     case 'autoCallStarted':
-      return e.icon === 'cross' ? 'autoCallCross' : 'autoCall';
+      return e.icon === 'cross' ? (e.repeat === true ? 'autoCallCrossRepeat' : 'autoCallCross') : 'autoCall';
     case 'brazierLit':
       return 'brazierLit';
     case 'torchRefueled':

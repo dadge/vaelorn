@@ -63,7 +63,7 @@ export const BRAZIER_LIGHT_TILES = 5;
 export const CALL_FREEZE_MS = 1000;
 /** Durée (ms) du signal d'appel depuis l'appui (la 1re seconde est celle de l'immobilisation). */
 export const CALL_DURATION_MS = 3000;
-/** Délai de récupération (ms) mesuré depuis l'APPUI : un nouvel appel n'est possible qu'une fois écoulé (donc 2 s de repos après la fin du signal). */
+/** Délai de récupération (ms) mesuré depuis l'APPUI : un nouvel appel n'est possible qu'une fois écoulé (donc 2 s de repos après la fin du signal). Valeur PAR DÉFAUT : un héros peut en déclarer une autre (Romain : 0, `callTraits.ts` / `balance.ts` [B31]). */
 export const CALL_COOLDOWN_MS = 5000;
 
 /** Résolution logique du canvas (Phaser.Scale.FIT l'adapte à la fenêtre). */

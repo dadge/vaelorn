@@ -220,6 +220,18 @@ export function callEndFade(elapsedMs: number): number {
   return Math.max(0, remaining / CALL_END_FADE_MS);
 }
 
+/**
+ * Fondu de sortie du signal AFFICHÉ de `p` : `callEndFade`, SAUF pour une croix rouge qui va se répéter tout de suite (héros à croix quasi continue, Romain : répétition toutes les 3 s = la durée du signal) :
+ * le nouveau signal repart au pas même où l'ancien s'éteint, sans creux d'opacité parasite. Les autres héros (répétition 10 s) gardent le fondu. Pur.
+ */
+export function callSignalFade(p: Pick<PlayerState, 'callMs' | 'autoCall' | 'autoCallCross'>, elapsedMs: number): number {
+  const fade = callEndFade(elapsedMs);
+  if (fade >= 1) return fade;
+  const manual = Number.isFinite(p.callMs) && p.callMs > 0;
+  if (!manual && p.autoCall?.icon === 'cross' && p.autoCallCross !== undefined && p.autoCallCross.ms <= CALL_END_FADE_MS) return 1;
+  return fade;
+}
+
 /** Couleur (0xRRGGBB) de l'indicateur : celle du joueur appelant. */
 export function callColor(callerId: number): number {
   return PLAYER_COLORS[callerId] ?? 0xffffff;

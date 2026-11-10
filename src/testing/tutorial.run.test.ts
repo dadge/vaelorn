@@ -38,6 +38,13 @@ describe('tutoriel : terminable de bout en bout', () => {
     expectCompleted(run, run.run(MAX_MS));
   }, T);
 
+  it('Romain joué (trait « parle beaucoup » : appels sans attente, croix toutes les 3 s) : terminé aussi, sans étape bloquée', () => {
+    const run = new TutorialRun({ human: 'romain', partner: 'sandrine' });
+    expectCompleted(run, run.run(MAX_MS));
+    expect(run.state.players[0].characterId).toBe('romain');
+    expect(run.state.players[0].callCooldownMs).toBe(0);
+  }, T);
+
   it('variante « tout passer » : le tutoriel est ENTIÈREMENT saute-able (étapes puis salles), sans jamais bloquer', () => {
     // Comme GameScene : « Passer » saute l'étape ; sur une étape de sortie (ou après 45 s sans progrès) la scène relance à la salle suivante.
     let room = 0;

@@ -14,9 +14,10 @@
  * passer `reviveHeld = true` pour un joueur dont le bouton d'action est tenu ET qui a un allié à terre à portée
  * (ou simplement `frame.revive` ; `updateRevive` vérifie lui-même la portée).
  */
-import { CALL_COOLDOWN_MS, CALL_DURATION_MS, CALL_FREEZE_MS, TORCH_LOW_FRACTION, TORCH_MAX_MS } from './constants';
+import { CALL_DURATION_MS, CALL_FREEZE_MS, TORCH_LOW_FRACTION, TORCH_MAX_MS } from './constants';
 import { PLAYER_INVULN_MS, REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW } from './constants';
 import { damageToPlayer, maxHpFor, REVIVE_INVULN_MS } from './balance';
+import { callCooldownFor, crossSoftRepeatFor, crossSoftWindowMs } from './callTraits';
 import { getCharacter } from './characters';
 import { createLoadout, damageReduction, isStarActive, lanternReduction, reviveTimeReduction, stepBuffs } from './gear';
 import { distSq } from './geometry';
@@ -363,16 +364,19 @@ export function isCallFrozen(p: Pick<PlayerState, 'status' | 'callMs'>): boolean
   return p.status === 'alive' && p.callMs > CALL_DURATION_MS - CALL_FREEZE_MS + CALL_EPSILON_MS;
 }
 
-/** Peut-on lancer un appel ? Joueur vivant, aucun appel en cours, délai de récupération écoulé (la phase 'playing' est vérifiée par la simulation). */
+/**
+ * Peut-on lancer un appel ? Joueur vivant, aucun appel en cours, délai de récupération écoulé (la phase 'playing' est vérifiée par la simulation).
+ * Un héros SANS ATTENTE (Romain, `callTraits.manualCooldownMs` = 0) n'a jamais de délai de récupération : il peut relancer dès que son signal est FINI, mais pas pendant (« aucun appel en cours » reste exigé).
+ */
 export function canStartCall(p: Pick<PlayerState, 'status' | 'callMs' | 'callCooldownMs'>): boolean {
   const cd = typeof p.callCooldownMs === 'number' && Number.isFinite(p.callCooldownMs) ? p.callCooldownMs : 0;
   return p.status === 'alive' && !(p.callMs > CALL_EPSILON_MS) && cd <= CALL_EPSILON_MS;
 }
 
-/** Lance l'appel : `callMs = CALL_DURATION_MS`, `callCooldownMs = CALL_COOLDOWN_MS`. MUTE `p`. */
+/** Lance l'appel : `callMs = CALL_DURATION_MS`, `callCooldownMs = callCooldownFor(p)` (`CALL_COOLDOWN_MS` par défaut, 0 pour Romain). MUTE `p`. */
 export function startCall(p: PlayerState): void {
   p.callMs = CALL_DURATION_MS;
-  p.callCooldownMs = CALL_COOLDOWN_MS;
+  p.callCooldownMs = callCooldownFor(p);
   cancelAutoCall(p); // l'appel manuel l'emporte : l'icône de l'appel automatique est effacée (son délai de récupération reste, il est distinct)
 }
 
@@ -398,7 +402,15 @@ export function stepAutoCallTimers(p: PlayerState, dtMs: number): void {
     if (cd > 0) p.autoCallCooldownMs = cd;
     else delete p.autoCallCooldownMs;
   }
-  if (p.autoCallCross) p.autoCallCross.ms = stepCallTimer(p.autoCallCross.ms, dtMs);
+  if (p.autoCallCross) {
+    const before = p.autoCallCross.ms;
+    p.autoCallCross.ms = stepCallTimer(before, dtMs);
+    // héros à répétition douce (Romain) : on mesure depuis combien de temps le délai est écoulé sans croix repartie (voir `autoCallCross.idleMs`) ; les autres héros n'ont jamais ce champ
+    if (p.autoCallCross.ms <= 0 && crossSoftRepeatFor(p)) {
+      const over = before > 0 ? Math.max(0, dtMs - before) : dtMs;
+      p.autoCallCross.idleMs = Math.min(crossSoftWindowMs(p) * 2, (p.autoCallCross.idleMs ?? 0) + over);
+    }
+  }
 }
 
 /** Efface le signal d'appel automatique en cours (délai de récupération et mémoire des objets signalés inchangés). MUTE `p`. */

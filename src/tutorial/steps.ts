@@ -414,8 +414,8 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
   }),
   // récapitulatif : TOUTES les règles de l'appel automatique, en deux pages de lecture (les étapes précédentes les ont fait vivre une à une)
   // (durées de lecture ≈ 20 caractères / s : le texte est long, mieux vaut lentement que trop vite)
-  step({ id: 'autoCallRecap1', room: 't_call', kind: 'tip', minMs: 22000 }),
-  step({ id: 'autoCallRecap2', room: 't_call', kind: 'tip', minMs: 30000 }),
+  step({ id: 'autoCallRecap1', room: 't_call', kind: 'tip', minMs: 28000 }),
+  step({ id: 'autoCallRecap2', room: 't_call', kind: 'tip', minMs: 33000 }),
   step({
     id: 'exit.call',
     room: 't_call',

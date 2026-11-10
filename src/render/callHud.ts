@@ -33,6 +33,7 @@ import {
   callEndFade,
   callHudScale,
   callSignalElapsedMs,
+  callSignalFade,
   callSymbolBack,
   callSymbolDisplayScale,
   callSymbolEdgeMargin,
@@ -205,7 +206,7 @@ export class CallEdgeHud {
       const center = callArcCenterAngle(this.placedAngle[k]);
       const color = callColor(caller.id);
       const elapsed = callSignalElapsedMs(caller);
-      const fade = callEndFade(elapsed);
+      const fade = callSignalFade(caller, elapsed);
       callWaveAlphas(elapsed, this.alphas);
       for (let i = 0; i < (this.placedOverhead[k] ? 0 : CALL_WAVE_COUNT); i++) {
         const r = CALL_RADII[i] * s;

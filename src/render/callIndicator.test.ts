@@ -33,6 +33,7 @@ import {
   callElapsedMs,
   callEndFade,
   callHudScale,
+  callSignalFade,
   callWaveAlphas,
   callWaveIndex,
   callWorldRings,
@@ -133,6 +134,22 @@ describe('début et fin de l\'animation', () => {
     expect(callWaveAlphas(0)).toEqual([1, CALL_GHOST_ALPHA, CALL_GHOST_ALPHA]);
     expect(callWaveAlphas(CALL_STEP_MS - 1)[2]).toBe(CALL_GHOST_ALPHA);
     expect(callWaveAlphas(CALL_CYCLE_MS + 1)[2]).toBeGreaterThan(CALL_GHOST_ALPHA); // les tours suivants : queue normale
+  });
+
+  it("croix de Romain (répétition toutes les 3 s) : pas de fondu de sortie quand la répétition suit tout de suite (aucun creux d'opacité) ; les autres héros (10 s) et les autres signaux gardent le fondu", () => {
+    const end = CALL_DURATION_MS - CALL_END_FADE_MS / 2; // en plein fondu
+    const cross = { icon: 'cross' as const, ref: 'x', ms: CALL_END_FADE_MS / 2, to: [1 as PlayerId] };
+    // Romain : la répétition est due à l'instant où le signal s'éteint
+    expect(callSignalFade({ callMs: 0, autoCall: cross, autoCallCross: { ms: 0 } }, end)).toBe(1);
+    expect(callSignalFade({ callMs: 0, autoCall: cross, autoCallCross: { ms: CALL_END_FADE_MS } }, end)).toBe(1);
+    // un autre héros : prochaine croix dans 7 s, le signal s'éteint normalement
+    expect(callSignalFade({ callMs: 0, autoCall: cross, autoCallCross: { ms: 7000 } }, end)).toBeCloseTo(0.5);
+    // objet (pas de croix) ou appel manuel : fondu inchangé
+    expect(callSignalFade({ callMs: 0, autoCall: { ...cross, icon: 'heart', ref: 'p1' }, autoCallCross: { ms: 0 } }, end)).toBeCloseTo(0.5);
+    expect(callSignalFade({ callMs: 100, autoCall: cross, autoCallCross: { ms: 0 } }, end)).toBeCloseTo(0.5);
+    expect(callSignalFade({ callMs: 0, autoCall: cross }, end)).toBeCloseTo(0.5);
+    // hors fondu : toujours 1
+    expect(callSignalFade({ callMs: 0, autoCall: cross, autoCallCross: { ms: 7000 } }, 0)).toBe(1);
   });
 
   it('fondu de sortie global : 1 jusqu\'aux derniers CALL_END_FADE_MS, puis décroît jusqu\'à 0, toujours dans [0, 1]', () => {

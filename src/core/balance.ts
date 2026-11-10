@@ -38,6 +38,7 @@
  *        propre au joueur (4 s, distinct de celui de l'appel manuel) et marge de ré-armement par couple (joueur, objet au sol)
  *  [B29] HEART_HEAL_RADIUS ......... EMPLACEMENT CŒUR : rayon de contact (px) pour soigner un coéquipier blessé avec B (= portée du relevage, `REVIVE_RANGE`)
  *  [B30] CROSS_CALL_* .............. CROIX ROUGE (demande de soins, appel automatique) : seuil 30 % des PV max, réarmement à 60 %, répétition toutes les 10 s
+ *  [B31] *_CHATTY .................. Romain « parle beaucoup » (trait d'appel, `callTraits.ts`) : appel manuel et appel automatique d'objet SANS attente (0 ms ; un signal d'objet reste lisible 1 s avant d'être remplacé), croix rouge répétée toutes les 3 s
  *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
@@ -319,6 +320,21 @@ export const CROSS_CALL_THRESHOLD = 0.3;
 export const CROSS_CALL_REARM_FRACTION = 0.6;
 /** [B30] Répétition (ms) de la croix tant que le joueur reste à CROSS_CALL_THRESHOLD ou moins : un nouvel appel au plus toutes les 10 s (signal de 3 s allumé, 7 s éteint). Propre à la croix : sans lien avec `AUTO_CALL_COOLDOWN_MS`. */
 export const CROSS_CALL_REPEAT_MS = 10_000;
+
+// ───────────────────────── [B31] Trait « parle beaucoup » (Romain) ─────────────────────────
+
+/** [B31] Délai de récupération (ms) de l'appel MANUEL d'un héros qui parle beaucoup (Romain) : aucune attente (défaut des autres : `CALL_COOLDOWN_MS`, 5 s). L'immobilisation de 1 s et le signal de 3 s restent. */
+export const CALL_COOLDOWN_MS_CHATTY = 0;
+/** [B31] Délai de récupération (ms) de l'appel AUTOMATIQUE d'objet d'un héros qui parle beaucoup : aucune attente (défaut : `AUTO_CALL_COOLDOWN_MS`, 4 s). L'anti-spam par couple (joueur, objet) reste. */
+export const AUTO_CALL_COOLDOWN_MS_CHATTY = 0;
+/**
+ * [B31] Durée d'affichage MINIMALE (ms) d'un signal d'objet d'un héros SANS attente avant qu'un autre objet puisse le remplacer : sans elle, deux objets voisins se remplaceraient au pas suivant (l'icône du premier
+ * resterait un seul pas à l'écran, illisible, et ses destinataires ne la verraient jamais). Ce n'est pas un délai de récupération : le héros n'attend pas pour appeler, un signal se remplace dès qu'il a eu le
+ * temps d'être lu. Ne concerne ni la croix (qui reste prioritaire), ni l'appel manuel, ni l'appel après échange d'accessoire (qui part à l'instant du geste).
+ */
+export const AUTO_CALL_MIN_SHOW_MS_CHATTY = 1_000;
+/** [B31] Répétition (ms) de la croix rouge d'un héros qui parle beaucoup : toutes les 3 s au lieu de 10 s (= la durée du signal : la croix est quasi continue tant qu'il reste à 30 % de PV ou moins). */
+export const CROSS_CALL_REPEAT_MS_CHATTY = 3_000;
 
 /**
  * [B29] EMPLACEMENT CŒUR : rayon de contact (px, centre à centre) dans lequel un joueur qui appuie sur B soigne un coéquipier VIVANT et BLESSÉ avec le cœur rangé : la portée du relevage

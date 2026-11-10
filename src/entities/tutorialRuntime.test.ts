@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CHARACTER_IDS, CHARACTERS } from '../core/characters';
 import { SIM_STEP_MS } from '../core/constants';
 import { createSimulation } from '../core/simulation';
 import type { TickInputs } from '../core/types';
@@ -12,6 +13,10 @@ describe('partenaire et joueurs simulés', () => {
     expect(pickPartnerCharacter('sandrine')).toBe('valentine');
     expect(pickPartnerCharacter('mira')).toBe('sandrine');
     for (const c of PARTNER_PREFERENCE) expect(pickPartnerCharacter(c)).not.toBe(c);
+  });
+
+  it("le partenaire scripté n'a JAMAIS de trait d'appel (Romain parle beaucoup : ses appels ne respecteraient plus le rythme scripté de l'étape), quel que soit le héros joué", () => {
+    for (const human of CHARACTER_IDS) expect(CHARACTERS[pickPartnerCharacter(human)].callTraits, human).toBeUndefined();
   });
 
   it('2 joueurs, difficulté facile, ids 0 et 1', () => {
