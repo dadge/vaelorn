@@ -1100,17 +1100,13 @@ const I18N_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const readJson = (f: string): Record<string, string> => JSON.parse(fs.readFileSync(path.join(I18N_DIR, f), 'utf8')) as Record<string, string>;
 
 describe('i18n : la description de Romain annonce son trait (fr / en)', () => {
-  it('mentionne qu\'il parle beaucoup, les appels sans attente et la croix toutes les 3 s ; tient dans l\'espace de la description (≤ longueur des plus longues)', () => {
+  it('évoque qu\'il parle beaucoup (les valeurs chiffrées sont dans le README et le tutoriel) ; tient dans l\'espace de la description (≤ longueur des plus longues)', () => {
     const fr = readJson('fr.json');
     const en = readJson('en.json');
     const f = fr['character.romain.desc'];
     const e = en['character.romain.desc'];
     expect(f.toLowerCase()).toContain('parle beaucoup');
-    expect(f).toContain('sans attente');
-    expect(f).toContain('3 s');
-    expect(e.toLowerCase()).toContain('talks a lot');
-    expect(e.toLowerCase()).toContain('no wait');
-    expect(e).toContain('3 s');
+    expect(e.toLowerCase()).toContain('chatterbox');
     const longest = Math.max(...CHARACTER_IDS.filter((id) => id !== 'romain').map((id) => Math.max(fr[`character.${id}.desc`].length, en[`character.${id}.desc`].length)));
     expect(f.length).toBeLessThanOrEqual(longest);
     expect(e.length).toBeLessThanOrEqual(longest);
