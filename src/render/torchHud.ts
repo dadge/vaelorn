@@ -2,16 +2,19 @@
  * Torche personnelle : logique PURE de l'interface (jauge, niveau d'alerte, clignotement, couleurs).
  * Aucune dépendance à Phaser : testée sous Node. Le HUD (hud.ts) et le panneau d'équipe s'en servent.
  */
-import { TORCH_LOW_FRACTION, TORCH_MAX_MS } from '../core/constants';
+import { TORCH_LOW_FRACTION } from '../core/constants';
+import { torchFuelFraction } from '../core/light';
 import type { RoomDef } from '../core/types';
 
 /** Niveau d'alerte d'une torche : pleine, faiblissante (< TORCH_LOW_FRACTION), éteinte (0). */
 export type TorchLevel = 'full' | 'low' | 'empty';
 
-/** Fraction de combustible 0..1 (bornée ; jamais NaN). */
+/**
+ * Fraction de combustible 0..1 (bornée ; jamais NaN) : la MÊME que celle qui fixe le rayon de la lumière de la torche
+ * (`torchRadiusPx`, core/light.ts), donc la jauge et la lumière décroissent ensemble.
+ */
 export function torchFraction(torchMs: number): number {
-  if (!Number.isFinite(torchMs)) return 0;
-  return Math.max(0, Math.min(1, torchMs / TORCH_MAX_MS));
+  return torchFuelFraction(torchMs);
 }
 
 /** Niveau d'alerte pour un combustible donné. */

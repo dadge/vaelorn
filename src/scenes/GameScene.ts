@@ -703,10 +703,12 @@ export class GameScene extends Phaser.Scene {
         break;
       }
       case 'heartStored': {
-        // le cœur / demi-cœur est RANGÉ dans l'emplacement (aucun soin) : petit éclat et texte flottant discret
+        // le cœur / demi-cœur est RANGÉ dans l'emplacement (aucun soin) : petit éclat et texte flottant discret ; FUSION (demi-cœur → cœur entier) : plus d'éclats, couleur du cœur entier, « Cœur complet »
         const pos = this.playerPos(e.playerId, state);
-        fx.sparkles(pos.x, pos.y - 6, pickupHaloColor(e.kind), 6, 6);
-        fx.floatText(pos.x, pos.y - 12 - e.playerId * 9, t(heartStoredTextKey(e.kind)), pickupTextColor(e.kind), 900, 15, 8); // décalé par joueur : deux rangements côte à côte restent lisibles
+        const merged = e.merged === true;
+        const shown = merged ? 'full' : e.kind;
+        fx.sparkles(pos.x, pos.y - 6, pickupHaloColor(shown), merged ? 9 : 6, 6);
+        fx.floatText(pos.x, pos.y - 12 - e.playerId * 9, t(heartStoredTextKey(e.kind, merged)), pickupTextColor(shown), merged ? 1100 : 900, 15, 8); // décalé par joueur : deux rangements côte à côte restent lisibles
         break;
       }
       case 'heartUsed': {

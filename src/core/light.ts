@@ -7,7 +7,6 @@ import {
   BRAZIER_LIGHT_TILES,
   LIGHT_EMPTY_TILES,
   LIGHT_FULL_TILES,
-  LIGHT_LOW_TILES,
   TILE,
   TORCH_LOW_FRACTION,
   TORCH_MAX_MS,
@@ -37,22 +36,28 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 /**
- * Rayon de lumière (px) d'une torche selon son combustible (f = torchMs / TORCH_MAX_MS, borné à [0, 1]) :
- *  - f ≥ TORCH_LOW_FRACTION : LIGHT_FULL_TILES (plein) ;
- *  - de 0.8×seuil à 1×seuil : transition douce vers LIGHT_LOW_TILES ;
- *  - de 0.3×seuil à 0.8×seuil : LIGHT_LOW_TILES (faiblissante) ;
- *  - de 0 à 0.3×seuil : décroît jusqu'à LIGHT_EMPTY_TILES (torche éteinte, f = 0).
- * Continue et monotone croissante en torchMs. Valeur non finie ⇒ traitée comme 0.
+ * Fraction de combustible d'une torche, bornée à [0, 1] : `f = torchMs / TORCH_MAX_MS`. Valeur non finie ⇒ 0.
+ * C'est EXACTEMENT la fraction de la jauge du HUD (`torchFraction`, render/torchHud.ts) : la lumière et la barre
+ * partagent la même variable.
+ */
+export function torchFuelFraction(torchMs: number): number {
+  if (!Number.isFinite(torchMs)) return 0;
+  return Math.max(0, Math.min(1, torchMs / TORCH_MAX_MS));
+}
+
+/**
+ * Rayon de lumière (px) d'une torche : fonction CONTINUE, MONOTONE et LINÉAIRE du combustible — la lumière baisse
+ * exactement au même rythme que la jauge.
+ *
+ *   f = torchMs / TORCH_MAX_MS            (borné à [0, 1] ; valeur non finie ⇒ 0)
+ *   rayon = lerp(LIGHT_EMPTY_TILES, LIGHT_FULL_TILES, f) × TILE
+ *         = (LIGHT_EMPTY_TILES + f × (LIGHT_FULL_TILES − LIGHT_EMPTY_TILES)) × TILE
+ *
+ * soit 1,75 tuile (28 px) torche vide, 6 tuiles (96 px) torche pleine, 3,875 tuiles à moitié. Le niveau d'alerte
+ * de la jauge (TORCH_LOW_FRACTION : couleur, clignotement) n'intervient PAS dans le rayon.
  */
 export function torchRadiusPx(torchMs: number): number {
-  const f = Math.max(0, Math.min(1, (Number.isFinite(torchMs) ? torchMs : 0) / TORCH_MAX_MS));
-  const low = TORCH_LOW_FRACTION;
-  let tiles: number;
-  if (f >= low) tiles = LIGHT_FULL_TILES;
-  else if (f >= low * 0.8) tiles = lerp(LIGHT_LOW_TILES, LIGHT_FULL_TILES, (f - low * 0.8) / (low * 0.2));
-  else if (f >= low * 0.3) tiles = LIGHT_LOW_TILES;
-  else tiles = lerp(LIGHT_EMPTY_TILES, LIGHT_LOW_TILES, f / (low * 0.3));
-  return tiles * TILE;
+  return lerp(LIGHT_EMPTY_TILES, LIGHT_FULL_TILES, torchFuelFraction(torchMs)) * TILE;
 }
 
 /** Rayon (px) d'un brasero. */

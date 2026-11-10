@@ -6,7 +6,7 @@
  *
  * Couverture : déplacement, panneaux, bloc « Objectifs de la salle » (haut à droite), « Ton objectif » (haut à gauche), attaque,
  * cœurs, spécial et recharge, ennemis restants, levier, plaques, porte, objectif d'équipe, bloc poussable, clé et porte de couleur,
- * torche et braseros (salle sombre), RELEVAGE, EMPLACEMENT CŒUR (ranger, se soigner avec B, soigner un coéquipier blessé, emplacement plein = appel automatique),
+ * torche et braseros (salle sombre), RELEVAGE, EMPLACEMENT CŒUR (ranger, se soigner avec B, soigner un coéquipier blessé, emplacement entier = appel automatique),
  * APPELS AUTOMATIQUES (cœur qu'on ne peut pas ranger, objet moins puissant laissé, échange d'accessoire, croix rouge = demande de soins, page récapitulative de toutes les règles), APPEL (recevoir puis lancer),
  * mort d'équipe, sortie scellée.
  */
@@ -231,16 +231,25 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
     partner: [{ op: 'walk', at: { mech: 'lv_r' }, essential: true }, { op: 'press', button: 'interact', essential: true }, ...goExit],
   }),
 
-  // ───────── t_heart : EMPLACEMENT CŒUR (ranger, B sur soi, B sur un coéquipier blessé, emplacement plein = appel automatique) ─────────
+  // ───────── t_heart : EMPLACEMENT CŒUR (ranger et FUSIONNER deux demi-cœurs, B sur soi, B sur un coéquipier blessé, emplacement plein = appel automatique) ─────────
   step({
     id: 'heartStore',
     room: 't_heart',
     kind: 'do',
-    minMs: 1500,
-    done: { k: 'any', of: [{ k: 'holdsHeart' }, { k: 'event', type: 'heartStored', by: 0 }] },
-    markers: [{ tile: [8, 6] }],
+    minMs: 2500,
+    // deux DEMI-cœurs au sol : le premier est rangé, le second FUSIONNE (`merged`) : l'emplacement tient alors un cœur entier (10 PV, de quoi enchaîner sur `heartSelf`). Aucun reste au sol.
+    // Validée par DEUX rangements du joueur (le second est la fusion) et non par `merged` seul : un appui sur B entre les deux (joueur blessé, bordure « prêt ») consomme le premier demi-cœur,
+    // le second est alors simplement rangé (pas de fusion) et l'étape ne doit pas rester bloquée ; l'emplacement tient dans les deux cas un cœur (gate de `heartSelf`).
+    done: { k: 'event', type: 'heartStored', by: 0, count: 2 },
+    markers: [{ tile: [8, 6] }, { tile: [12, 6] }],
     highlights: ['heartSlot'],
-    script: { afterMs: 0, hearts: [{ tile: [8, 6], kind: 'full' }] },
+    script: {
+      afterMs: 0,
+      hearts: [
+        { tile: [8, 6], kind: 'half' },
+        { tile: [12, 6], kind: 'half' },
+      ],
+    },
   }),
   step({
     id: 'heartSelf',
@@ -273,20 +282,23 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
     kind: 'do',
     minMs: 2500,
     // validée quand l appel automatique est parti ET que le partenaire a pris le cœur resté au sol (il vient de lui-même : l appel a un effet visible)
-    // (l'appel doit porter le symbole du demi-cœur : une croix rouge du joueur, blessé en arrivant, ne doit pas la valider à tort)
-    done: { k: 'all', of: [{ k: 'event', type: 'autoCallStarted', by: 0, match: { icon: 'half' } }, { k: 'event', type: 'heartStored', by: 1 }] },
+    // (l'appel doit porter le symbole du CŒUR ENTIER : une croix rouge du joueur, blessé en arrivant, ne doit pas la valider à tort)
+    // Cœurs ENTIERS : avec la fusion, deux demi-cœurs ne refuseraient rien (demi + demi = entier) ; un cœur entier rangé en premier remplit l'emplacement, le suivant est refusé quel que soit l'ordre.
+    // TROIS cœurs : un appui sur B entre le premier et le suivant (joueur encore blessé) consomme le premier ; le troisième garantit alors le refus (et l'appel) sans bloquer l'étape.
+    done: { k: 'all', of: [{ k: 'event', type: 'autoCallStarted', by: 0, match: { icon: 'heart' } }, { k: 'event', type: 'heartStored', by: 1 }] },
     noCompact: true,
     markers: [{ tile: [8, 6] }, { tile: [12, 6] }],
     highlights: ['heartSlot'],
     script: {
       afterMs: 0,
       hearts: [
-        { tile: [8, 6], kind: 'half' },
-        { tile: [12, 6], kind: 'half' },
+        { tile: [8, 6], kind: 'full' },
+        { tile: [10, 6], kind: 'full' },
+        { tile: [12, 6], kind: 'full' },
       ],
     },
     // l'appel automatique du joueur prévient le partenaire (emplacement libre) : il vient ramasser le cœur resté au sol
-    partner: [{ op: 'idle', until: { k: 'event', type: 'autoCallStarted', by: 0, match: { icon: 'half' } } }, { op: 'walk', at: { pickup: true } }],
+    partner: [{ op: 'idle', until: { k: 'event', type: 'autoCallStarted', by: 0, match: { icon: 'heart' } } }, { op: 'walk', at: { pickup: true } }],
   }),
   step({
     id: 'exit.heart',

@@ -300,9 +300,18 @@ class Placer {
     label: string,
     x: number,
     y: number,
-    extra: { ownerSlot?: number; minPlayers?: number; lightRadiusTiles?: number } = {},
+    extra: { ownerSlot?: number; minPlayers?: number; lightRadiusTiles?: number; litLabel?: string } = {},
   ): this {
-    this.fires.push({ id, type: 'brazier', tile: this.snap(x, y, false), labelKey: mechLabel(room, label), ...extra });
+    // `litLabel` : suffixe de la clé du libellé « allumé » (défaut `fire` : celui des braseros de recharge de la salle)
+    const { litLabel = 'fire', ...rest } = extra;
+    this.fires.push({
+      id,
+      type: 'brazier',
+      tile: this.snap(x, y, false),
+      labelKey: mechLabel(room, label),
+      litLabelKey: mechLabel(room, litLabel),
+      ...rest,
+    });
     return this;
   }
 
@@ -783,6 +792,7 @@ const embers: RoomDef = (() => {
     .lit('embers', 'embersFire5', 57, 36);
   COLORS.forEach((color, slot) => {
     p.unlit('embers', `emberBrazier${color}`, `emberBrazier${color}`, emberTiles[slot][0], emberTiles[slot][1], {
+      litLabel: `emberBrazier${color}Lit`,
       ownerSlot: slot,
       lightRadiusTiles: 4,
       ...(slot === 0 ? {} : { minPlayers: slot + 1 }),

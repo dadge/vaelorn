@@ -49,11 +49,10 @@ export const PLAYER_COLOR_NAMES: readonly string[] = ['blue', 'red', 'green', 'y
 
 /** Torche personnelle (salles sombres). Autonomie en ms de jeu passées dans une salle sombre. */
 export const TORCH_MAX_MS = 75_000;
-/** Sous cette fraction du combustible, la torche faiblit (rayon réduit, alerte HUD). */
+/** Sous cette fraction du combustible, la torche faiblit (alerte HUD : couleur, clignotement, scintillement renforcé ; le rayon, lui, décroît en continu depuis le plein). */
 export const TORCH_LOW_FRACTION = 0.25;
-/** Rayons de lumière en tuiles : torche pleine / faiblissante / éteinte, brasero par défaut. */
+/** Rayons de lumière en tuiles : torche pleine / éteinte (le rayon d'une torche varie LINÉAIREMENT entre les deux selon le combustible, voir `torchRadiusPx`), brasero par défaut. */
 export const LIGHT_FULL_TILES = 6;
-export const LIGHT_LOW_TILES = 3.5;
 export const LIGHT_EMPTY_TILES = 1.75;
 export const BRAZIER_LIGHT_TILES = 5;
 

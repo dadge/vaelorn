@@ -74,7 +74,7 @@ describe('sons : emplacement cœur', () => {
 
   it('les trois sons se jouent sans audio (Node) sans lever ; le refus est plus discret que l usage', () => {
     const s = new Sfx();
-    for (const n of ['heartStore', 'heartUse', 'heartRefuse'] as const) expect(() => s.play(n)).not.toThrow();
+    for (const n of ['heartStore', 'heartMerge', 'heartUse', 'heartRefuse'] as const) expect(() => s.play(n)).not.toThrow();
     s.destroy();
   });
 });

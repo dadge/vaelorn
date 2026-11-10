@@ -1,0 +1,18 @@
+{
+  "mech.level3.sanctum.brazierBlueLit": "Brasero bleu (recharge)",
+  "mech.level3.sanctum.brazierGreenLit": "Brasero vert (recharge)",
+  "mech.level3.sanctum.brazierRedLit": "Brasero rouge (recharge)",
+  "mech.level3.sanctum.brazierYellowLit": "Brasero jaune (recharge)",
+  "mech.level4.deepdark.brazierBlueLit": "Brasero bleu (recharge)",
+  "mech.level4.deepdark.brazierGreenLit": "Brasero vert (recharge)",
+  "mech.level4.deepdark.brazierRedLit": "Brasero rouge (recharge)",
+  "mech.level4.deepdark.brazierYellowLit": "Brasero jaune (recharge)",
+  "mech.level5.blindforge.brazierBlueLit": "Brasero bleu (recharge)",
+  "mech.level5.blindforge.brazierGreenLit": "Brasero vert (recharge)",
+  "mech.level5.blindforge.brazierRedLit": "Brasero rouge (recharge)",
+  "mech.level5.blindforge.brazierYellowLit": "Brasero jaune (recharge)",
+  "mech.level6.embers.emberBrazierBlueLit": "Brasero bleu (recharge)",
+  "mech.level6.embers.emberBrazierGreenLit": "Brasero vert (recharge)",
+  "mech.level6.embers.emberBrazierRedLit": "Brasero rouge (recharge)",
+  "mech.level6.embers.emberBrazierYellowLit": "Brasero jaune (recharge)"
+}

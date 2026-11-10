@@ -7,12 +7,12 @@
  * ── Règles ──
  *  1. Déclencheur : un joueur VIVANT chevauche (même rayon que le ramassage : `PICKUP_RADIUS` / `GEAR_PICKUP_RADIUS`) un objet au sol qu'il ne prend pas :
  *      - cœur ou demi-cœur, règle d'ORIGINE (sans emplacement cœur) : il ne peut pas le consommer (`canConsumeHeart` : PV pleins ; aucun seuil, un seul PV manquant suffit à le consommer) ;
- *      - cœur ou demi-cœur, règle de l'EMPLACEMENT CŒUR (`options.heartSlot`, `heartSlot.ts`) : son emplacement est PLEIN (`PlayerState.heart`), quels que soient ses PV : il ne peut pas le ranger ;
+ *      - cœur ou demi-cœur, règle de l'EMPLACEMENT CŒUR (`options.heartSlot`, `heartSlot.ts`) : son emplacement contient un cœur ENTIER (`PlayerState.heart === 'full'`), quels que soient ses PV : il ne peut ni le ranger ni fusionner (vide ou demi-cœur : il l'accepte) ;
  *      - objet d'équipement : `pickupDecision(...) === 'ignore'` (même emplacement et niveau inférieur ou égal ; accessoire de même sorte de niveau inférieur ou
  *        égal ; anneau du vampire hors niveau III…). PAS de déclenchement pour un objet verrouillé pour lui (ses propres objets lâchés), une décision 'swap'
  *        (échange manuel au choix du joueur : ce n'est pas un refus), les bonus temporaires (toujours pris), un objet ramassé (il a disparu) ni un objet
  *        simplement attiré par un aimant sans chevauchement.
- *  2. Destinataires utiles : alliés VIVANTS pour qui l'objet serait réellement utile (cœur : un allié qui peut le consommer, ou avec l'emplacement cœur un allié dont l'emplacement est LIBRE ;
+ *  2. Destinataires utiles : alliés VIVANTS pour qui l'objet serait réellement utile (cœur : un allié qui peut le consommer, ou avec l'emplacement cœur un allié dont l'emplacement est LIBRE ou contient un DEMI-cœur (il le range ou le fusionne) ;
  *     équipement : 'equip' ou 'upgrade' et pas verrouillé sur cet objet). La distance ne compte pas. Aucun destinataire → AUCUN appel. Évalués au déclenchement (`AutoCallState.to`).
  *  3. Signal automatique ≠ appel manuel : il ne fige pas le joueur, ne consomme pas le délai de l'appel manuel, dure `AUTO_CALL_DURATION_MS`. Un appel manuel
  *     en cours n'est jamais interrompu par un automatique ; un appel manuel qui démarre efface l'icône automatique (`startCall`).
@@ -47,7 +47,7 @@ import {
 } from './balance';
 import { ACCESSORY_KINDS, GEAR_LEVELS, GEAR_SLOTS, pickupDecision } from './gear';
 import { distSq } from './geometry';
-import { canStoreHeart, heartUseAmount } from './heartSlot';
+import { canAcceptHeart, heartUseAmount } from './heartSlot';
 import { canConsumeHeart } from './loot';
 import { autoCallCooldownFor, autoCallsWithoutWait, crossRepeatMsFor, crossSoftRepeatFor, crossSoftWindowMs } from './callTraits';
 import { CALL_EPSILON_MS } from './players';
@@ -68,16 +68,19 @@ export function heartUsefulTo(p: Pick<PlayerState, 'hp' | 'maxHp' | 'status'>): 
   return canConsumeHeart(p);
 }
 
-/** Un cœur / demi-cœur est-il utile à ce joueur avec l'EMPLACEMENT CŒUR (vivant ET emplacement libre : il peut le ranger) ? */
+/**
+ * Un cœur / demi-cœur est-il utile à ce joueur avec l'EMPLACEMENT CŒUR ? Vivant ET il peut l'accepter : emplacement LIBRE (il le range) OU contenant un DEMI-cœur (il fusionne et monte à l'entier :
+ * utile même si l'objet au sol est un demi-cœur). Emplacement ENTIER : inutile.
+ */
 export function heartSlotUsefulTo(p: Pick<PlayerState, 'status' | 'heart'>): boolean {
-  return canStoreHeart(p);
+  return canAcceptHeart(p);
 }
 
 /** Options de `stepAutoCalls`. */
 export interface AutoCallOptions {
   /**
-   * Règle de l'EMPLACEMENT CŒUR (`SimConfig.heartSlot`) : l'appel de cœur part quand l'emplacement du joueur est PLEIN (quels que soient ses PV) et les destinataires sont les alliés vivants dont
-   * l'emplacement est LIBRE. Faux / absent : règle d'origine (PV pleins ; alliés blessés).
+   * Règle de l'EMPLACEMENT CŒUR (`SimConfig.heartSlot`) : l'appel de cœur part quand l'emplacement du joueur est ENTIER (quels que soient ses PV : un emplacement vide ou à demi-cœur ramasse / fusionne, il ne refuse rien)
+   * et les destinataires sont les alliés vivants qui PEUVENT ranger : emplacement LIBRE ou contenant un DEMI-cœur (fusion). Faux / absent : règle d'origine (PV pleins ; alliés blessés).
    */
   heartSlot?: boolean;
 }
@@ -239,7 +242,7 @@ export function stepAutoCalls(
     const seen = p.autoCallSeen;
     let found: Candidate | null = null;
     // nourriture d'abord, puis équipement (ordre des tableaux : déterministe)
-    if (!busy && (slot ? p.heart !== undefined : !canConsumeHeart(p))) {
+    if (!busy && (slot ? !canAcceptHeart(p) : !canConsumeHeart(p))) {
       for (const pk of pickups) {
         const ref = pickupRef(pk.id);
         if (seen?.includes(ref) || distSq(p.pos, pk.pos) > rr) continue;

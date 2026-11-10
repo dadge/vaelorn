@@ -552,7 +552,7 @@ function buildOssuary(): RoomDef {
   // Torches : 4 braseros ALLUMÉS (points de recharge : départ, levier, arène est, salle de sortie) et 3 braseros
   // ÉTEINTS facultatifs (ailes nord/sud, alcôve est) : aucune condition de progression ne dépend d'eux.
   const lit = (id: string, tile: TileXY): MechanismDef => ({ id, type: 'brazier', tile, lit: true, labelKey: 'mech.level1.br_lit' });
-  const unlit = (id: string, tile: TileXY): MechanismDef => ({ id, type: 'brazier', tile, labelKey: 'mech.level1.br_unlit' });
+  const unlit = (id: string, tile: TileXY): MechanismDef => ({ id, type: 'brazier', tile, labelKey: 'mech.level1.br_unlit', litLabelKey: 'mech.level1.br_lit' });
   const braziers: MechanismDef[] = [
     lit('br_start', [6, 20]), lit('br_lever', [26, 26]), lit('br_east', [52, 24]), lit('br_exit', [69, 18]),
     unlit('br_n', [29, 8]), unlit('br_s', [29, 38]), unlit('br_alcove', [75, 5]),

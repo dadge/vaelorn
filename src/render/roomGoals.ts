@@ -19,6 +19,7 @@ import {
   areAllRequirementsMet,
   isMechanismSolved,
   isRequirementMet,
+  mechanismLabelKey,
   type RequirementContext,
 } from '../core/mechanisms';
 import { allObjectivesDone, isObjectiveDone, isZoneOccupied, objectivesForPlayer } from '../core/objectives';
@@ -217,9 +218,11 @@ export const MECHANISM_FALLBACK_KEYS: Readonly<Record<MechanismDef['type'], stri
   lightBridge: 'goal.mech.lightBridge',
 };
 
-function mechanismName(def: MechanismDef | undefined): string {
+/** Nom du mécanisme : son libellé monde COURANT (un brasero allumé s'affiche comme dans la salle : `mechanismLabelKey`). */
+function mechanismName(def: MechanismDef | undefined, st?: MechanismState): string {
   if (!def) return t('goal.mech.generic');
-  if (def.labelKey) return t(def.labelKey);
+  const labelKey = mechanismLabelKey(def, st);
+  if (labelKey) return t(labelKey);
   const key = MECHANISM_FALLBACK_KEYS[def.type];
   return key ? t(key) : t('goal.mech.generic');
 }
@@ -280,7 +283,7 @@ function clearLine(state: GameState, room: RoomDef): GoalLine {
 function mechanismLine(state: GameState, room: RoomDef, ctx: RequirementContext, req: string): GoalLine {
   const def = room.mechanisms.find((m) => m.id === req);
   const st = findMechanismState(state, req);
-  const name = mechanismName(def);
+  const name = mechanismName(def, st);
   const isDoor = def?.type === 'door';
   const done = st ? isMechanismSolved(st) : false;
   let detail = '';

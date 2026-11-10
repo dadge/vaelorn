@@ -310,7 +310,15 @@ class Placer {
    * Brasero ÉTEINT à allumer (`interact`, torche non vide) ; `ownerSlot`/`minPlayers` : coop adaptative. Posé EXACTEMENT sur (x, y)
    * (ignore les zones interdites, qui servent justement à le protéger) tant que la tuile est du sol libre.
    */
-  unlit(id: string, label: string, x: number, y: number, extra: { ownerSlot?: number; minPlayers?: number; lightRadiusTiles?: number } = {}): this {
+  unlit(
+    id: string,
+    label: string,
+    x: number,
+    y: number,
+    extra: { ownerSlot?: number; minPlayers?: number; lightRadiusTiles?: number; litLabel?: string } = {},
+  ): this {
+    // `litLabel` : suffixe de la clé du libellé « allumé » (défaut `fire` : celui des braseros de recharge de la salle)
+    const { litLabel = 'fire', ...rest } = extra;
     const g = this.rows[y]?.[x];
     let tile: TileXY;
     if ((g === '.' || g === ',') && !this.used.has(y * 1000 + x)) {
@@ -319,7 +327,7 @@ class Placer {
     } else {
       tile = this.snap(x, y, false);
     }
-    this.fires.push({ id, type: 'brazier', tile, labelKey: mechLabel(this.roomId, label), ...extra });
+    this.fires.push({ id, type: 'brazier', tile, labelKey: mechLabel(this.roomId, label), litLabelKey: mechLabel(this.roomId, litLabel), ...rest });
     return this;
   }
 
@@ -815,6 +823,7 @@ const blindforge: RoomDef = (() => {
     .lit('darkFire7', 68, 22);
   COLORS.forEach((color, slot) => {
     p.unlit(`brazier${color}`, `brazier${color}`, colorTiles[slot][0], colorTiles[slot][1], {
+      litLabel: `brazier${color}Lit`,
       ownerSlot: slot,
       lightRadiusTiles: 4,
       ...(slot === 0 ? {} : { minPlayers: slot + 1 }),

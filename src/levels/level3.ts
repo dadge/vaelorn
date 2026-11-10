@@ -251,9 +251,18 @@ class Placer {
     label: string,
     x: number,
     y: number,
-    extra: { ownerSlot?: number; minPlayers?: number; lightRadiusTiles?: number } = {},
+    extra: { ownerSlot?: number; minPlayers?: number; lightRadiusTiles?: number; litLabel?: string } = {},
   ): this {
-    this.fires.push({ id, type: 'brazier', tile: this.snap(x, y, false), labelKey: mechLabel(room, label), ...extra });
+    // `litLabel` : suffixe de la clé du libellé « allumé » (défaut `fire` : celui des braseros de recharge de la salle)
+    const { litLabel = 'fire', ...rest } = extra;
+    this.fires.push({
+      id,
+      type: 'brazier',
+      tile: this.snap(x, y, false),
+      labelKey: mechLabel(room, label),
+      litLabelKey: mechLabel(room, litLabel),
+      ...rest,
+    });
     return this;
   }
 
@@ -751,6 +760,7 @@ const sanctum: RoomDef = (() => {
   // braseros de couleur : chaque héros allume SON brasero (slot 0 bleu, 1 rouge, 2 vert, 3 jaune) ; coop adaptative minPlayers = slot + 1
   COLORS.forEach((color, slot) => {
     p.unlit('sanctum', `sanctumBrazier${color}`, `brazier${color}`, colorBraziers[slot][0], colorBraziers[slot][1], {
+      litLabel: `brazier${color}Lit`,
       ownerSlot: slot,
       lightRadiusTiles: 4,
       ...(slot === 0 ? {} : { minPlayers: slot + 1 }),

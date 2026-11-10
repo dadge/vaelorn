@@ -580,6 +580,12 @@ export interface BrazierDef extends MechanismBase {
   ownerSlot?: number;
   /** Rayon de lumière en tuiles (défaut BRAZIER_LIGHT_TILES). */
   lightRadiusTiles?: number;
+  /**
+   * Clé i18n du libellé affiché une fois le brasero ALLUMÉ (état `active || waived`), à la place de `labelKey` (celui d'avant
+   * l'allumage). Reprend la forme des braseros déjà allumés du niveau/de la salle (« Brasero (recharge) »). Absent : `labelKey`
+   * reste affiché en toute circonstance. Exige `labelKey` (validé par `validateLevel`). Voir `mechanismLabelKey`.
+   */
+  litLabelKey?: string;
 }
 
 /**
@@ -1070,8 +1076,11 @@ export type SimEvent =
   | { type: 'pickupCollected'; pickupId: number; playerId: PlayerId; kind: PickupKind; healed: number; pos: Vec2 }
   | { type: 'crystalUsed'; crystalId: string; playerId: PlayerId; healed: number; pos: Vec2 }
   // ── Emplacement cœur (`SimConfig.heartSlot`) ──
-  /** Un joueur RANGE le cœur / demi-cœur qu'il touche dans son emplacement (il disparaît du sol, aucun soin). */
-  | { type: 'heartStored'; playerId: PlayerId; pickupId: number; kind: PickupKind; pos: Vec2 }
+  /**
+   * Un joueur RANGE le cœur / demi-cœur qu'il touche dans son emplacement (il disparaît du sol, aucun soin). `kind` = l'objet ramassé. `merged: true` (champ ABSENT sinon) : l'emplacement contenait déjà un
+   * DEMI-cœur, il passe à CŒUR ENTIER (fusion : demi + demi ou demi + entier ; le surplus d'un demi-cœur est perdu).
+   */
+  | { type: 'heartStored'; playerId: PlayerId; pickupId: number; kind: PickupKind; pos: Vec2; merged?: true }
   /** B : `playerId` utilise le cœur rangé sur `targetId` (lui-même ou un allié blessé) : `amount` PV rendus (plafonnés au manque), le cœur est consommé. */
   | { type: 'heartUsed'; playerId: PlayerId; targetId: PlayerId; kind: PickupKind; amount: number; pos: Vec2 }
   /** B sans effet (personne n'a besoin de soin, ou emplacement vide) : rien n'est consommé ; retour discret. */
@@ -1134,7 +1143,7 @@ export interface SimConfig {
   autoCall?: boolean;
   /**
    * Emplacement CŒUR (défaut false pour le cœur du moteur, TRUE posé par le jeu et le tutoriel) : un cœur / demi-cœur touché est rangé (jamais consommé au contact), le bouton B l'utilise
-   * (voir `heartSlot.ts`), l'appel automatique part quand l'emplacement est plein, le cristal de soin devient volontaire. false / absent = ancien comportement exact (bots, calibration, démo).
+   * (voir `heartSlot.ts`), l'appel automatique part quand l'emplacement est ENTIER (vide ou à demi-cœur : on range / on fusionne), le cristal de soin devient volontaire. false / absent = ancien comportement exact (bots, calibration, démo).
    */
   heartSlot?: boolean;
   /** Cœur rangé au départ par indice de joueur (reprise d'une sauvegarde « Continuer ») : 'half' | 'full' ; absent, indéfini ou valeur inconnue = emplacement vide. Sans effet si `heartSlot` est faux. */

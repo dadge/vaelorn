@@ -233,7 +233,10 @@ export function collectRequiredI18nKeys(level: LevelDef, opts: { checkSpeakers?:
   for (const room of level.rooms ?? []) {
     add(room.nameKey, `salle "${room.id}" nameKey`);
     add(room.introHintKey, `salle "${room.id}" introHintKey`);
-    for (const m of room.mechanisms ?? []) add(m.labelKey, `salle "${room.id}" mécanisme "${m.id}" labelKey`);
+    for (const m of room.mechanisms ?? []) {
+      add(m.labelKey, `salle "${room.id}" mécanisme "${m.id}" labelKey`);
+      if (m.type === 'brazier') add(m.litLabelKey, `salle "${room.id}" brasero "${m.id}" litLabelKey`);
+    }
     for (const s of room.signs ?? []) add(s.textKey, `salle "${room.id}" panneau "${s.id}" textKey`);
   }
   for (const o of level.objectives ?? []) add(o.labelKey, `objectif "${o.id}" labelKey`);
@@ -510,6 +513,10 @@ function validateRoomStatic(room: RoomDef, level: LevelDef, err: (m: string) => 
       });
     }
     if (m.type === 'brazier') {
+      if (m.litLabelKey !== undefined) {
+        if (!hasText(m.litLabelKey)) err(`${P} : brasero "${m.id}" litLabelKey vide`);
+        else if (!hasText(m.labelKey)) err(`${P} : brasero "${m.id}" litLabelKey sans labelKey (libellé « éteint » manquant : l'étiquette n'existerait pas)`);
+      }
       overlapCheck(m.tile, `brasero "${m.id}"`, doorTiles, 'la porte');
       overlapCheck(m.tile, `brasero "${m.id}"`, blockTiles, 'le bloc');
     }

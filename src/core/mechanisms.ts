@@ -74,6 +74,7 @@ import type {
   LeverState,
   LightBridgeDef,
   LightBridgeState,
+  MechanismDef,
   MechanismState,
   PlateState,
   PlayerId,
@@ -803,6 +804,19 @@ function updateRunes(
 }
 
 // ── Braseros ──
+
+/**
+ * Clé i18n du libellé monde à afficher près du mécanisme `def` d'après son état courant (fonction pure).
+ * Seul le brasero est dynamique : s'il définit `litLabelKey` et qu'il est allumé (`active || waived`, comme son rendu),
+ * on affiche ce libellé « allumé » ; sinon (éteint, ou pas de `litLabelKey`) `labelKey`. Un brasero qui repasse à éteint
+ * retrouve donc son libellé d'éteint. Tous les autres types : `labelKey`, inchangé. `undefined` : pas de libellé.
+ */
+export function mechanismLabelKey(def: MechanismDef, st: MechanismState | undefined): string | undefined {
+  if (def.type === 'brazier' && def.litLabelKey !== undefined && st !== undefined && st.type === 'brazier' && (st.active || st.waived)) {
+    return def.litLabelKey;
+  }
+  return def.labelKey;
+}
 
 /**
  * Ce qu'un appui d'interaction de `p` ferait sur le brasero `def` :

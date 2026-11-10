@@ -127,7 +127,7 @@ function litBrazier(id: string, tile: TileXY): BrazierDef {
 
 /** Brasero éteint, tâche annexe : un joueur à torche non vide l'allume (Action) et gagne un refuge de plus. */
 function coldBrazier(id: string, tile: TileXY): BrazierDef {
-  return { id: `brazier_${id}`, type: 'brazier', tile, labelKey: 'mech.level2.brazierCold' };
+  return { id: `brazier_${id}`, type: 'brazier', tile, labelKey: 'mech.level2.brazierCold', litLabelKey: 'mech.level2.brazier' };
 }
 
 function enemy(kind: EnemyKind, x: number, y: number, minPlayers?: number, extra: Partial<EnemySpawnDef> = {}): EnemySpawnDef {

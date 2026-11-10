@@ -256,7 +256,7 @@ export class TutorialRun {
         return idleFrame();
       }
       case 'heartStore': {
-        // marche sur le cœur posé au sol (rangée 6)
+        // marche sur les deux demi-cœurs posés au sol (rangée 6) : le premier est rangé, le second fusionne (le premier disparu, le suivant devient `pickups[0]`)
         const pk = state.room.pickups?.[0];
         return pk ? this.walk(pos, pk.pos, 2).f : idleFrame();
       }
@@ -280,7 +280,7 @@ export class TutorialRun {
         return { ...idleFrame(), heart: this.pulse % 6 < 3 };
       }
       case 'heartFull': {
-        // deux cœurs au sol : le premier est rangé, en passant sur le second l'emplacement est plein (appel automatique)
+        // deux cœurs ENTIERS au sol : le premier est rangé, en passant sur le second l'emplacement est entier (appel automatique)
         const target = state.room.pickups?.[0];
         return target ? this.walk(pos, target.pos, 2).f : idleFrame();
       }

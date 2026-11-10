@@ -2,6 +2,7 @@
   "heart.controls.gamepad": "Bouton B",
   "heart.controls.keyboard": "B",
   "heart.controls.label": "Utiliser le cœur",
+  "heart.merged": "♥ Cœur complet",
   "heart.stored.full": "♥ rangé",
   "heart.stored.half": "½ ♥ rangé"
 }

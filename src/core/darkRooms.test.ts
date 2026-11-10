@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  LIGHT_EMPTY_TILES,
   LIGHT_FULL_TILES,
   ROOM_CLEAR_DELAY_MS,
   SIM_STEP_MS,
@@ -16,6 +17,7 @@ import {
   makeTestRoom,
   validateLevel,
 } from './levelValidation';
+import { torchRadiusPx } from './light';
 import { createSimulation, GameSimulation } from './simulation';
 import type {
   ActionFrame,
@@ -199,6 +201,70 @@ describe('simulation : torches en salle sombre', () => {
     run(s, Math.ceil((WIPE_RESTART_DELAY_MS + 300) / DT));
     expect(s.state.players[0].status).toBe('alive');
     expect(s.state.players[0].torchMs).toBeGreaterThan(TORCH_MAX_MS - 2000);
+  });
+
+  const torchRadius = (s: GameSimulation, id = 0): number => s.lights().find((l) => l.kind === 'torch' && l.playerId === id)!.radius;
+
+  it('la lumière de la torche décroît pas à pas avec la jauge pendant l’usure (salle sombre), proportionnellement', () => {
+    const s = sim(mkLevel([darkRoom('r1')]), 1);
+    expect(torchRadius(s)).toBe(LIGHT_FULL_TILES * TILE); // départ : torche pleine
+    let prev = torchRadius(s);
+    for (let i = 0; i < 600; i++) {
+      run(s, 1);
+      const r = torchRadius(s);
+      expect(r).toBeLessThan(prev); // strictement : la lumière baisse à CHAQUE pas, plus de plateau
+      prev = r;
+      const f = s.state.players[0].torchMs / TORCH_MAX_MS;
+      expect((r - LIGHT_EMPTY_TILES * TILE) / ((LIGHT_FULL_TILES - LIGHT_EMPTY_TILES) * TILE)).toBeCloseTo(f, 9); // proportionnelle à la jauge
+    }
+    expect(torchRadius(s)).toBe(torchRadiusPx(s.state.players[0].torchMs));
+  });
+
+  it('la lumière suit l’usure jusqu’à la torche vide (1,75 tuile), puis reste là', () => {
+    const s = sim(mkLevel([darkRoom('r1')]), 1);
+    const p = s.state.players[0];
+    p.torchMs = 20 * DT;
+    run(s, 40);
+    expect(p.torchMs).toBe(0);
+    expect(torchRadius(s)).toBe(LIGHT_EMPTY_TILES * TILE);
+  });
+
+  it('la recharge à un brasero remonte la lumière en même temps que la jauge', () => {
+    const s = sim(mkLevel([darkRoom('r1')]), 1);
+    const p = s.state.players[0];
+    p.pos = centerOf([4, 3]);
+    p.torchMs = TORCH_MAX_MS * 0.1;
+    run(s, 1);
+    const low = torchRadius(s);
+    expect(low).toBeCloseTo(torchRadiusPx(TORCH_MAX_MS * 0.1), 1);
+    run(s, 2, { 0: frame({ interact: true }) });
+    expect(p.torchMs).toBeGreaterThan(TORCH_MAX_MS - 100);
+    expect(torchRadius(s)).toBeGreaterThan(low);
+    expect(torchRadius(s)).toBeCloseTo(LIGHT_FULL_TILES * TILE, 0);
+  });
+
+  it('la Lanterne ralentit l’usure de la torche : la lumière suit toujours le combustible (une seule source de vérité)', () => {
+    const s = sim(mkLevel([darkRoom('r1')]), 2);
+    // joueur 1 : Lanterne niveau III (−70 %) ; le rayon ne dépend que de torchMs, pas du loadout
+    Object.assign(s.state.players[1].loadout, { accessory: { kind: 'lantern', level: 3 } });
+    run(s, 300);
+    const [a, b] = s.state.players;
+    expect(b.torchMs).toBeGreaterThan(a.torchMs);
+    expect(torchRadius(s, 1)).toBeGreaterThan(torchRadius(s, 0));
+    expect(torchRadius(s, 1)).toBe(torchRadiusPx(b.torchMs));
+    expect(torchRadius(s, 0)).toBe(torchRadiusPx(a.torchMs));
+  });
+
+  it('non-régression : la lumière est une fonction de rendu, lire lights() ne change pas l’état de la simulation', () => {
+    const a = sim(mkLevel([darkRoom('r1')]), 2);
+    const b = sim(mkLevel([darkRoom('r1')]), 2);
+    for (let i = 0; i < 400; i++) {
+      const inp = { 0: frame({ moveX: Math.sin(i / 17), interact: i % 90 < 3 }), 1: frame({ moveY: Math.cos(i / 13) }) };
+      a.step(DT, inp);
+      b.step(DT, inp);
+      a.lights(); // lecture seule
+    }
+    expect(a.serialize()).toBe(b.serialize());
   });
 
   it('lights() : torches des joueurs + brasero allumé + décors torch', () => {

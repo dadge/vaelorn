@@ -56,6 +56,7 @@ export type SfxName =
   | 'crystalHeal'
   // emplacement cœur
   | 'heartStore'
+  | 'heartMerge'
   | 'heartUse'
   | 'heartRefuse'
   // équipement
@@ -131,6 +132,8 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   crystalHeal: { f0: 440, f1: 880, durMs: 240, type: 'sine', vol: 0.07, then: { f0: 660, f1: 1320, delayMs: 140 } },
   // emplacement cœur (placeholders) : « tic » doux au rangement, carillon de soin à l'utilisation, petit « non » grave et très discret quand B ne sert à rien (jamais agressif)
   heartStore: { f0: 520, f1: 760, durMs: 90, type: 'triangle', vol: 0.045 },
+  // fusion (demi-cœur + cœur → cœur entier) : le « tic » du rangement suivi d'une seconde note plus haute (même timbre, même discrétion)
+  heartMerge: { f0: 520, f1: 760, durMs: 90, type: 'triangle', vol: 0.05, then: { f0: 760, f1: 1140, delayMs: 80 } },
   heartUse: { f0: 540, f1: 1080, durMs: 200, type: 'sine', vol: 0.06, then: { f0: 810, f1: 1620, delayMs: 110 } },
   heartRefuse: { f0: 230, f1: 190, durMs: 70, type: 'sine', vol: 0.03 },
   // équipement (placeholders) : tintement à l'apparition, fanfare montante au ramassage, chute grave quand tout est perdu
@@ -239,7 +242,7 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
     case 'crystalUsed':
       return 'crystalHeal';
     case 'heartStored':
-      return 'heartStore';
+      return e.merged === true ? 'heartMerge' : 'heartStore';
     case 'heartUsed':
       return 'heartUse';
     case 'heartRefused':

@@ -239,15 +239,15 @@ describe('rangement : un cœur touché est RANGÉ, jamais consommé', () => {
     }
   });
 
-  it('emplacement plein : on ne le ramasse pas, il reste au sol (aucun cumul, aucun remplacement, aucun échange demi / entier)', () => {
+  it('emplacement ENTIER : on ne le ramasse pas, il reste au sol (aucun cumul, aucun remplacement)', () => {
     const s = mk(1);
     s.step(DT, {});
-    s.state.players[0].heart = 'half';
+    s.state.players[0].heart = 'full';
     s.state.players[0].hp = 20; // blessé : l'ancien comportement l'aurait consommé
     put(s, 0, 60, 60);
-    addPickup(s, 'full', 62, 60);
+    addPickup(s, 'half', 62, 60);
     const ev = stepN(s, 30);
-    expect(s.state.players[0].heart).toBe('half'); // inchangé
+    expect(s.state.players[0].heart).toBe('full'); // inchangé
     expect(s.state.players[0].hp).toBe(20);
     expect(s.state.room.pickups).toHaveLength(1);
     expect(ofType(ev, 'heartStored')).toHaveLength(0);
@@ -875,25 +875,25 @@ describe('bout en bout : jouer avec l emplacement cœur', () => {
     b.hp = 15;
     put(s, 0, 40, 40);
     put(s, 1, 120, 40);
-    addPickup(s, 'half', 42, 40);
+    addPickup(s, 'full', 42, 40);
     stepN(s, 2);
-    expect(a.heart).toBe('half');
-    // J1 range, puis un deuxième cœur au sol à ses pieds : emplacement plein, J2 a l emplacement libre -> appel automatique avec le symbole du demi-cœur
-    addPickup(s, 'full', 41, 40);
+    expect(a.heart).toBe('full');
+    // J1 range, puis un deuxième cœur au sol à ses pieds : emplacement ENTIER, J2 a l emplacement libre -> appel automatique avec le symbole du demi-cœur
+    addPickup(s, 'half', 41, 40);
     const ev = stepN(s, 2);
     const calls = ofType(ev, 'autoCallStarted');
-    expect(calls).toEqual([{ type: 'autoCallStarted', playerId: 0, icon: 'heart', to: [1] }]);
-    expect(a.heart).toBe('half'); // pas de remplacement
+    expect(calls).toEqual([{ type: 'autoCallStarted', playerId: 0, icon: 'half', to: [1] }]);
+    expect(a.heart).toBe('full'); // pas de remplacement
     // J1 rejoint J2 et le soigne
     put(s, 0, 112, 40);
     const ev2 = pressB(s);
-    expect(ofType(ev2, 'heartUsed')[0]).toMatchObject({ playerId: 0, targetId: 1, amount: 5 });
-    expect(b.hp).toBe(20);
+    expect(ofType(ev2, 'heartUsed')[0]).toMatchObject({ playerId: 0, targetId: 1, amount: 10 });
+    expect(b.hp).toBe(25);
     expect(a.heart).toBeUndefined();
-    // J2 (emplacement libre) prend le cœur resté au sol
+    // J2 (emplacement libre) prend le demi-cœur resté au sol
     put(s, 1, 41, 40);
     stepN(s, 2);
-    expect(b.heart).toBe('full');
+    expect(b.heart).toBe('half');
   });
 
   it('rien n est jamais consommé tout seul : en traversant la salle blessé, aucun PV n est regagné', () => {

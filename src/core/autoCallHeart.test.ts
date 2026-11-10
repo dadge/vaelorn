@@ -1,6 +1,6 @@
 /**
- * APPEL AUTOMATIQUE et emplacement cœur (`options.heartSlot`) : NOUVELLE règle — l'appel de cœur part quand l'emplacement du joueur est PLEIN (quels que soient ses PV) ; les destinataires
- * utiles sont les alliés VIVANTS dont l'emplacement est LIBRE. Sans l'option : règle d'origine (PV pleins / alliés blessés), strictement inchangée (voir `autoCall.test.ts`).
+ * APPEL AUTOMATIQUE et emplacement cœur (`options.heartSlot`) : NOUVELLE règle — l'appel de cœur part quand l'emplacement du joueur est ENTIER (quels que soient ses PV ; un emplacement vide ou à demi-cœur
+ * ramasse / fusionne) ; les destinataires utiles sont les alliés VIVANTS qui PEUVENT ranger : emplacement LIBRE ou contenant un DEMI-cœur (fusion). Sans l'option : règle d'origine (PV pleins / alliés blessés), strictement inchangée (voir `autoCall.test.ts`).
  */
 import { describe, expect, it } from 'vitest';
 import { heartSlotUsefulTo, heartUsefulTo, stepAutoCalls } from './autoCall';
@@ -19,11 +19,13 @@ const slot = (players: PlayerState[], pk: PickupState[]): SimEvent[] => stepAuto
 const calls = (ev: readonly SimEvent[]): Extract<SimEvent, { type: 'autoCallStarted' }>[] => ev.filter((e): e is Extract<SimEvent, { type: 'autoCallStarted' }> => e.type === 'autoCallStarted');
 
 describe('utilité d un cœur', () => {
-  it('heartSlotUsefulTo : vivant ET emplacement libre ; la règle d origine (heartUsefulTo) reste « vivant ET blessé »', () => {
+  it('heartSlotUsefulTo : vivant ET emplacement libre OU à demi-cœur (fusion) ; entier = inutile ; la règle d origine (heartUsefulTo) reste « vivant ET blessé »', () => {
     const p = mkPlayer(0, 0);
     expect(heartSlotUsefulTo(p)).toBe(true);
     expect(heartUsefulTo(p)).toBe(false); // PV pleins
     p.heart = 'half';
+    expect(heartSlotUsefulTo(p)).toBe(true); // un demi-cœur monte à l'entier
+    p.heart = 'full';
     expect(heartSlotUsefulTo(p)).toBe(false);
     delete p.heart;
     markPlayerDown(p);
@@ -31,7 +33,7 @@ describe('utilité d un cœur', () => {
   });
 });
 
-describe('règle de l emplacement cœur : appel quand l emplacement est PLEIN', () => {
+describe('règle de l emplacement cœur : appel quand l emplacement est ENTIER', () => {
   it('emplacement plein, PV pleins, allié à l emplacement libre : appel avec le symbole du cœur (entier) / du demi-cœur', () => {
     for (const [kind, icon] of [['full', 'heart'], ['half', 'half']] as const) {
       const [a, b] = team();
@@ -45,9 +47,9 @@ describe('règle de l emplacement cœur : appel quand l emplacement est PLEIN', 
 
   it('emplacement plein ET blessé : l appel part quand même (les PV ne comptent plus) ; l allié blessé mais à l emplacement plein n est pas destinataire', () => {
     const [a, b, c] = team(3);
-    a.heart = 'half';
+    a.heart = 'full';
     a.hp = a.maxHp / 2; // blessé (au-dessus du seuil de la croix rouge) : sous l ancienne règle il aurait consommé le cœur, aucun appel
-    b.hp = b.maxHp / 2; // blessé mais emplacement plein : ne peut pas le ranger
+    b.hp = b.maxHp / 2; // blessé mais emplacement entier : ne peut pas le ranger
     b.heart = 'full';
     const ev = calls(slot([a, b, c], [heart(a.pos.x, a.pos.y)]));
     expect(ev).toHaveLength(1);
@@ -60,10 +62,10 @@ describe('règle de l emplacement cœur : appel quand l emplacement est PLEIN', 
     expect(a.autoCall).toBeUndefined();
   });
 
-  it('aucun allié à l emplacement libre : AUCUN appel, aucun champ créé', () => {
+  it('aucun allié qui puisse ranger (tous entiers) : AUCUN appel, aucun champ créé', () => {
     const [a, b] = team();
     a.heart = 'full';
-    b.heart = 'half';
+    b.heart = 'full';
     expect(slot([a, b], [heart(a.pos.x, a.pos.y)])).toEqual([]);
     expect(a.autoCall).toBeUndefined();
     expect(a.autoCallCooldownMs).toBeUndefined();
@@ -73,6 +75,24 @@ describe('règle de l emplacement cœur : appel quand l emplacement est PLEIN', 
     c.heart = 'full';
     markPlayerDown(d);
     expect(slot([c, d], [heart(c.pos.x, c.pos.y)])).toEqual([]);
+  });
+
+  it('FUSION : un joueur à demi-cœur ne déclenche AUCUN appel (il accepte l objet) ; un allié à demi-cœur EST destinataire, que l objet soit un cœur ou un demi-cœur ; un allié entier ne l est pas', () => {
+    for (const kind of ['full', 'half'] as const) {
+      const [a, b, c] = team(3);
+      a.heart = 'full';
+      b.heart = 'half'; // peut monter à l'entier : utile
+      c.heart = 'full'; // ne peut rien ranger : inutile
+      const ev = calls(slot([a, b, c], [heart(a.pos.x, a.pos.y, kind)]));
+      expect(ev, kind).toHaveLength(1);
+      expect(ev[0].to, kind).toEqual([1]);
+      expect(ev[0].icon, kind).toBe(kind === 'full' ? 'heart' : 'half');
+      // le porteur d un demi-cœur qui se tient sur l objet : pas d appel (il le fusionnera)
+      const [d, e] = team();
+      d.heart = 'half';
+      expect(slot([d, e], [heart(d.pos.x, d.pos.y, kind)]), kind).toEqual([]);
+      expect(d.autoCall).toBeUndefined();
+    }
   });
 
   it('solo : aucun appel (rien à prévenir) ; hors du rayon de contact : rien', () => {
@@ -131,9 +151,9 @@ describe('simulation : l appel automatique utilise la nouvelle règle quand hear
     s.state.nextPickupId = 2;
   };
 
-  it('heartSlot : emplacement plein, PV pleins -> appel (allié libre) ; l objet reste au sol', () => {
+  it('heartSlot : emplacement ENTIER, PV pleins -> appel (allié libre) ; l objet reste au sol', () => {
     const s = sim(true);
-    s.state.players[0].heart = 'half';
+    s.state.players[0].heart = 'full';
     addPickup(s);
     const ev: SimEvent[] = [];
     for (let i = 0; i < 3; i++) ev.push(...s.step(SIM_STEP_MS, {}));

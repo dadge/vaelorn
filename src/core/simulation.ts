@@ -33,11 +33,12 @@
  *      (`pickupCollected`) par le joueur vivant blessé le plus proche, usage des cristaux de soin (`crystalUsed`) ;
  *      AVEC `SimConfig.heartSlot` (`heartSlot.ts`) : d'abord l'usage VOLONTAIRE du cœur rangé par le front montant de `ActionFrame.heart` (B : `heartUsed` sur un allié blessé à portée, ou
  *      cristal de soin sous les pieds (`crystalUsed`), ou soi-même ; sinon `heartRefused`), puis le RANGEMENT du cœur / demi-cœur touché dans l'emplacement du joueur vivant le plus proche
- *      dont il est vide (`heartStored`, blessé ou non) ; aucune consommation au contact, le cristal ne soigne plus au contact ;
+ *      dont il est vide OU contient un demi-cœur (`heartStored`, blessé ou non ; FUSION si l'emplacement tenait un demi-cœur : il passe à l'entier, `merged: true`) ; emplacement ENTIER : l'objet reste au sol ;
+ *      aucune consommation au contact, le cristal ne soigne plus au contact ;
  *  (i3) équipement au sol (phase 'playing') : vieillissement / péremption des objets, verrous, ramassage automatique (`gearPicked`) par le joueur
  *      vivant le plus proche pour qui l'objet est STRICTEMENT meilleur (`gear.ts` `pickupDecision`) ;
  *  (i4) appel AUTOMATIQUE (phases 'playing' et 'roomCleared', option `SimConfig.autoCall`, 2 joueurs ou plus ; `autoCall.ts`, [B28]) : un joueur vivant qui chevauche un cœur qu'il ne
- *      peut pas prendre (PV pleins ; avec `heartSlot` : emplacement PLEIN, quels que soient les PV), un objet d'équipement qu'il ne prend pas (décision 'ignore') ou l'ancien accessoire qu'il vient de poser en
+ *      peut pas prendre (PV pleins ; avec `heartSlot` : emplacement ENTIER, quels que soient les PV), un objet d'équipement qu'il ne prend pas (décision 'ignore') ou l'ancien accessoire qu'il vient de poser en
  *      l'ÉCHANGEANT à la main (verrou 'leave') prévient les alliés pour qui l'objet serait utile (`autoCallStarted`) ; un joueur qui tombe à 30 % de ses PV max ou moins demande des soins par la CROIX ROUGE
  *      (`icon: 'cross'`, aux alliés qui peuvent soigner : cœur rangé utilisable ou Valentine, [B30]).
  *      Purement informatif : ne fige personne, ne consomme pas le délai de l'appel manuel, aucun tirage aléatoire, aucun effet sur le jeu ;
@@ -148,7 +149,7 @@ import {
 } from './gear';
 import { dirFromVec, distSq, pointInTileRect, tileCenter } from './geometry';
 import { RoomGrid } from './grid';
-import { canStoreHeart, heartCollectorFor, heartUseAmount, isHeartKind, normalizeHeartField, planHeartUse } from './heartSlot';
+import { canAcceptHeart, canStoreHeart, heartCollectorFor, heartUseAmount, isHeartKind, mergeHeart, normalizeHeartField, planHeartUse } from './heartSlot';
 import { lightSources, type LightSource } from './light';
 import {
   areAllRequirementsMet,
@@ -1442,9 +1443,9 @@ export class GameSimulation implements IGameSimulation {
         }
       }
     };
-    // l'aimant ne tire un cœur que vers un porteur qui peut s'en servir : blessé (comportement d'origine) ; avec l'emplacement cœur : qui peut le RANGER (emplacement vide)
+    // l'aimant ne tire un cœur que vers un porteur qui peut s'en servir : blessé (comportement d'origine) ; avec l'emplacement cœur : qui peut l'ACCEPTER (emplacement vide ou demi-cœur : on range / on fusionne)
     const heartSlot = s.heartSlot === true;
-    for (const pk of s.room.pickups as PickupState[]) pull(pk.pos, heartSlot ? (p) => p.heart === undefined : (p) => p.hp < p.maxHp);
+    for (const pk of s.room.pickups as PickupState[]) pull(pk.pos, heartSlot ? (p) => canAcceptHeart(p) : (p) => p.hp < p.maxHp);
     for (const d of s.room.gearDrops as GearDropState[]) {
       pull(d.pos, (p) => {
         if (d.lockedFor === p.id) return false;
@@ -1489,15 +1490,19 @@ export class GameSimulation implements IGameSimulation {
       for (let i = 0; i < pickups.length; ) {
         const pk = pickups[i];
         if (heartSlot) {
-          // EMPLACEMENT CŒUR : le joueur vivant à l'emplacement VIDE le plus proche RANGE l'objet (blessé ou non, aucun soin) ; emplacement plein : il reste au sol
+          // EMPLACEMENT CŒUR : le joueur vivant le plus proche dont l'emplacement est VIDE ou tient un DEMI-cœur RANGE l'objet (blessé ou non, aucun soin) ; si l'emplacement tenait un demi-cœur, il
+          // FUSIONNE (passe à l'entier, le surplus est perdu : `merged`) ; emplacement ENTIER : l'objet reste au sol. Ce rangement vient APRÈS l'usage de B (`stepHeartUse`) : un demi-cœur utilisé ce pas
+          // libère l'emplacement, l'objet touché est alors simplement rangé (pas de fusion)
           const keeper = heartCollectorFor(s.players, pk.pos, PICKUP_RADIUS);
-          if (!keeper) {
+          const next = keeper ? mergeHeart(keeper.heart, pk.kind) : null;
+          if (!keeper || next === null) {
             i++;
             continue;
           }
-          keeper.heart = pk.kind;
+          const merged = keeper.heart !== undefined;
+          keeper.heart = next;
           pickups.splice(i, 1);
-          events.push({ type: 'heartStored', playerId: keeper.id, pickupId: pk.id, kind: pk.kind, pos: { x: pk.pos.x, y: pk.pos.y } });
+          events.push({ type: 'heartStored', playerId: keeper.id, pickupId: pk.id, kind: pk.kind, pos: { x: pk.pos.x, y: pk.pos.y }, ...(merged ? { merged: true as const } : {}) });
           continue;
         }
         const p = collectorFor(s.players, pk.pos, PICKUP_RADIUS);

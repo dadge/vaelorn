@@ -8,6 +8,7 @@
 import type Phaser from 'phaser';
 import { RoomGrid } from '../core/grid';
 import { PLAYER_COLORS, TILE } from '../core/constants';
+import { mechanismLabelKey } from '../core/mechanisms';
 import { resolveSlot } from '../core/slots';
 import type {
   DecorDef,
@@ -59,6 +60,26 @@ interface LabelView {
   offsetY: number;
   radius: number;
   shownAlpha: number;
+  /** Définition du mécanisme dont le libellé dépend de l'état (brasero avec `litLabelKey`) ; null : libellé statique. */
+  dyn: MechanismDef | null;
+}
+
+/** Ce que `refreshLabel` sait mettre à jour (un LabelView, ou son double dans les tests). */
+export interface RefreshableLabel {
+  key: string;
+  text: { setText(value: string): unknown };
+}
+
+/**
+ * Applique la clé de libellé `key` à l'étiquette `l` SEULEMENT si elle change (pas de setText à chaque image : un setText
+ * Phaser re-génère la texture du texte). `key` undefined ou identique : rien. Retourne true si le texte a été remplacé.
+ * `translate` : traduction dans la langue COURANTE (`t`), donc le changement de langue reste correct après un changement d'état.
+ */
+export function refreshLabel(l: RefreshableLabel, key: string | undefined, translate: (k: string) => string): boolean {
+  if (key === undefined || key === l.key) return false;
+  l.key = key;
+  l.text.setText(translate(key));
+  return true;
 }
 
 interface ZoneView {
@@ -240,7 +261,8 @@ export class RoomView {
         continue;
       }
       const big = def.type === 'block' || def.type === 'socket' || def.type === 'door' || def.type === 'lightBridge';
-      this.addLabel(def.labelKey, color, view, { x: 0, y: 0 }, big ? 26 : 16, big ? LABEL_RADIUS + 16 : LABEL_RADIUS);
+      const dyn = def.type === 'brazier' && def.litLabelKey !== undefined ? def : null;
+      this.addLabel(def.labelKey, color, view, { x: 0, y: 0 }, big ? 26 : 16, big ? LABEL_RADIUS + 16 : LABEL_RADIUS, dyn);
     }
     // étiquette de sortie
     this.addLabel(this.sealed ? 'mech.sealedExit' : 'mech.exit', 0xfff6c8, null, this.exitCenter, room.exit.rect.h * TILE / 2 + 8, LABEL_RADIUS + room.exit.rect.w * TILE / 2);
@@ -254,10 +276,10 @@ export class RoomView {
     }
   }
 
-  private addLabel(key: string, color: number, view: MechView | null, fixed: Vec2, offsetY: number, radius: number): void {
+  private addLabel(key: string, color: number, view: MechView | null, fixed: Vec2, offsetY: number, radius: number, dyn: MechanismDef | null = null): void {
     const text = this.add(makeWorldText(this.ctx.scene, this.ctx.zoom, t(key), { size: 6, color, wrap: 72 }));
     text.setDepth(DEPTH_LABELS).setAlpha(0);
-    this.labels.push({ text, key, view, fixed: { x: fixed.x, y: fixed.y }, offsetY, radius, shownAlpha: 0 });
+    this.labels.push({ text, key, view, fixed: { x: fixed.x, y: fixed.y }, offsetY, radius, shownAlpha: 0, dyn });
   }
 
   // ───────── lecture ─────────
@@ -349,6 +371,11 @@ export class RoomView {
   private updateLabels(state: GameState): void {
     const players = state.players;
     for (const l of this.labels) {
+      // libellé dépendant de l'état (brasero : « éteint » -> « allumé (recharge) ») ; ne touche au texte que sur changement
+      if (l.dyn) {
+        const def = l.dyn;
+        refreshLabel(l, mechanismLabelKey(def, state.room.mechanisms.find((m) => m.id === def.id)), t);
+      }
       const ax = l.view ? l.view.center.x : l.fixed.x;
       const ay = (l.view ? l.view.center.y : l.fixed.y) - l.offsetY;
       let best = Infinity;

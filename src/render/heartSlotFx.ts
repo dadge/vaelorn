@@ -6,8 +6,12 @@ import { LOOT_FULL_HEAL } from '../core/balance';
 import type { PickupKind } from '../core/types';
 import { pickupTextColor } from './lifeFx';
 
-/** Clé i18n du texte flottant d'un RANGEMENT : « ♥ rangé » (cœur entier) / « ½ ♥ rangé » (demi-cœur). */
-export function heartStoredTextKey(kind: PickupKind): string {
+/**
+ * Clé i18n du texte flottant d'un RANGEMENT : « ♥ rangé » (cœur entier) / « ½ ♥ rangé » (demi-cœur) ; FUSION (`merged` : l'emplacement tenait un demi-cœur et passe à l'entier) : « ♥ Cœur complet »,
+ * quel que soit l'objet ramassé.
+ */
+export function heartStoredTextKey(kind: PickupKind, merged = false): string {
+  if (merged) return 'heart.merged';
   return kind === 'full' ? 'heart.stored.full' : 'heart.stored.half';
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TILE } from '../core/constants';
-import type { LightSource } from '../core/light';
+import { SIM_STEP_MS, TILE, TORCH_MAX_MS } from '../core/constants';
+import { torchRadiusPx, type LightSource } from '../core/light';
 import {
   DarknessLayer,
   FLICKER_AMPLITUDE,
@@ -98,6 +98,43 @@ describe('quantizeBrushRadius', () => {
     expect(quantizeBrushRadius(0.3)).toBe(MIN_BRUSH_RADIUS);
     expect(quantizeBrushRadius(1e6)).toBe(MAX_BRUSH_RADIUS);
     for (const v of [0, -1, NaN, Infinity]) expect(quantizeBrushRadius(v)).toBe(0);
+  });
+});
+
+describe('quantizeBrushRadius : torche à rayon continu', () => {
+  it('une torche qui s’use de 6 à 1,75 tuile parcourt ~24 paliers de pinceau (échelle 1), moins en échelle réduite', () => {
+    for (const [scale, lo, hi] of [[1, 22, 25], [0.5, 16, 19]] as const) {
+      const levels = new Set<number>();
+      for (let ms = 0; ms <= TORCH_MAX_MS; ms += 16) levels.add(quantizeBrushRadius(torchRadiusPx(ms) * scale));
+      expect(levels.size).toBeGreaterThanOrEqual(lo);
+      expect(levels.size).toBeLessThanOrEqual(hi);
+    }
+  });
+
+  it('le scintillement (≤ ±6 % à intensité 0,6) n’ajoute pas plus de 2 paliers à la vie d’une torche', () => {
+    const plain = new Set<number>();
+    const flick = new Set<number>();
+    for (let ms = 0; ms <= TORCH_MAX_MS; ms += 16) {
+      const r = torchRadiusPx(TORCH_MAX_MS - ms);
+      plain.add(quantizeBrushRadius(r));
+      flick.add(quantizeBrushRadius(flickerRadius(r, ms, 1000, ms > TORCH_MAX_MS * 0.75 ? 0.6 : 0.15)));
+    }
+    expect(flick.size).toBeLessThanOrEqual(plain.size + 2);
+  });
+
+  it('deux rayons consécutifs de la torche (1 s d’écart) diffèrent d’au plus un pas de quantification', () => {
+    for (let ms = 1000; ms <= TORCH_MAX_MS; ms += 1000) {
+      const a = quantizeBrushRadius(torchRadiusPx(ms));
+      const b = quantizeBrushRadius(torchRadiusPx(ms - 1000));
+      expect(a - b).toBeGreaterThanOrEqual(0);
+      expect(a - b).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it('coût d’un pinceau borné : le plus grand (96 px) pèse 192² × 4 octets', () => {
+    const { size, data } = brushPixels(96);
+    expect(size).toBe(192);
+    expect(data.length).toBe(192 * 192 * 4);
   });
 });
 
@@ -371,6 +408,40 @@ describe('DarknessLayer (scène simulée)', () => {
     for (let t = 0; t < 20000; t += 16) layer.update([src(100, 80, 96, { flicker: 1 })], t);
     expect(layer.brushCount).toBeGreaterThan(1);
     expect(layer.brushCount).toBeLessThanOrEqual(8);
+  });
+
+  it('torche qui s’use sur toute sa vie (75 s à 60 i/s) : ≤ 26 pinceaux créés, au plus 1 par image, aucune fuite', () => {
+    const { layer, created, removed, textures } = make(true, 40 * TILE, 30 * TILE);
+    const frames = Math.round(TORCH_MAX_MS / SIM_STEP_MS);
+    let maxLive = 0;
+    let maxCreatedPerFrame = 0;
+    for (let i = 0; i < frames; i++) {
+      const before = created.length;
+      const torchMs = TORCH_MAX_MS - i * SIM_STEP_MS;
+      layer.update([src(200, 150, torchRadiusPx(torchMs), { flicker: torchMs < TORCH_MAX_MS * 0.25 ? 0.6 : 0.15 })], i * SIM_STEP_MS);
+      maxCreatedPerFrame = Math.max(maxCreatedPerFrame, created.length - before);
+      maxLive = Math.max(maxLive, textures.size);
+    }
+    expect(created.length).toBeLessThanOrEqual(26); // ≈ 24 paliers de rayon sur la vie d'une torche
+    expect(created.length).toBeGreaterThanOrEqual(18); // la lumière change bel et bien de pinceau en continu
+    expect(maxCreatedPerFrame).toBeLessThanOrEqual(1); // une seule source : au plus une création par image
+    expect(maxLive).toBeLessThanOrEqual(12); // les pinceaux dépassés sont libérés au fil de l'eau (inactivité)
+    expect(removed.length).toBeGreaterThan(0);
+    layer.destroy();
+    expect(textures.size).toBe(0);
+    expect(removed.length).toBe(created.length); // créées = supprimées : aucune fuite
+  });
+
+  it('4 torches au même niveau partagent leurs pinceaux ; 4 niveaux différents : au plus 4 pinceaux utilisés par image', () => {
+    const { layer, created } = make(true, 40 * TILE, 30 * TILE);
+    const same = [0, 1, 2, 3].map((i) => src(100 + i * 50, 100, torchRadiusPx(TORCH_MAX_MS * 0.6), { playerId: i, flicker: 0 }));
+    layer.update(same, 0);
+    expect(created.length).toBe(1);
+    const mixed = [1, 0.7, 0.4, 0.1].map((f, i) => src(100 + i * 50, 100, torchRadiusPx(TORCH_MAX_MS * f), { playerId: i, flicker: 0 }));
+    layer.update(mixed, 16);
+    expect(created.length).toBe(1 + 4);
+    layer.update(mixed, 32); // même image : plus aucune création
+    expect(created.length).toBe(1 + 4);
   });
 
   it('destroy : libère le RenderTexture et toutes les textures de pinceau, idempotent', () => {

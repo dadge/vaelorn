@@ -5,9 +5,12 @@
  * (consommation au contact, `loot.ts`) est strictement conservé (bots, calibration, démo). Constantes dans `balance.ts` ([B29] `HEART_HEAL_RADIUS`, [B10] valeurs de soin).
  *
  * ── Règles (validées) ──
- *  1. RANGER : un cœur / demi-cœur au sol touché (`PICKUP_RADIUS`) par un joueur VIVANT dont l'emplacement est VIDE est rangé et disparaît du sol, que le joueur soit blessé ou non
- *     (`heartCollectorFor`). Emplacement plein : l'objet reste au sol (un allié peut le prendre) et l'appel automatique part (`autoCall.ts`). Un seul objet : pas de cumul, pas de remplacement,
- *     pas d'échange demi → entier.
+ *  1. RANGER / FUSIONNER : un cœur / demi-cœur au sol touché (`PICKUP_RADIUS`) par un joueur VIVANT qui PEUT l'accepter (`canAcceptHeart` : emplacement VIDE ou contenant un DEMI-cœur) est ramassé et
+ *     disparaît du sol, que le joueur soit blessé ou non (`heartCollectorFor`) :
+ *       - emplacement VIDE : l'objet est rangé tel quel (demi → demi, entier → entier) ;
+ *       - emplacement DEMI-cœur : FUSION, l'emplacement passe à CŒUR ENTIER (10 PV) — demi + demi = entier, demi + entier = entier (le surplus d'un demi-cœur est perdu : règle validée, `mergeHeart`) ;
+ *       - emplacement ENTIER : rien n'est ramassé, l'objet reste au sol (un allié peut le prendre) et l'appel automatique part (`autoCall.ts`).
+ *     Un seul objet à la fois : jamais de cumul au-delà d'un cœur entier, jamais de remplacement.
  *  2. UTILISER = bouton B (front montant), un seul effet par appui, jamais pendant le gel d'un appel manuel ni à terre ; le relevage (A) garde la priorité. Cible, par ordre de priorité
  *     (`planHeartUse`) :
  *       (a) un coéquipier VIVANT et BLESSÉ à portée de contact (`HEART_HEAL_RADIUS`, le plus proche ; égalité : premier dans l'ordre des joueurs (= ids, l'état les trie)) ET un cœur rangé → on LE SOIGNE (cœur consommé) ;
@@ -28,9 +31,24 @@ export function isHeartKind(v: unknown): v is PickupKind {
   return v === 'half' || v === 'full';
 }
 
-/** Le joueur peut-il RANGER un cœur ? Vivant et emplacement vide. */
+/** Le joueur peut-il RANGER un cœur dans un emplacement VIDE ? Vivant et emplacement vide (sans fusion : voir `canAcceptHeart`). */
 export function canStoreHeart(p: Pick<PlayerState, 'status' | 'heart'>): boolean {
   return p.status === 'alive' && p.heart === undefined;
+}
+
+/** Le joueur peut-il ACCEPTER un cœur / demi-cœur au sol ? Vivant et emplacement VIDE (on range) ou contenant un DEMI-cœur (on fusionne : il passe à l'entier). Emplacement ENTIER : non. */
+export function canAcceptHeart(p: Pick<PlayerState, 'status' | 'heart'>): boolean {
+  return p.status === 'alive' && p.heart !== 'full';
+}
+
+/**
+ * Contenu de l'emplacement après avoir accepté `incoming` : vide → `incoming` ; demi-cœur → 'full' (FUSION : demi + demi = entier, demi + entier = entier, le surplus est perdu) ; entier → null
+ * (refusé : rien ne change). Pur.
+ */
+export function mergeHeart(current: PickupKind | undefined, incoming: PickupKind): PickupKind | null {
+  if (current === 'full') return null;
+  if (current === 'half') return 'full';
+  return incoming;
 }
 
 /** Le joueur est-il vivant ET blessé (PV < max) ? Un seul PV manquant suffit. */
@@ -39,14 +57,15 @@ export function isWounded(p: Pick<PlayerState, 'hp' | 'maxHp' | 'status'>): bool
 }
 
 /**
- * Joueur qui RANGE le cœur posé en `pos` (rayon de contact `radius`) : le joueur VIVANT à l'emplacement VIDE le plus proche dans le rayon (égalité : premier dans l'ordre des joueurs (= ids, l'état les trie)), ou null. Blessé ou non.
+ * Joueur qui RANGE (ou FUSIONNE) le cœur posé en `pos` (rayon de contact `radius`) : le joueur VIVANT le plus proche dans le rayon dont l'emplacement est VIDE ou contient un DEMI-cœur (`canAcceptHeart` ;
+ * égalité : premier dans l'ordre des joueurs (= ids, l'état les trie)), ou null. Blessé ou non.
  */
 export function heartCollectorFor(players: readonly PlayerState[], pos: Vec2, radius: number): PlayerState | null {
   let best: PlayerState | null = null;
   let bestD = Infinity;
   const r2 = radius * radius;
   for (const p of players) {
-    if (!canStoreHeart(p)) continue;
+    if (!canAcceptHeart(p)) continue;
     const d = distSq(p.pos, pos);
     if (d <= r2 && d < bestD) {
       best = p;

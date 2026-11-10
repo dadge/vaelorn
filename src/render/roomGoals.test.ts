@@ -186,6 +186,18 @@ describe('describeRoomGoals : mécanismes', () => {
     expect(lines.every((l) => l.detail === '' && !l.highlight)).toBe(true);
   });
 
+  it("brasero à libellé « allumé » : la ligne d'objectif suit le libellé courant (éteint, puis allumé, puis repasse à éteint)", () => {
+    const br: MechanismDef = { id: 'br', type: 'brazier', tile: [7, 4], labelKey: 'mech.tutorial.br_b', litLabelKey: 'mech.tutorial.br_a' };
+    const { sim, goals } = doorRoom([br, plate('pa', 4)], ['br', 'pa']); // 2e exigence non remplie : la ligne du brasero reste affichée une fois cochée
+    const state = sim.state.room.mechanisms.find((m) => m.id === 'br')!;
+    expect(goalOf(goals(), 'br').label).toBe(`Activate: ${t('mech.tutorial.br_b')}`);
+    state.active = true;
+    expect(goalOf(goals(), 'br').label).toBe(`Activate: ${t('mech.tutorial.br_a')}`);
+    expect(goalOf(goals(), 'br').done).toBe(true);
+    state.active = false;
+    expect(goalOf(goals(), 'br').label).toBe(`Activate: ${t('mech.tutorial.br_b')}`);
+  });
+
   it('mécanisme neutralisé (waived) : ligne déjà cochée', () => {
     const { goals } = doorRoom([{ id: 'lv', type: 'lever', tile: [5, 4], minPlayers: 3 }, plate('pa', 6)], ['lv', 'pa']);
     const lines = goals();

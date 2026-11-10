@@ -727,7 +727,7 @@ describe('non-régression : le trait n\'a aucun effet sur le jeu (flux aléatoir
   const GOLDEN: Record<string, string> = {
     '1': 'c0c7aa2a6a7728a1',
     '7': '89a1e9c1c4920749',
-    '4242': 'e3451a7e12420235',
+    '4242': '184ae159532de30f', // recalculée à l'ajout de la FUSION des cœurs (demi + cœur = entier) : seule cette règle change cette partie (vérifié : empreinte identique avec la fusion désactivée)
   };
 
   /** Compteurs du scénario d'empreinte (preuve qu'il exerce bien les appels manuels, automatiques et la croix). */

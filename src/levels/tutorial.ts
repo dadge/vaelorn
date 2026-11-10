@@ -155,7 +155,7 @@ const dark: RoomDef = {
   dark: true,
   mechanisms: [
     { id: 'br_a', type: 'brazier', tile: [14, 4], lit: true, labelKey: 'mech.tutorial.br_a' },
-    { id: 'br_b', type: 'brazier', tile: [22, 4], labelKey: 'mech.tutorial.br_b' },
+    { id: 'br_b', type: 'brazier', tile: [22, 4], labelKey: 'mech.tutorial.br_b', litLabelKey: 'mech.tutorial.br_a' },
   ],
   signs: [{ id: 's_dark', tile: [7, 5], textKey: 'sign.tutorial.s_dark' }],
   // torches de décor : zone de départ éclairée (exigence du validateur : ≤ 6 tuiles d'une source de lumière)

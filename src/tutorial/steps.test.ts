@@ -254,10 +254,19 @@ describe('étapes du tutoriel : appels automatiques', () => {
     expect(b[0] - a[0]).toBeGreaterThan(40); // la vue montre ≈ 26,7 tuiles de large (≈ 32 sur un fond de téléphone large) : le partenaire est nettement hors de la vue, même à 23 tuiles il apparaissait au bord (puce « Passer » par-dessus)
   });
 
-  it("l'étape heartFull n'est validée / attendue que par l'appel de DEMI-CŒUR du joueur (une croix rouge de sa part, blessé en arrivant, ne compte pas)", () => {
+  it("l'étape heartFull n'est validée / attendue que par l'appel de CŒUR ENTIER du joueur (une croix rouge de sa part, blessé en arrivant, ne compte pas)", () => {
     const s = step('heartFull');
-    expect(JSON.stringify(s.done)).toContain('"icon":"half"');
-    expect(JSON.stringify(s.partner![0])).toContain('"icon":"half"');
+    expect(JSON.stringify(s.done)).toContain('"icon":"heart"');
+    expect(JSON.stringify(s.partner![0])).toContain('"icon":"heart"');
+  });
+
+  it("la fusion est enseignée dans l'étape de rangement : deux demi-cœurs au sol, validée par l'événement de fusion ; heartFull pose deux cœurs ENTIERS (deux demi-cœurs ne refuseraient rien)", () => {
+    const store = step('heartStore');
+    expect(store.script?.hearts?.map((h) => h.kind)).toEqual(['half', 'half']);
+    expect(JSON.stringify(store.done)).toContain('"count":2'); // deux rangements (le second fusionne) : robuste à un B entre les deux
+    expect(fr['tutorial.step.heartStore']).toContain('deux demi-cœurs font un cœur entier');
+    expect(en['tutorial.step.heartStore']).toContain('two half hearts make a full heart');
+    expect(step('heartFull').script?.hearts?.map((h) => h.kind)).toEqual(['full', 'full', 'full']); // le troisième garantit le refus même si B a consommé le premier
   });
 
   it("l'étape crossCall redonne le cœur tant que le partenaire n'est pas soigné (keepHeart) : un B prématuré ne bloque pas", () => {
@@ -278,7 +287,7 @@ describe('étapes du tutoriel : appels automatiques', () => {
     const recap = (l: Record<string, string>): string => `${l['tutorial.step.autoCallRecap1']}\n${l['tutorial.step.autoCallRecap2']}`.toLowerCase();
     const fr1 = recap(fr);
     // 4 déclencheurs
-    expect(fr1).toContain('emplacement cœur est plein');
+    expect(fr1).toContain('emplacement cœur contient déjà un cœur entier');
     expect(fr1).toContain('pas plus puissant'); // un niveau ÉGAL est aussi refusé
     expect(fr1).toContain('à terre'); // pas de croix à terre
     expect(fr1).toContain('échanger');

@@ -9,7 +9,7 @@ import { LEVELS } from '../levels';
 import { SIM_STEP_MS } from '../core/constants';
 import { TUTORIAL_STEPS } from '../tutorial/steps';
 import { tutorialLevel } from '../levels/tutorial';
-import type { GearItem } from '../core/types';
+import type { ActionFrame, GameState, GearItem } from '../core/types';
 import { TutorialRun, type HumanStrategy } from './tutorial.solution';
 
 const MAX_MS = 10 * 60_000;
@@ -150,21 +150,23 @@ describe('tutoriel : partenaire', () => {
 });
 
 describe('tutoriel : emplacement cœur', () => {
-  it('le parcours complet range un cœur, se soigne avec B, soigne le partenaire blessé et déclenche l appel automatique de cœur', () => {
+  it('le parcours complet range puis FUSIONNE deux demi-cœurs, se soigne avec B, soigne le partenaire blessé et déclenche l appel automatique de cœur', () => {
     const run = new TutorialRun();
     run.run(MAX_MS);
     expect(run.done).toBe(true);
     const ev = run.events;
-    // rangement
-    expect(ev.some((e) => e.type === 'heartStored' && e.playerId === 0)).toBe(true);
+    // rangement d'un demi-cœur, puis FUSION du second (cœur entier : de quoi se soigner de 10 PV)
+    const stored = ev.filter((e) => e.type === 'heartStored' && e.playerId === 0);
+    expect(stored.length).toBeGreaterThanOrEqual(2);
+    expect(stored.some((e) => e.type === 'heartStored' && e.merged === true)).toBe(true);
     // B sur soi (blessure scénarisée) puis B sur le coéquipier blessé : jamais consommé au contact
     const used = ev.filter((e) => e.type === 'heartUsed');
     expect(used.some((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 0)).toBe(true);
     expect(used.some((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 1)).toBe(true);
     expect(ev.some((e) => e.type === 'pickupCollected')).toBe(false);
-    // emplacement plein : appel automatique avec le symbole du cœur / demi-cœur vers le partenaire, qui prend ensuite le cœur resté au sol
+    // emplacement ENTIER : appel automatique avec le symbole du cœur entier vers le partenaire, qui prend ensuite le cœur resté au sol
     const calls = ev.filter((e) => e.type === 'autoCallStarted');
-    expect(calls.some((e) => e.type === 'autoCallStarted' && e.playerId === 0 && (e.icon === 'half' || e.icon === 'heart') && e.to.includes(1))).toBe(true);
+    expect(calls.some((e) => e.type === 'autoCallStarted' && e.playerId === 0 && e.icon === 'heart' && e.to.includes(1))).toBe(true);
     expect(ev.some((e) => e.type === 'heartStored' && e.playerId === 1)).toBe(true);
     const done = new Set(run.director.snapshot().done);
     for (const id of ['heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'exit.heart']) expect(done.has(id), id).toBe(true);
@@ -283,6 +285,45 @@ describe('tutoriel : appels automatiques (objet laissé, échange d accessoire, 
     solver.run(3 * 60_000);
     expect(solver.events.some((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 1)).toBe(true);
     expect(solver.director.snapshot().done).toContain('crossCall');
+  }, T);
+
+  /** Joueur blessé qui appuie UNE fois sur B (soin de soi) dès que son emplacement tient quelque chose pendant `stepId` : le solveur continue ensuite normalement. */
+  function runWithOneEarlyB(stepId: string): TutorialRun {
+    const run = new TutorialRun({ startRoomIndex: 5 });
+    const orig = (run as unknown as { humanFrame: (s: GameState) => ActionFrame }).humanFrame.bind(run);
+    let woundDone = false;
+    let pressed = false;
+    (run as unknown as { humanFrame: (s: GameState) => ActionFrame }).humanFrame = (state: GameState): ActionFrame => {
+      const f = orig(state);
+      const me = state.players[0];
+      if (run.director.step.id === stepId) {
+        if (!woundDone) {
+          woundDone = true;
+          me.hp = Math.floor(me.maxHp * 0.6); // blessé mais au-dessus de la blessure mise en scène (50 %) : le solveur de heartSelf attend celle-ci
+        }
+        if (!pressed && me.heart !== undefined) {
+          pressed = true;
+          return { ...f, moveX: 0, moveY: 0, heart: true };
+        }
+      }
+      return f;
+    };
+    run.run(3 * 60_000);
+    return run;
+  }
+
+  it('B ENTRE les deux demi-cœurs (joueur blessé) : heartStore n est pas bloquée (deux rangements suffisent, pas de fusion) et la salle se termine', () => {
+    const run = runWithOneEarlyB('heartStore');
+    const stored = run.events.filter((e) => e.type === 'heartStored' && e.playerId === 0);
+    expect(stored.length).toBeGreaterThanOrEqual(2);
+    expect(run.events.some((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 0)).toBe(true);
+    expect(run.director.snapshot().done).toEqual(expect.arrayContaining(['heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'exit.heart']));
+  }, T);
+
+  it('B ENTRE les cœurs entiers de heartFull (joueur blessé) : le troisième cœur garantit le refus, l appel part et l étape se termine', () => {
+    const run = runWithOneEarlyB('heartFull');
+    expect(run.events.some((e) => e.type === 'autoCallStarted' && e.playerId === 0 && e.icon === 'heart')).toBe(true);
+    expect(run.director.snapshot().done).toEqual(expect.arrayContaining(['heartFull', 'exit.heart']));
   }, T);
 
   it('départ direct dans chaque nouvelle salle (?room=N) : l étape de la salle est jouable de bout en bout avec le solveur', () => {
