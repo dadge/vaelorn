@@ -113,6 +113,7 @@ export const SPRITE_MANIFEST: Record<string, SpriteManifestEntry> = {
   'ui_heart_*': e('Cœurs de PV : plein, demi, vide', [8, 8], 'Icônes 8×8'),
   'ui_check': e('Coche verte (objectif accompli)', [8, 8], 'Icône 8×8'),
   'ui_cross': e('Croix rouge', [8, 8], 'Icône 8×8'),
+  'ui_medcross': e('Croix médicale rouge (demande de soins, appel automatique)', [8, 8], 'Icône 8×8'),
   'ui_down': e('Crâne : joueur à terre', [8, 8], 'Icône 8×8'),
   'ui_key_*': e('Icône de clé (couleur du slot)', [8, 8], 'Icône 8×8 en 4 couleurs'),
 };

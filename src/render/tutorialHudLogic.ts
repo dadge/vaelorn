@@ -96,10 +96,16 @@ export function legendPosition(
   avoid: readonly ScreenBounds[] = [],
 ): { x: number; y: number } {
   if (frame.x0 < vp.x + vp.w / 2) {
-    const x = frame.x1 + 8;
+    let x = frame.x1 + 8;
     const y = Math.max(vp.y + 2, Math.round(frame.y0 + (frame.y1 - frame.y0 - textSize.h) / 2));
-    const box: ScreenBounds = { x0: x, y0: y, x1: x + textSize.w, y1: y + textSize.h };
-    if (box.x1 <= vp.x + vp.w - 4 && !avoid.some((o) => o !== frame && boundsOverlap(o, box))) return { x: Math.round(x), y };
+    // à droite du cadre ; si un autre rectangle à éviter s'y trouve (autre cadre, rangée d'équipement voisine de l'emplacement cœur), on se décale à droite de CE rectangle (3 essais au plus)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const box: ScreenBounds = { x0: x, y0: y, x1: x + textSize.w, y1: y + textSize.h };
+      if (box.x1 > vp.x + vp.w - 4) break;
+      const hit = avoid.find((o) => o !== frame && boundsOverlap(o, box));
+      if (!hit) return { x: Math.round(x), y };
+      x = hit.x1 + 8;
+    }
   }
   const x = Math.max(vp.x + 4, Math.min(frame.x1 - textSize.w, vp.x + vp.w - textSize.w - 4));
   const above = frame.y0 - textSize.h - 4;

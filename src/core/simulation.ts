@@ -37,7 +37,9 @@
  *  (i3) équipement au sol (phase 'playing') : vieillissement / péremption des objets, verrous, ramassage automatique (`gearPicked`) par le joueur
  *      vivant le plus proche pour qui l'objet est STRICTEMENT meilleur (`gear.ts` `pickupDecision`) ;
  *  (i4) appel AUTOMATIQUE (phases 'playing' et 'roomCleared', option `SimConfig.autoCall`, 2 joueurs ou plus ; `autoCall.ts`, [B28]) : un joueur vivant qui chevauche un cœur qu'il ne
- *      peut pas prendre (PV pleins ; avec `heartSlot` : emplacement PLEIN, quels que soient les PV) ou un objet d'équipement qu'il ne prend pas (décision 'ignore') prévient les alliés pour qui l'objet serait utile (`autoCallStarted`).
+ *      peut pas prendre (PV pleins ; avec `heartSlot` : emplacement PLEIN, quels que soient les PV), un objet d'équipement qu'il ne prend pas (décision 'ignore') ou l'ancien accessoire qu'il vient de poser en
+ *      l'ÉCHANGEANT à la main (verrou 'leave') prévient les alliés pour qui l'objet serait utile (`autoCallStarted`) ; un joueur qui tombe à 30 % de ses PV max ou moins demande des soins par la CROIX ROUGE
+ *      (`icon: 'cross'`, aux alliés qui peuvent soigner : cœur rangé utilisable ou Valentine, [B30]).
  *      Purement informatif : ne fige personne, ne consomme pas le délai de l'appel manuel, aucun tirage aléatoire, aucun effet sur le jeu ;
  *  (j) morts d'ennemis (enemyDied, kills du tueur, retrait) ; BUTIN : chaque mort d'ennemi non invoqué tire son butin de vie avec le PRNG
  *      DÉDIÉ (`lootRngState`, jamais `rngState`) → `pickupDropped` (voir `loot.ts`, `balance.ts` [B10]-[B17]) ; puis, s'il ne laisse pas de cœur,
@@ -70,7 +72,7 @@
  *    avec les autres timers (a). Immobile tant que `callMs > CALL_DURATION_MS - CALL_FREEZE_MS`. Annulé si l'appelant tombe à terre ;
  *    tout (re)démarrage de salle (start / next / restart, donc défaite collective incluse) remet les deux à 0. Un joueur qui appelle reste
  *    vulnérable, sa torche continue de s'user et il compte normalement pour les zones d'objectif et de sortie.
- *  - appel AUTOMATIQUE (`autoCall`, `autoCallCooldownMs`, `autoCallSeen` : champs OPTIONNELS créés au déclenchement et supprimés à leur terme) : signal de 3 s qui
+ *  - appel AUTOMATIQUE (`autoCall`, `autoCallCooldownMs`, `autoCallSeen`, `autoCallCross` : champs OPTIONNELS créés au déclenchement et supprimés à leur terme) : signal de 3 s qui
  *    NE fige PAS le joueur et ne touche pas aux champs de l'appel manuel ; un appel manuel qui démarre l'efface (`startCall`) ; remis à zéro à chaque entrée de salle et à la
  *    chute ; désactivé par `SimConfig.autoCall === false` (`GameState.autoCallDisabled`). Un état sans appel automatique est identique à celui d'avant son ajout.
  *  - sources de vie : nourriture (`room.pickups`) et cristaux (`room.healCrystals`) sont remis à zéro / à neuf à chaque entrée de salle (start /
@@ -107,7 +109,7 @@ import {
   SUMMON_WAVE,
   WIPE_RESTART_DELAY_MS,
 } from './constants';
-import { normalizeAutoCallFields, stepAutoCalls } from './autoCall';
+import { normalizeAutoCallFields, stepAutoCalls, validGearItem } from './autoCall';
 import { createEnemyState, knockEnemy, onEnemyHit, stunEnemy, updateEnemy } from './ai';
 import { getCharacter } from './characters';
 import { canOccupy, moveCircle, resolveOverlap, type PixelRect } from './collision';
@@ -146,7 +148,7 @@ import {
 } from './gear';
 import { dirFromVec, distSq, pointInTileRect, tileCenter } from './geometry';
 import { RoomGrid } from './grid';
-import { heartCollectorFor, heartUseAmount, isHeartKind, normalizeHeartField, planHeartUse } from './heartSlot';
+import { canStoreHeart, heartCollectorFor, heartUseAmount, isHeartKind, normalizeHeartField, planHeartUse } from './heartSlot';
 import { lightSources, type LightSource } from './light';
 import {
   areAllRequirementsMet,
@@ -325,6 +327,8 @@ function normalizeLootState(state: GameState, room: RoomDef | undefined): void {
  */
 function normalizeGearState(state: GameState): void {
   if (typeof state.gearEnabled !== 'boolean') state.gearEnabled = true;
+  // marqueur optionnel « pas de tirage d'équipement » (tutoriel) : tout ce qui n'est pas exactement `true` est supprimé (valeur hostile / ancien état)
+  if (state.gearDropsDisabled !== undefined && state.gearDropsDisabled !== true) delete state.gearDropsDisabled;
   if (typeof state.gearRngState !== 'number' || !Number.isFinite(state.gearRngState)) {
     state.gearRngState = seedToState((state.rngState | 0) ^ GEAR_SEED_XOR);
   }
@@ -336,6 +340,11 @@ function normalizeGearState(state: GameState): void {
     state.room.gearBudget = state.gearEnabled ? state.playerCount * GEAR_BUDGET_PER_PLAYER : 0;
   }
   for (const p of state.players) ensureLoadout(p);
+}
+
+/** Objet d'équipement posable / équipable par script : emplacement et niveau connus, et pour un accessoire une sorte connue (une icône ET une règle de ramassage existent). */
+function isValidGearItem(item: GearItem): boolean {
+  return validGearItem(item) && (item.slot !== 'accessory' || item.accessory !== undefined);
 }
 
 // ───────────────────────────── Simulation ─────────────────────────────
@@ -512,6 +521,41 @@ export class GameSimulation implements IGameSimulation {
   spawnScriptedHeart(pos: Vec2, kind: PickupKind, ttlMs: number): boolean {
     if (this.state.phase !== 'playing' || !isHeartKind(kind) || !Number.isFinite(ttlMs) || !(ttlMs > 0)) return false;
     this.addPickup(kind, this.findPickupSpot(pos), ttlMs, this.pending);
+    return true;
+  }
+
+  /**
+   * Range d'office un cœur / demi-cœur dans l'emplacement d'un joueur VIVANT (tutoriel uniquement : de quoi soigner pour la démonstration de la croix rouge). Ne remplace JAMAIS un cœur déjà rangé (retourne alors
+   * false, rien ne change). Retourne false sans l'option `heartSlot`, hors phase 'playing', pour un joueur inconnu ou à terre ou un genre de cœur inconnu. Aucun événement, aucun tirage aléatoire.
+   */
+  giveScriptedHeart(id: PlayerId, kind: PickupKind): boolean {
+    if (this.state.phase !== 'playing' || this.state.heartSlot !== true || !isHeartKind(kind)) return false;
+    const p = this.state.players.find((q) => q.id === id);
+    if (!p || !canStoreHeart(p)) return false;
+    p.heart = kind;
+    return true;
+  }
+
+  /**
+   * Objet d'ÉQUIPEMENT SCÉNARISÉ posé au sol (tutoriel uniquement : démonstration de l'appel après un objet refusé ou un échange d'accessoire), avec une durée de vie longue (`ttlMs`) pour qu'il ne disparaisse pas pendant
+   * la lecture de la consigne. Non verrouillé. Événement `gearDropped` au pas suivant. À appeler ENTRE deux pas ; retourne false hors phase 'playing' ou pour un objet invalide (emplacement / niveau inconnu, accessoire
+   * sans sorte). Ne tire AUCUN flux aléatoire.
+   */
+  spawnScriptedGear(pos: Vec2, item: GearItem, ttlMs: number): boolean {
+    if (this.state.phase !== 'playing' || !isValidGearItem(item) || !Number.isFinite(ttlMs) || !(ttlMs > 0)) return false;
+    this.addGearDrop({ ...item }, this.findPickupSpot(pos), null, 'life', false, this.pending, ttlMs);
+    return true;
+  }
+
+  /**
+   * ÉQUIPE un joueur d'un objet (tutoriel uniquement : lui donner de quoi refuser un objet moins bon ou échanger un accessoire). À appeler ENTRE deux pas ; retourne false (aucun effet) hors phase 'playing', pour un
+   * joueur inconnu ou à terre, ou pour un objet invalide. Remplace l'objet de l'emplacement (même règle que `equipItem`). Aucun événement, aucun tirage aléatoire.
+   */
+  equipScripted(id: PlayerId, item: GearItem): boolean {
+    if (this.state.phase !== 'playing' || !isValidGearItem(item)) return false;
+    const p = this.state.players.find((q) => q.id === id);
+    if (!p || p.status !== 'alive') return false;
+    equipItem(p.loadout, item);
     return true;
   }
 
@@ -1176,7 +1220,7 @@ export class GameSimulation implements IGameSimulation {
   private dropGear(e: EnemyState, heart: { heart: boolean; chance: number }, events: SimEvent[]): { dropped: boolean; chance: number } {
     const s = this.state;
     const none = { dropped: false, chance: 0 };
-    if (s.gearEnabled === false || s.phase !== 'playing') return none;
+    if (s.gearEnabled === false || s.gearDropsDisabled === true || s.phase !== 'playing') return none;
     const budget = s.room.gearBudget ?? 0;
     if (!(budget > 0)) return none;
     const rest = this.remainingGearWeights(e);
@@ -1209,7 +1253,7 @@ export class GameSimulation implements IGameSimulation {
    */
   private dropBuff(e: EnemyState, heart: { heart: boolean; chance: number }, gear: { dropped: boolean; chance: number }, events: SimEvent[]): void {
     const s = this.state;
-    if (s.gearEnabled === false || s.phase !== 'playing') return;
+    if (s.gearEnabled === false || s.gearDropsDisabled === true || s.phase !== 'playing') return;
     const budget = s.room.buffBudget ?? 0;
     if (!(budget > 0)) return;
     const rest = this.remainingGearWeights(e);
@@ -1242,11 +1286,11 @@ export class GameSimulation implements IGameSimulation {
   }
 
   /** Pose un objet d'équipement au sol et émet `gearDropped`. */
-  private addGearDrop(item: GearItem, pos: Vec2, lockedFor: PlayerId | null, lockMode: 'life' | 'leave', scattered: boolean, events: SimEvent[]): void {
+  private addGearDrop(item: GearItem, pos: Vec2, lockedFor: PlayerId | null, lockMode: 'life' | 'leave', scattered: boolean, events: SimEvent[], ttlMs: number = GEAR_TTL_MS): void {
     const s = this.state;
     const id = s.nextGearDropId ?? 1;
     s.nextGearDropId = id + 1;
-    (s.room.gearDrops as GearDropState[]).push({ id, item, pos: { x: pos.x, y: pos.y }, ttlMs: GEAR_TTL_MS, lockedFor, lockMode });
+    (s.room.gearDrops as GearDropState[]).push({ id, item, pos: { x: pos.x, y: pos.y }, ttlMs, lockedFor, lockMode });
     events.push({ type: 'gearDropped', dropId: id, item, pos: { x: pos.x, y: pos.y }, scattered });
   }
 
@@ -1645,7 +1689,7 @@ export class GameSimulation implements IGameSimulation {
     this.roomGrid = new RoomGrid(room.layout);
     s.room = newRoomState(room, s.playerCount, s.lootEnabled !== false, s.gearEnabled !== false);
     // budget de bonus temporaires de la salle : tiré sur le PRNG isolé de l'équipement (jamais sur le flux principal ni celui du butin de vie)
-    if (s.gearEnabled !== false) s.room.buffBudget = rollBuffBudget(s.playerCount, () => nextRandom(this.gearRng));
+    if (s.gearEnabled !== false && s.gearDropsDisabled !== true) s.room.buffBudget = rollBuffBudget(s.playerCount, () => nextRandom(this.gearRng));
     s.lootDryKills = 0; // compteur anti-malchance remis à zéro à chaque début de salle (start / next / restart)
     s.phase = 'playing';
     s.phaseTimerMs = 0;
@@ -1707,6 +1751,7 @@ export function createSimulation(config: SimConfig, level: LevelDef): GameSimula
     lootDryKills: 0,
     nextPickupId: 1,
     ...(config.autoCall === false ? { autoCallDisabled: true } : {}),
+    ...(config.gear !== false && config.gearDrops === false ? { gearDropsDisabled: true } : {}),
     ...(config.heartSlot === true ? { heartSlot: true } : {}),
     gearEnabled: config.gear !== false,
     gearRngState: seedToState((Number.isFinite(config.seed) ? Math.floor(config.seed) | 0 : 0) ^ GEAR_SEED_XOR),

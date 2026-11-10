@@ -205,7 +205,7 @@ grid(
     ['fx_slash_up', 'fx_slash_down', 'fx_slash_left', 'fx_slash_right'],
     ['fx_arrow', 'fx_bolt', 'fx_orb', 'fx_shard', 'fx_heal', 'fx_marker', 'fx_shadow'],
     ['fx_hit_0', 'fx_hit_1', 'fx_hit_2', 'fx_revive_0', 'fx_revive_1', 'fx_revive_2', 'fx_revive_3'],
-    ['ui_heart_full', 'ui_heart_half', 'ui_heart_empty', 'ui_check', 'ui_cross', 'ui_down', 'ui_key_0', 'ui_key_1', 'ui_key_2', 'ui_key_3'],
+    ['ui_heart_full', 'ui_heart_half', 'ui_heart_empty', 'ui_medcross', 'ui_check', 'ui_cross', 'ui_down', 'ui_key_0', 'ui_key_1', 'ui_key_2', 'ui_key_3'],
   ],
   { cell: 24, bg: [60, 66, 80] },
 );

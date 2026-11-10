@@ -139,16 +139,18 @@ export class HeartInputGuard {
 
 /** Options de simulation qui dépendent du MODE de la scène (partie normale, tutoriel, démo). Pure : testée, GameScene n'a plus qu'à la déballer. */
 export interface ModeSimFlags {
-  /** équipement : partie normale uniquement */
+  /** équipement : partie normale ET tutoriel (il y enseigne l'objet refusé et l'échange d'accessoire : objets POSÉS par script), pas en démo */
   gear: boolean;
+  /** butin d'équipement ALÉATOIRE (objets et bonus des ennemis) : partie normale uniquement ; le tutoriel pose ses objets par script (aucun tirage parasite) */
+  gearDrops: boolean;
   /** butin de vie aléatoire : partie normale et démo (le tutoriel pose ses cœurs par script) */
   loot: boolean;
-  /** appel automatique : partie normale et tutoriel (il y enseigne « emplacement plein = appel »), pas en démo */
+  /** appel automatique : partie normale et tutoriel (il y enseigne les 4 déclencheurs : cœur, objet moins puissant, échange d'accessoire, croix rouge), pas en démo */
   autoCall: boolean;
   /** emplacement cœur : partie normale et tutoriel (il l'enseigne), PAS en démo (les pilotes automatiques n'utilisent pas B : ancien comportement) */
   heartSlot: boolean;
 }
 
 export function modeSimFlags(mode: { tutorial: boolean; demo: boolean }): ModeSimFlags {
-  return { gear: !mode.tutorial && !mode.demo, loot: !mode.tutorial, autoCall: !mode.demo, heartSlot: !mode.demo };
+  return { gear: !mode.demo, gearDrops: !mode.tutorial && !mode.demo, loot: !mode.tutorial, autoCall: !mode.demo, heartSlot: !mode.demo };
 }

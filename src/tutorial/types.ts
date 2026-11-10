@@ -7,7 +7,7 @@
  * est validée par une ACTION du joueur (`Condition`), jamais par une simple lecture.
  * Tout l'état du directeur (`TutorialState`) est du JSON pur (snapshot / restore, déterminisme).
  */
-import type { PlayerId, SimEvent, TileXY, Vec2 } from '../core/types';
+import type { GearItem, PlayerId, SimEvent, TileXY, Vec2 } from '../core/types';
 
 /** Famille d'appareil dont on affiche les noms de boutons. */
 export type DeviceKind = 'keyboard' | 'gamepad' | 'gamepadPs' | 'touch';
@@ -16,7 +16,7 @@ export type DeviceKind = 'keyboard' | 'gamepad' | 'gamepadPs' | 'touch';
 export type ButtonName = 'move' | 'action' | 'attack' | 'interact' | 'special' | 'call' | 'heart' | 'skip' | 'pause';
 
 /** Zones du HUD que le tutoriel peut mettre en évidence (rectangles fournis par `PlayerHud.regions()`). */
-export type HudRegionId = 'roomGoals' | 'personalGoal' | 'hearts' | 'heartSlot' | 'special' | 'keys' | 'torch' | 'prompt' | 'sign';
+export type HudRegionId = 'roomGoals' | 'personalGoal' | 'hearts' | 'heartSlot' | 'gear' | 'special' | 'keys' | 'torch' | 'prompt' | 'sign';
 
 /** Condition évaluée sur l'état de la simulation (lecture seule). */
 export type Condition =
@@ -60,7 +60,9 @@ export type Target =
   | { exit: true }
   | { human: true }
   /** Le cœur / demi-cœur au sol le plus proche du partenaire (aucune cible = arrivé : rien à ramasser). */
-  | { pickup: true };
+  | { pickup: true }
+  /** L'objet d'équipement au sol le plus proche du partenaire (aucune cible = arrivé : rien à ramasser). */
+  | { gear: true };
 
 /** Instruction de la machine virtuelle du partenaire. `essential` : doit être terminée même si l'étape est sautée. */
 export type PartnerOp =
@@ -123,14 +125,34 @@ export interface TutorialStepDef {
   /** Mise à terre scénarisée, `afterMs` après le début effectif de l'étape. */
   knockDown?: { afterMs: number; ids: PlayerId[] };
   /**
-   * Mise en scène du SOIN, `afterMs` après le début effectif de l'étape (une seule fois) : blessure d'un joueur (PV ramenés à `fraction` de ses PV max, sans jamais le mettre à terre ni
-   * le soigner) et cœurs posés au sol (durée de vie longue, `TUTORIAL_HEART_TTL_MS`). Appliquée par la scène via `takeScripted()` (comme `knockDown`) : aucune règle de jeu ici.
+   * Mise en scène du SOIN et de l'ÉQUIPEMENT, `afterMs` après le début effectif de l'étape (une seule fois) : blessure d'un joueur (PV ramenés à `fraction` de ses PV max, sans jamais le mettre à terre ni
+   * le soigner), cœurs posés au sol (durée de vie longue, `TUTORIAL_HEART_TTL_MS`), cœur rangé d'office, équipement porté et objets d'équipement posés au sol (`TUTORIAL_GEAR_TTL_MS`). Appliquée par la scène via `takeScripted()` (comme `knockDown`) : aucune règle de jeu ici.
    */
-  script?: { afterMs: number; wound?: { id: PlayerId; fraction: number }[]; hearts?: { tile: TileXY; kind: 'half' | 'full' }[] };
+  script?: {
+    afterMs: number;
+    /** Équipe un joueur d'un objet (lui donner de quoi refuser un objet moins bon, ou un accessoire à échanger). Appliqué EN PREMIER. */
+    equip?: { id: PlayerId; item: GearItem }[];
+    /** Range un cœur dans l'emplacement d'un joueur s'il est vide (jamais de remplacement : un cœur déjà rangé est conservé). */
+    giveHeart?: { id: PlayerId; kind: 'half' | 'full' }[];
+    /**
+     * Avec `giveHeart` : le cœur est REDONNÉ (même règle : emplacement vide seulement) tant que l'étape n'est pas finie et que ce joueur ne l'a pas utilisé sur un AUTRE joueur. Évite le blocage d'un appui
+     * prématuré sur B (le cœur serait consommé sur soi, loin du partenaire, et la démonstration ne pourrait plus aboutir). Sans effet une fois le joueur soigné (B ne consomme rien à PV pleins).
+     */
+    keepHeart?: boolean;
+    wound?: { id: PlayerId; fraction: number }[];
+    hearts?: { tile: TileXY; kind: 'half' | 'full' }[];
+    /** Objets d'équipement posés au sol (durée de vie longue), non verrouillés. */
+    gear?: { tile: TileXY; item: GearItem }[];
+  };
 }
 
 /** Action de mise en scène à appliquer à la simulation (voir `TutorialStepDef.script`) : coordonnées déjà résolues en pixels. */
-export type ScriptedAction = { k: 'wound'; id: PlayerId; fraction: number } | { k: 'heart'; x: number; y: number; kind: 'half' | 'full' };
+export type ScriptedAction =
+  | { k: 'wound'; id: PlayerId; fraction: number }
+  | { k: 'heart'; x: number; y: number; kind: 'half' | 'full' }
+  | { k: 'equip'; id: PlayerId; item: GearItem }
+  | { k: 'giveHeart'; id: PlayerId; kind: 'half' | 'full' }
+  | { k: 'gear'; x: number; y: number; item: GearItem };
 
 /** Repère résolu en coordonnées monde (pixels). */
 export interface ResolvedMarker {

@@ -180,7 +180,7 @@ export class TutorialHud {
     }
     this.skipHint.setText(t('tutorial.skip.hint', { skip: a.labels.skip }));
 
-    this.drawFrames(frames, a.timeMs, a.touch);
+    this.drawFrames(frames, a.timeMs, a.touch, a.regions.gear);
     this.drawMarkers(v, a.timeMs);
     this.drawEdge(v, a);
     this.updateChip(v, a);
@@ -227,7 +227,7 @@ export class TutorialHud {
     this.card.setStrokeStyle(3, v.interrupt ? 0xff8a6a : v.waiting ? 0x8890ac : GOLD, 0.95);
   }
 
-  private drawFrames(frames: HighlightFrame[], timeMs: number, touch: boolean): void {
+  private drawFrames(frames: HighlightFrame[], timeMs: number, touch: boolean, gearRow?: ScreenBounds): void {
     const g = this.frames;
     g.clear();
     const alpha = pulseAlpha(timeMs);
@@ -250,7 +250,10 @@ export class TutorialHud {
       if (leg) {
         leg.setText(t(f.legendKey));
         leg.setStyle({ fontSize: `${labelFontSize(touch)}px` });
-        const pos = legendPosition(f.bounds, this.vp, { w: leg.width, h: leg.height }, frames.map((o) => o.bounds));
+        // la rangée d'équipement (visible dans tout le tutoriel, juste à droite de la case cœur) n'est pas recouverte par la légende, sauf si elle est elle-même le cadre mis en valeur
+        const avoid = frames.map((o) => o.bounds);
+        if (gearRow && !frames.some((o) => o.id === 'gear')) avoid.push(gearRow);
+        const pos = legendPosition(f.bounds, this.vp, { w: leg.width, h: leg.height }, avoid);
         leg.setPosition(pos.x, pos.y).setVisible(true).setAlpha(Math.max(0.8, alpha));
       }
     });

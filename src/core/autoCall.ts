@@ -19,12 +19,31 @@
  *  4. Anti-spam : un seul déclenchement par couple (joueur, objet) tant que le joueur reste dans le rayon (+ `AUTO_CALL_REARM_MARGIN`) ; par joueur, délai de
  *     récupération `AUTO_CALL_COOLDOWN_MS` (> durée du signal : un signal actif n'est jamais remplacé par un autre objet).
  *  5. Un signal s'arrête quand son objet disparaît (ramassé par un allié, périmé).
- * Solo (un seul joueur) : aucun appel. L'activation (démo, tutoriel, bots) est décidée par l'appelant (`GameState.autoCallDisabled`).
+ *  6. ÉCHANGE D'ACCESSOIRE : un joueur qui ÉCHANGE à la main un accessoire d'une autre sorte (bouton A, `swapAccessory` de la simulation) pose l'ANCIEN à ses pieds, verrouillé pour lui tant qu'il n'a pas quitté
+ *     le rayon (`lockMode === 'leave'`) : c'est un objet qu'il LAISSE (`gearLeftBy`). Un appel part alors avec l'icône de l'objet posé, aux mêmes conditions que pour un objet refusé (destinataires : alliés vivants
+ *     pour qui l'objet serait utile, mêmes délais, un seul déclenchement par couple joueur / objet). Le verrou ne l'empêche pas : il EST le déclencheur. L'appel après échange part à l'instant du geste : il n'est PAS soumis au délai de `AUTO_CALL_COOLDOWN_MS` ni à un signal d'objet en cours (qu'il remplace) ; seuls un appel manuel en cours (cas rare : il l'emporte) ou une croix en cours le retardent ; si le joueur quitte l'objet avant la fin de ce retard, l'appel est perdu (écart accepté, TODO.md). Les objets ÉPARPILLÉS par une chute (`lockMode === 'life'`,
+ *     le joueur est à terre) et le cœur qui tombe ne déclenchent rien (ce n'est pas un choix du joueur).
+ *  7. CROIX ROUGE = DEMANDE DE SOINS (`stepCross`, constantes [B30]) : un joueur VIVANT dont les PV tombent à `CROSS_CALL_THRESHOLD` (30 %) de ses PV max ou MOINS prévient les alliés VIVANTS qui PEUVENT réellement le
+ *     soigner (`canHealWithCross` : emplacement cœur contenant un cœur utilisable — avec `options.heartSlot` —, ou VALENTINE, qui soigne avec sa flèche et son onde sans cœur), évalués au déclenchement ; aucun
+ *     soigneur = aucun appel. Symbole : une croix rouge (`icon: 'cross'`, `ref: 'x'`). Un joueur à terre ne la déclenche pas (il a déjà sa flèche). Répétition : un nouvel appel au plus toutes les
+ *     `CROSS_CALL_REPEAT_MS` (10 s) tant que le joueur reste à 30 % ou moins ; entre 30 % et 60 % le délai CONTINUE de courir (un rebond juste au-dessus du seuil ne fait pas taire la demande) ; le suivi (`PlayerState.autoCallCross`) est supprimé (croix réarmée)
+ *     quand les PV remontent à `CROSS_CALL_REARM_FRACTION` (60 %) ou plus et à chaque entrée de salle. Un signal de croix en cours s'arrête dès que le joueur repasse au-dessus du seuil (soigné). Priorité : la croix PEUT remplacer un appel automatique d'objet en cours (plus urgent) ; un appel MANUEL
+ *     en cours n'est jamais interrompu et l'emporte (un signal d'objet remplacé par la croix est « oublié » et repart ensuite) ; elle n'est pas soumise au délai de `AUTO_CALL_COOLDOWN_MS` (4 s) des objets et ne le consomme pas, ni celui de l'appel manuel.
+ * Solo (un seul joueur) : aucun appel. L'activation (démo, bots) est décidée par l'appelant (`GameState.autoCallDisabled`) ; le tutoriel l'active.
  */
-import { AUTO_CALL_COOLDOWN_MS, AUTO_CALL_DURATION_MS, AUTO_CALL_REARM_MARGIN, GEAR_PICKUP_RADIUS, PICKUP_RADIUS } from './balance';
+import {
+  AUTO_CALL_COOLDOWN_MS,
+  AUTO_CALL_DURATION_MS,
+  AUTO_CALL_REARM_MARGIN,
+  CROSS_CALL_REARM_FRACTION,
+  CROSS_CALL_REPEAT_MS,
+  CROSS_CALL_THRESHOLD,
+  GEAR_PICKUP_RADIUS,
+  PICKUP_RADIUS,
+} from './balance';
 import { ACCESSORY_KINDS, GEAR_LEVELS, GEAR_SLOTS, pickupDecision } from './gear';
 import { distSq } from './geometry';
-import { canStoreHeart } from './heartSlot';
+import { canStoreHeart, heartUseAmount } from './heartSlot';
 import { canConsumeHeart } from './loot';
 import { CALL_EPSILON_MS } from './players';
 import type { AutoCallIcon, AutoCallState, GearDropState, GearItem, PickupState, PlayerId, PlayerState, SimEvent } from './types';
@@ -64,11 +83,54 @@ export function gearRefusedBy(p: Pick<PlayerState, 'status' | 'id' | 'loadout'>,
   return pickupDecision(p.loadout, drop.item) === 'ignore';
 }
 
+/**
+ * Ce joueur vient-il de LAISSER cet objet d'équipement par un échange manuel d'accessoire ? Vrai si vivant et si l'objet est verrouillé POUR LUI en mode 'leave' (le seul mode que pose `swapAccessory` : « tant qu'il n'a
+ * pas quitté le rayon »). Les objets éparpillés par une chute (mode 'life') ne comptent pas : ce n'est pas un choix du joueur.
+ */
+export function gearLeftBy(p: Pick<PlayerState, 'status' | 'id'>, drop: Pick<GearDropState, 'lockedFor' | 'lockMode'>): boolean {
+  return p.status === 'alive' && drop.lockMode === 'leave' && drop.lockedFor === p.id;
+}
+
 /** Cet objet d'équipement serait-il utile à ce joueur (vivant, non verrouillé, 'equip' ou 'upgrade') ? ('swap' = échange manuel : pas utile.) */
 export function gearUsefulTo(p: Pick<PlayerState, 'status' | 'id' | 'loadout'>, drop: Pick<GearDropState, 'item' | 'lockedFor'>): boolean {
   if (p.status !== 'alive' || drop.lockedFor === p.id) return false;
   const decision = pickupDecision(p.loadout, drop.item);
   return decision === 'equip' || decision === 'upgrade';
+}
+
+/** Référence du signal de la croix rouge (`AutoCallState.ref`) : aucun objet au sol, donc jamais purgée avec les objets. */
+export const CROSS_REF = 'x';
+
+/** Tolérance (fractions de PV) sur les comparaisons de seuil : `0,3 × 10` n'est pas exactement 3 en virgule flottante. */
+const HP_EPSILON = 1e-9;
+
+/** Ce joueur est-il à `CROSS_CALL_THRESHOLD` de ses PV max ou MOINS ? (PV non finis ou PV max nuls : non). Ne regarde pas son statut. */
+export function isCrossLow(p: Pick<PlayerState, 'hp' | 'maxHp'>): boolean {
+  return Number.isFinite(p.hp) && Number.isFinite(p.maxHp) && p.maxHp > 0 && p.hp <= p.maxHp * CROSS_CALL_THRESHOLD + HP_EPSILON;
+}
+
+/** Ce joueur est-il remonté à `CROSS_CALL_REARM_FRACTION` de ses PV max ou PLUS ? (la croix est alors réarmée) */
+export function isCrossRearmed(p: Pick<PlayerState, 'hp' | 'maxHp'>): boolean {
+  return Number.isFinite(p.hp) && Number.isFinite(p.maxHp) && p.maxHp > 0 && p.hp >= p.maxHp * CROSS_CALL_REARM_FRACTION - HP_EPSILON;
+}
+
+/** Valentine soigne sans cœur (flèche de soin, onde `healNova`) : elle reçoit toujours la croix quand elle est vivante dans l'équipe. */
+export function isHealerCharacter(p: Pick<PlayerState, 'characterId'>): boolean {
+  return p.characterId === 'valentine';
+}
+
+/**
+ * `healer` peut-il RÉELLEMENT soigner `patient` ? Vivant, autre que le patient, et soit Valentine (soigne sans cœur), soit (règle de l'EMPLACEMENT CŒUR, `heartSlot`) un cœur rangé UTILISABLE : au moins un PV à rendre
+ * au patient (`heartUseAmount`). Sans `heartSlot` (règle d'origine : cœur consommé au contact, pas d'emplacement) seule Valentine peut soigner à la demande.
+ */
+export function canHealWithCross(
+  healer: Pick<PlayerState, 'id' | 'status' | 'characterId' | 'heart'>,
+  patient: Pick<PlayerState, 'id' | 'hp' | 'maxHp'>,
+  heartSlot: boolean,
+): boolean {
+  if (healer.status !== 'alive' || healer.id === patient.id) return false;
+  if (isHealerCharacter(healer)) return true;
+  return heartSlot && healer.heart !== undefined && heartUseAmount(healer, { hp: patient.hp, maxHp: patient.maxHp, status: 'alive' }) > 0;
 }
 
 /** Symbole d'un cœur au sol : 'heart' (entier) ou 'half'. */
@@ -130,10 +192,11 @@ export function stepAutoCalls(
   const slot = options.heartSlot === true;
   if (players.length < 2) return events;
   if (pickups.length === 0 && gearDrops.length === 0) {
-    // plus aucun objet au sol : les signaux en cours s'arrêtent et la mémoire des objets signalés est vidée
+    // plus aucun objet au sol : les signaux d'objet en cours s'arrêtent (pas la croix rouge, qui n'a pas d'objet) et la mémoire des objets signalés est vidée
     for (const p of players) {
-      delete p.autoCall;
+      if (p.autoCall && p.autoCall.icon !== 'cross') delete p.autoCall;
       delete p.autoCallSeen;
+      stepCross(p, players, slot, events);
     }
     return events;
   }
@@ -143,7 +206,7 @@ export function stepAutoCalls(
   const rearmG = (GEAR_PICKUP_RADIUS + AUTO_CALL_REARM_MARGIN) * (GEAR_PICKUP_RADIUS + AUTO_CALL_REARM_MARGIN);
   for (const p of players) {
     // l'objet d'un signal en cours a disparu (ramassé par un allié, périmé) : le signal s'arrête
-    if (p.autoCall && !refExists(p.autoCall.ref, pickups, gearDrops)) delete p.autoCall;
+    if (p.autoCall && p.autoCall.icon !== 'cross' && !refExists(p.autoCall.ref, pickups, gearDrops)) delete p.autoCall;
     // ré-armement : un objet signalé n'est oublié qu'une fois le joueur sorti du rayon + marge (ou l'objet disparu)
     if (p.autoCallSeen) {
       const kept = p.autoCallSeen.filter((ref) => {
@@ -155,14 +218,19 @@ export function stepAutoCalls(
       if (kept.length === 0) delete p.autoCallSeen;
       else if (kept.length !== p.autoCallSeen.length) p.autoCallSeen = kept;
     }
+    // croix rouge (demande de soins) : prioritaire sur un appel d'objet en cours (elle le remplace), évaluée avant les objets
+    stepCross(p, players, slot, events);
     if (p.status !== 'alive') continue;
-    // un signal automatique actif n'est pas remplacé ; un appel manuel en cours n'est pas interrompu ; délai de récupération propre à l'appel automatique
-    if (p.autoCall || p.callMs > CALL_EPSILON_MS || (p.autoCallCooldownMs ?? 0) > CALL_EPSILON_MS) continue;
+    // un appel manuel en cours n'est jamais interrompu ; une croix en cours n'est jamais remplacée (plus urgente)
+    if (p.callMs > CALL_EPSILON_MS || p.autoCall?.icon === 'cross') continue;
+    // un signal d'objet actif n'est pas remplacé par un autre objet ; délai de récupération propre à l'appel automatique. Seul l'appel APRÈS ÉCHANGE d'accessoire (règle 6) y échappe : il part
+    // à l'instant du geste du joueur, qui s'éloigne naturellement de l'objet (le verrou 'leave' tombe alors et l'appel serait perdu s'il devait attendre la fin d'un délai) ; il REMPLACE un signal d'objet en cours
+    const busy = p.autoCall !== undefined || (p.autoCallCooldownMs ?? 0) > CALL_EPSILON_MS;
 
     const seen = p.autoCallSeen;
     let found: Candidate | null = null;
     // nourriture d'abord, puis équipement (ordre des tableaux : déterministe)
-    if (slot ? p.heart !== undefined : !canConsumeHeart(p)) {
+    if (!busy && (slot ? p.heart !== undefined : !canConsumeHeart(p))) {
       for (const pk of pickups) {
         const ref = pickupRef(pk.id);
         if (seen?.includes(ref) || distSq(p.pos, pk.pos) > rr) continue;
@@ -175,7 +243,8 @@ export function stepAutoCalls(
     if (!found) {
       for (const d of gearDrops) {
         const ref = gearRef(d.id);
-        if (seen?.includes(ref) || distSq(p.pos, d.pos) > gr || !gearRefusedBy(p, d)) continue;
+        // objet refusé (décision 'ignore') OU objet que ce joueur vient de LAISSER par un échange d'accessoire (verrou 'leave' : le verrou est ici le déclencheur, pas un obstacle)
+        if (seen?.includes(ref) || distSq(p.pos, d.pos) > gr || !((!busy && gearRefusedBy(p, d)) || gearLeftBy(p, d))) continue;
         const to = recipients(players, p.id, (q) => gearUsefulTo(q, d));
         if (to.length === 0) continue;
         found = { ref, icon: 'gear', item: { ...d.item }, to };
@@ -185,16 +254,61 @@ export function stepAutoCalls(
     if (!found) continue;
     const call: AutoCallState = { icon: found.icon, ref: found.ref, ms: AUTO_CALL_DURATION_MS, to: found.to };
     if (found.item) call.item = found.item;
+    forgetReplacedRef(p); // un signal d'objet remplacé (appel après échange) pourra repartir
     p.autoCall = call;
     p.autoCallCooldownMs = AUTO_CALL_COOLDOWN_MS;
-    p.autoCallSeen = seen ? [...seen, found.ref] : [found.ref];
+    p.autoCallSeen = p.autoCallSeen ? [...p.autoCallSeen, found.ref] : [found.ref];
     events.push({ type: 'autoCallStarted', playerId: p.id, icon: found.icon, to: found.to.slice() });
   }
   return events;
 }
 
+/**
+ * Le signal d'OBJET en cours de `p` (s'il y en a un) va être remplacé (par la croix ou par l'appel après échange) : on oublie sa référence dans `autoCallSeen`, sinon l'objet ne serait JAMAIS re-signalé tant que le
+ * joueur reste dessus (les alliés l'auraient vu une fraction de seconde puis plus jamais). Il repartira, une fois le délai de récupération écoulé, si le joueur est toujours dessus. MUTE `p`.
+ */
+function forgetReplacedRef(p: PlayerState): void {
+  const prev = p.autoCall;
+  if (!prev || prev.icon === 'cross' || !p.autoCallSeen) return;
+  const rest = p.autoCallSeen.filter((r) => r !== prev.ref);
+  if (rest.length === 0) delete p.autoCallSeen;
+  else p.autoCallSeen = rest;
+}
+
+/** Au moins un allié vivant peut-il soigner `patient` ? Parcours sans allocation (la liste des destinataires n'est construite qu'au déclenchement). */
+function hasHealer(players: readonly PlayerState[], patient: PlayerState, heartSlot: boolean): boolean {
+  for (const q of players) if (q.id !== patient.id && canHealWithCross(q, patient, heartSlot)) return true;
+  return false;
+}
+
+/**
+ * Croix rouge d'UN joueur (voir règle 7 de l'en-tête) : réarmement (PV >= 60 %), répétition, déclenchement. MUTE `p` (`autoCall`, `autoCallCross`, `autoCallSeen` si un signal d'objet est remplacé) et ajoute
+ * l'événement `autoCallStarted` à `events`. Sans allocation tant que rien ne part. N'a aucun effet sur `callMs`, `callCooldownMs` ni `autoCallCooldownMs`.
+ */
+function stepCross(p: PlayerState, players: readonly PlayerState[], heartSlot: boolean, events: SimEvent[]): void {
+  if (p.status !== 'alive') return; // à terre : pas de croix (flèche vers l'allié à terre) ; le suivi a été remis à zéro à la chute
+  if (p.autoCall?.icon === 'cross' && !isCrossLow(p)) delete p.autoCall; // soigné au-dessus du seuil : la demande n'a plus lieu d'être, le signal s'arrête
+  const tracking = p.autoCallCross;
+  if (tracking && isCrossRearmed(p)) {
+    delete p.autoCallCross; // soigné : la croix est réarmée
+    return;
+  }
+  // entre 30 % et 60 % depuis un premier déclenchement : pas de croix, mais le délai de répétition CONTINUE de courir (`stepAutoCallTimers`) : un petit soin ou des PV qui rebondissent juste au-dessus du seuil
+  // ne font pas taire la demande (hystérésis : seul le réarmement à 60 % ou une nouvelle salle remet le suivi à zéro)
+  if (!isCrossLow(p)) return;
+  if (tracking && tracking.ms > CALL_EPSILON_MS) return; // répétition : pas avant la fin du délai
+  if (p.callMs > CALL_EPSILON_MS) return; // un appel manuel en cours n'est jamais interrompu (il l'emporte) ; la croix part dès qu'il est fini si le joueur est toujours bas
+  if (p.autoCall?.icon === 'cross') return; // déjà en train de la montrer
+  if (!hasHealer(players, p, heartSlot)) return; // personne ne peut soigner : aucun appel (réévalué à chaque pas tant que le joueur est bas)
+  const to = recipients(players, p.id, (q) => canHealWithCross(q, p, heartSlot));
+  forgetReplacedRef(p); // l'appel d'objet remplacé repartira après la croix (délai de récupération écoulé)
+  p.autoCall = { icon: 'cross', ref: CROSS_REF, ms: AUTO_CALL_DURATION_MS, to };
+  p.autoCallCross = { ms: CROSS_CALL_REPEAT_MS };
+  events.push({ type: 'autoCallStarted', playerId: p.id, icon: 'cross', to: to.slice() });
+}
+
 /** L'objet d'un signal 'gear' désigne-t-il une frame d'icône existante (emplacement connu, niveau 1..3, accessoire connu pour un accessoire) ? */
-function validGearItem(item: unknown): boolean {
+export function validGearItem(item: unknown): boolean {
   if (!item || typeof item !== 'object') return false;
   const it = item as Partial<GearItem>;
   if (!GEAR_SLOTS.includes(it.slot as GearItem['slot']) || !GEAR_LEVELS.includes(it.level as GearItem['level'])) return false;
@@ -212,8 +326,9 @@ export function normalizeAutoCallFields(p: PlayerState): void {
     const ok =
       !!o &&
       typeof o === 'object' &&
-      (o.icon === 'heart' || o.icon === 'half' || o.icon === 'gear') &&
+      (o.icon === 'heart' || o.icon === 'half' || o.icon === 'gear' || o.icon === 'cross') &&
       typeof o.ref === 'string' &&
+      (o.icon !== 'cross' || o.ref === CROSS_REF) &&
       typeof o.ms === 'number' &&
       Number.isFinite(o.ms) &&
       o.ms > 0 &&
@@ -227,4 +342,10 @@ export function normalizeAutoCallFields(p: PlayerState): void {
   if (cd !== undefined && !(typeof cd === 'number' && Number.isFinite(cd) && cd > 0 && cd <= AUTO_CALL_COOLDOWN_MS)) delete p.autoCallCooldownMs;
   const seen = p.autoCallSeen as unknown;
   if (seen !== undefined && !(Array.isArray(seen) && seen.length > 0 && seen.every((r) => typeof r === 'string'))) delete p.autoCallSeen;
+  const cross = p.autoCallCross as unknown;
+  if (cross !== undefined) {
+    const c = cross as { ms?: unknown } | null;
+    const ok = !!c && typeof c === 'object' && typeof c.ms === 'number' && Number.isFinite(c.ms) && c.ms >= 0 && c.ms <= CROSS_CALL_REPEAT_MS;
+    if (!ok) delete p.autoCallCross;
+  }
 }

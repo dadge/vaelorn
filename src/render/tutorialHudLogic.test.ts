@@ -110,6 +110,16 @@ describe('cadres de mise en évidence', () => {
     expect(boundsOverlap({ x0: q.x, y0: q.y, x1: q.x + 160, y1: q.y + 24 }, other)).toBe(false);
   });
 
+  it("l'emplacement cœur : la légende se décale à DROITE de la rangée d'équipement voisine (qui commence juste à droite de la case) au lieu de la recouvrir", () => {
+    const heartSlot: ScreenBounds = { x0: 10, y0: 90, x1: 60, y1: 120 };
+    const gearRow: ScreenBounds = { x0: 66, y0: 88, x1: 330, y1: 122 };
+    const p = legendPosition(heartSlot, FULL, { w: 160, h: 24 }, [heartSlot, gearRow]);
+    expect(boundsOverlap({ x0: p.x, y0: p.y, x1: p.x + 160, y1: p.y + 24 }, gearRow)).toBe(false);
+    expect(p.x).toBeGreaterThanOrEqual(gearRow.x1);
+    expect(p.y).toBeGreaterThanOrEqual(heartSlot.y0 - 4);
+    expect(p.y + 24).toBeLessThanOrEqual(heartSlot.y1 + 4); // reste alignée sur la case
+  });
+
   it('la légende se place au-dessus du cadre, sinon en dessous, toujours dans la vue', () => {
     const top = legendPosition({ x0: 900, y0: 10, x1: 1270, y1: 110 }, FULL, { w: 200, h: 20 });
     expect(top.y).toBeGreaterThan(110); // pas de place au-dessus : en dessous

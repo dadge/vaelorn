@@ -9,12 +9,15 @@ import { makeTestLevel } from '../core/levelValidation';
 import { createSimulation } from '../core/simulation';
 import type { AutoCallState, GameState, PlayerId, Vec2 } from '../core/types';
 import type { ViewContext } from '../entities/common';
-import { hasFrame } from './art';
+import { buildAtlasData, hasFrame } from './art';
 import { CallEdgeHud } from './callHud';
 import {
   CALL_DOT_RADIUS,
   CALL_SYMBOL_BACK_ALPHA,
   CALL_SYMBOL_BACK_RADIUS,
+  CALL_SYMBOL_CROSS_BACK_ALPHA,
+  CALL_SYMBOL_CROSS_BACK_COLOR,
+  CALL_SYMBOL_CROSS_FRAME,
   CALL_SYMBOL_HEART_BACK_ALPHA,
   CALL_SYMBOL_HEART_BACK_COLOR,
   CALL_SYMBOL_OVERHEAD_WORLD,
@@ -405,5 +408,119 @@ describe('CallEdgeHud : symbole à la place du point', () => {
     hud.update(state, 0, cam, [], 0);
     hud.destroy();
     expect(images.every((i) => i.destroyed)).toBe(true);
+  });
+});
+
+// ───────────────────────────── Croix rouge (demande de soins) ─────────────────────────────
+
+const crossCall = (to: PlayerId[] = [0], ms = AUTO_CALL_DURATION_MS): AutoCallState => ({ icon: 'cross', ref: 'x', ms, to });
+
+describe('croix rouge : symbole, disque, dessin', () => {
+  it("frame d'atlas `ui_medcross` (existe dans l'atlas), visible seulement par les destinataires qui peuvent soigner, jamais par l'émetteur ni si l'appel manuel l'emporte", () => {
+    expect(autoCallSymbolFrame({ icon: 'cross' })).toBe('ui_medcross');
+    expect(autoCallSymbolFrame({ icon: 'cross' })).toBe(CALL_SYMBOL_CROSS_FRAME);
+    expect(hasFrame('ui_medcross')).toBe(true);
+    const s = makeState(3);
+    const p = s.players[0];
+    p.autoCall = crossCall([1]);
+    expect(callSymbolFor(p, 1)).toBe('ui_medcross');
+    expect(callSymbolFor(p, 2)).toBeNull(); // ne peut pas soigner : ne voit rien
+    expect(callSymbolFor(p, 0)).toBeNull(); // l'émetteur
+    p.callMs = 2000; // appel manuel en cours : il l'emporte (le point habituel)
+    expect(callSymbolFor(p, 1)).toBeNull();
+  });
+
+  it('disque BLANC CASSÉ derrière la croix (rouge sur blanc, lisible sur tout fond) ; cœurs et objets inchangés', () => {
+    expect(callSymbolBack('ui_medcross', 0x111111)).toEqual({ color: CALL_SYMBOL_CROSS_BACK_COLOR, alpha: CALL_SYMBOL_CROSS_BACK_ALPHA });
+    expect(callSymbolBack('ui_heart_full', 0x111111)).toEqual({ color: CALL_SYMBOL_HEART_BACK_COLOR, alpha: CALL_SYMBOL_HEART_BACK_ALPHA });
+    expect(callSymbolBack('gear_icon_weapon_2', 0x111111)).toEqual({ color: 0x111111, alpha: CALL_SYMBOL_BACK_ALPHA });
+    const lum = (c: number): number => ((c >> 16) & 255) * 0.3 + ((c >> 8) & 255) * 0.59 + (c & 255) * 0.11;
+    expect(lum(CALL_SYMBOL_CROSS_BACK_COLOR)).toBeGreaterThan(220); // clair : la croix rouge ressort
+  });
+
+  it("la croix a EXACTEMENT les mêmes tailles que les autres symboles (icône 8×8 agrandie, même échelle, même disque, même marge)", () => {
+    const { images, hud, state, cam, layout } = setup();
+    const e = state.players[1];
+    e.pos = { x: cam.x + 1000, y: cam.y };
+    e.autoCall = heartCall([0]);
+    hud.update(state, 0, cam, [], 0);
+    const heartScale = images[0].scale;
+    e.autoCall = crossCall([0]);
+    hud.update(state, 0, cam, [], 0);
+    expect(images).toHaveLength(1);
+    expect(images[0].frame).toBe('ui_medcross');
+    expect(images[0].scale).toBe(heartScale);
+    expect(images[0].scale).toBeCloseTo(callSymbolDisplayScale(layout.zoom / 2));
+    expect(images[0].scale * 8).toBeCloseTo(CALL_SYMBOL_SIZE * (layout.zoom / 2));
+    // les frames sont toutes en 8×8 : la croix tient dans le même carré que les cœurs
+    const atlas = buildAtlasData();
+    for (const f of ['ui_medcross', 'ui_heart_full', 'ui_heart_half', 'gear_icon_weapon_2']) expect([atlas.frames[f].w, atlas.frames[f].h], f).toEqual([8, 8]);
+  });
+
+  it("dessin : 3 arcs inchangés, disque blanc cassé de même rayon que les autres symboles, liseré de la couleur de l'émetteur, UNE image de croix à la place du point", () => {
+    const { g, images, hud, state, cam, layout } = setup();
+    const e = state.players[1];
+    e.pos = { x: cam.x + 1000, y: cam.y };
+    e.autoCall = crossCall([0]);
+    hud.update(state, 0, cam, [], 0);
+    expect(g.count('arc')).toBe(3 * 2);
+    expect(images).toHaveLength(1);
+    expect(images[0].frame).toBe('ui_medcross');
+    const fill = g.calls.find((c) => c.fn === 'fillStyle');
+    expect(fill?.args[0]).toBe(CALL_SYMBOL_CROSS_BACK_COLOR);
+    expect(g.calls.filter((c) => c.fn === 'fillCircle').map((c) => c.args[2])).toEqual([CALL_SYMBOL_BACK_RADIUS * (layout.zoom / 2)]);
+    const arc = g.calls.find((c) => c.fn === 'arc');
+    expect([images[0].x, images[0].y]).toEqual([arc?.args[0], arc?.args[1]]);
+  });
+
+  it("émetteur visible dans la vue d'un destinataire : la croix flotte au-dessus de sa tête (HUD de ce seul destinataire) ; un allié qui ne peut pas soigner ne voit rien", () => {
+    const { g, images, hud, state, cam } = setup();
+    state.players[1].pos = { x: cam.x + 20, y: cam.y + 10 };
+    state.players[1].autoCall = crossCall([2]); // pas le spectateur 0
+    hud.update(state, 0, cam, [], 0);
+    expect(g.calls).toHaveLength(0);
+    expect(images).toHaveLength(0);
+    state.players[1].autoCall = crossCall([0]);
+    hud.update(state, 0, cam, [], 0);
+    expect(g.count('arc')).toBe(0);
+    expect(images).toHaveLength(1);
+    expect(images[0].frame).toBe('ui_medcross');
+  });
+});
+
+describe('croix rouge : dessin de l atlas provisoire (`ui_medcross`)', () => {
+  const atlas = buildAtlasData();
+  const r = atlas.frames['ui_medcross'];
+  const px = (x: number, y: number): [number, number, number, number] => {
+    const i = ((r.y + y) * atlas.width + (r.x + x)) * 4;
+    return [atlas.pixels[i], atlas.pixels[i + 1], atlas.pixels[i + 2], atlas.pixels[i + 3]];
+  };
+
+  it('8×8, AUCUN pixel semi-transparent (alpha 0 ou 255)', () => {
+    expect([r.w, r.h]).toEqual([8, 8]);
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) expect([0, 255], `(${x},${y})`).toContain(px(x, y)[3]);
+  });
+
+  it('une croix médicale : deux barres rouges vif (centre plein, bras sur les 4 côtés), contour sombre, reflet blanc', () => {
+    let red = 0;
+    let dark = 0;
+    let white = 0;
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const [pr, pg, pb, pa] = px(x, y);
+        if (pa === 0) continue;
+        if (pr > 200 && pg < 60 && pb < 70) red++;
+        else if (pr < 40 && pg < 40 && pb < 70) dark++;
+        else if (pr > 240 && pg > 240 && pb > 240) white++;
+      }
+    }
+    expect(red).toBeGreaterThanOrEqual(16); // les barres (2 × 6 − 4 au centre = 20, moins les reflets)
+    expect(dark).toBeGreaterThanOrEqual(14); // le contour
+    expect(white).toBeGreaterThanOrEqual(1);
+    // le centre est rouge ; les 4 coins sont transparents (forme de croix, pas un carré)
+    for (const [x, y] of [[3, 3], [4, 3], [3, 4], [4, 4]]) expect(px(x, y).slice(0, 3), `${x},${y}`).toEqual([0xe8, 0x14, 0x2a]);
+    for (const [x, y] of [[0, 0], [7, 0], [0, 7], [7, 7]]) expect(px(x, y)[3], `coin ${x},${y}`).toBe(0);
+    // bras sur les 4 côtés
+    for (const [x, y] of [[3, 1], [1, 3], [6, 4], [4, 6]]) expect(px(x, y)[3], `bras ${x},${y}`).toBe(255);
   });
 });

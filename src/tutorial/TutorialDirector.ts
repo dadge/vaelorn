@@ -319,10 +319,25 @@ export class TutorialDirector {
       }
       if (def.script && !s.scripted && gateOpen && s.activeMs >= def.script.afterMs) {
         s.scripted = true;
+        for (const q of def.script.equip ?? []) s.pendingScript.push({ k: 'equip', id: q.id, item: { ...q.item } });
+        for (const g of def.script.giveHeart ?? []) s.pendingScript.push({ k: 'giveHeart', id: g.id, kind: g.kind });
         for (const w of def.script.wound ?? []) s.pendingScript.push({ k: 'wound', id: w.id, fraction: w.fraction });
         for (const h of def.script.hearts ?? []) {
           const at = tileCenterPx(h.tile);
           s.pendingScript.push({ k: 'heart', x: at.x, y: at.y, kind: h.kind });
+        }
+        for (const g of def.script.gear ?? []) {
+          const at = tileCenterPx(g.tile);
+          s.pendingScript.push({ k: 'gear', x: at.x, y: at.y, item: { ...g.item } });
+        }
+      }
+    }
+    // cœur redonné (`script.keepHeart`) : le joueur a gaspillé son cœur sur lui-même avant d'avoir soigné le partenaire
+    if (playing && s.scripted && def.script?.keepHeart && !s.pendingScript.some((a) => a.k === 'giveHeart')) {
+      for (const g of def.script.giveHeart ?? []) {
+        const q = state.players[g.id];
+        if (q && q.status === 'alive' && q.heart === undefined && !s.events.some((e) => e.type === 'heartUsed' && e.playerId === g.id && e.targetId !== g.id)) {
+          s.pendingScript.push({ k: 'giveHeart', id: g.id, kind: g.kind });
         }
       }
     }

@@ -299,8 +299,8 @@ export class GameScene extends Phaser.Scene {
     const seed = tut ? TUTORIAL_SEED : demo ? demo.seed : (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
     // Salle de départ : reprise d'une sauvegarde ou dev `?room=N` (honorée par la simulation, voir SimConfig.startRoomIndex).
     const players = setups.slice(0, playerCount);
-    // Appel automatique (objet laissé aux coéquipiers) : partie normale ET tutoriel (il y enseigne « emplacement plein = appel »), pas en démo ; aucun autre effet sur le jeu.
-    // Équipement : actif en partie normale uniquement (la démo et le tutoriel ignorent les objets) ; « Continuer » restitue l'équipement sauvegardé.
+    // Appel automatique (objet laissé aux coéquipiers, échange d'accessoire, croix rouge) : partie normale ET tutoriel (il y enseigne les 4 déclencheurs), pas en démo ; aucun autre effet sur le jeu.
+    // Équipement : actif en partie normale (butin des ennemis compris) et dans le tutoriel (objets POSÉS par script uniquement, aucun tirage) ; inactif en démo ; « Continuer » restitue l'équipement sauvegardé.
     // Emplacement cœur : partie normale et tutoriel (le tutoriel l'enseigne) ; PAS en démo (les pilotes automatiques n'utilisent pas B : ancien comportement, soin au contact) ;
     // « Continuer » restitue aussi le cœur rangé.
     this.sim = createSimulation(
@@ -309,7 +309,7 @@ export class GameScene extends Phaser.Scene {
         players,
         seed,
         startRoomIndex: this.session.startRoomIndex,
-        // gear / loot / autoCall / heartSlot selon le mode (testé : `modeSimFlags`). Tutoriel : aucun butin aléatoire (les cœurs sont posés par le script : l'emplacement est vide à l'arrivée dans la salle du cœur).
+        // gear / gearDrops / loot / autoCall / heartSlot selon le mode (testé : `modeSimFlags`). Tutoriel : aucun butin aléatoire (les cœurs et les objets d'équipement sont posés par le script : l'emplacement est vide à l'arrivée dans la salle du cœur) ; l'équipement y est actif (rangée du HUD, ramassage, échange, appel).
         ...modeSimFlags({ tutorial: !!tut, demo: !!demo }),
         initialGear: tut || demo ? undefined : this.session.startGear,
         initialHearts: tut || demo ? undefined : this.session.startHearts,
@@ -362,7 +362,7 @@ export class GameScene extends Phaser.Scene {
       level,
       layout: this.layout,
       specialHint: (id) => specialHintLabel(inputManager.getAssignments()[id], inputManager.getBindings().special),
-      gear: state.gearEnabled !== false, // démo et tutoriel : pas de rangée d'équipement
+      gear: state.gearEnabled !== false, // rangée d'équipement : partie et tutoriel (équipement actif, sans butin aléatoire) ; pas dans la démo
       heartSlot: state.heartSlot === true, // emplacement cœur (partie et tutoriel, pas la démo)
       heartHint: (id) => specialHintLabel(inputManager.getAssignments()[id], inputManager.getBindings().heart),
     };

@@ -14,14 +14,26 @@ import type { ButtonName, DeviceKind, HudRegionId, ScriptedAction, TutorialView 
 
 /** Durée de vie (ms) des cœurs posés par le tutoriel : longue, pour qu'ils ne disparaissent pas pendant la lecture de la consigne. */
 export const TUTORIAL_HEART_TTL_MS = 10 * 60_000;
+/** Durée de vie (ms) des objets d'équipement posés par le tutoriel : longue, comme les cœurs. */
+export const TUTORIAL_GEAR_TTL_MS = 10 * 60_000;
 
 /**
- * Applique une mise en scène du directeur à la simulation (comme `knockDown`, ENTRE deux pas) : blessure d'un joueur ou cœur posé au sol. Partagée par la scène et le harnais de test.
+ * Applique une mise en scène du directeur à la simulation (comme `knockDown`, ENTRE deux pas) : blessure d'un joueur, cœur posé au sol ou rangé d'office, équipement porté ou posé au sol. Partagée par la scène et le harnais de test.
  * Retourne false si la simulation l'a refusée (hors phase 'playing', joueur déjà plus bas…).
  */
 export function applyScripted(sim: GameSimulation, a: ScriptedAction): boolean {
-  if (a.k === 'wound') return sim.woundPlayer(a.id, a.fraction);
-  return sim.spawnScriptedHeart({ x: a.x, y: a.y }, a.kind, TUTORIAL_HEART_TTL_MS);
+  switch (a.k) {
+    case 'wound':
+      return sim.woundPlayer(a.id, a.fraction);
+    case 'equip':
+      return sim.equipScripted(a.id, a.item);
+    case 'giveHeart':
+      return sim.giveScriptedHeart(a.id, a.kind);
+    case 'gear':
+      return sim.spawnScriptedGear({ x: a.x, y: a.y }, a.item, TUTORIAL_GEAR_TTL_MS);
+    default:
+      return sim.spawnScriptedHeart({ x: a.x, y: a.y }, a.kind, TUTORIAL_HEART_TTL_MS);
+  }
 }
 
 /** Ordre de préférence du partenaire scripté : le premier personnage de la famille différent de celui du joueur. */

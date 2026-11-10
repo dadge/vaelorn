@@ -10,7 +10,7 @@
  *    de l'appelant dans le monde (vus par tous les joueurs dont la vue le contient, l'appelant compris).
  *
  * APPEL AUTOMATIQUE (objet laissé aux coéquipiers, `AutoCallState`) : même indicateur de bord, mais le POINT d'origine est remplacé par un petit SYMBOLE
- * (cœur, demi-cœur ou icône 8×8 de l'objet) sur un disque sombre cerclé de la couleur de l'émetteur ; seuls les destinataires utiles (`AutoCallState.to`) le voient.
+ * (cœur, demi-cœur, icône 8×8 de l'objet ou CROIX ROUGE de la demande de soins : un joueur à 30 % de ses PV max ou moins) sur un disque cerclé de la couleur de l'émetteur (clair pour un cœur / la croix, sombre pour un objet) ; seuls les destinataires utiles (`AutoCallState.to`) le voient.
  * Le symbole est FIXE (aucun clignotement) ; les 3 arcs sont inchangés. Si l'émetteur est VISIBLE dans la vue d'un destinataire, il n'y a pas d'arcs ni d'anneaux (ils seraient
  * vus par TOUTES les caméras, destinataires ou non) : le même symbole, sur son disque, flotte au-dessus de la tête de l'émetteur, dans le HUD de ce seul destinataire
  * (`autoCallOverheadPos`).
@@ -80,6 +80,12 @@ export const CALL_SYMBOL_BACK_ALPHA = 0.8;
 export const CALL_SYMBOL_HEART_BACK_COLOR = 0xe6dcea;
 /** Opacité du disque clair derrière un cœur. */
 export const CALL_SYMBOL_HEART_BACK_ALPHA = 0.92;
+/** Couleur du disque derrière la CROIX ROUGE : blanc cassé (croix médicale : rouge sur blanc), lisible sur tout fond. */
+export const CALL_SYMBOL_CROSS_BACK_COLOR = 0xfaf6f8;
+/** Opacité du disque clair derrière la croix. */
+export const CALL_SYMBOL_CROSS_BACK_ALPHA = 0.95;
+/** Frame d'atlas de la croix rouge de la demande de soins (icône 8×8 : même taille que les cœurs et les icônes d'objet). */
+export const CALL_SYMBOL_CROSS_FRAME = 'ui_medcross';
 /** Distance (px MONDE) entre la position de l'émetteur et le centre du symbole flottant au-dessus de sa tête (émetteur visible dans la vue du destinataire). */
 export const CALL_SYMBOL_OVERHEAD_WORLD = 16;
 /** Largeur (px) des frames d'icône de l'atlas (cœurs de l'interface et icônes d'équipement : 8 px). */
@@ -111,8 +117,9 @@ export function isAutoCallVisibleTo(p: Pick<PlayerState, 'id' | 'status' | 'call
   return p.id !== viewerId && hasAutoCall(p) && !isCallSignalActive(p) && !!p.autoCall && (p.autoCall.to as readonly number[]).includes(viewerId);
 }
 
-/** Frame d'atlas du symbole d'un appel automatique : `ui_heart_full`, `ui_heart_half` ou l'icône 8×8 de l'objet (`gear_icon_*`). */
+/** Frame d'atlas du symbole d'un appel automatique : `ui_heart_full`, `ui_heart_half`, la croix médicale `ui_medcross` ou l'icône 8×8 de l'objet (`gear_icon_*`). */
 export function autoCallSymbolFrame(ac: Pick<AutoCallState, 'icon' | 'item'>): string {
+  if (ac.icon === 'cross') return CALL_SYMBOL_CROSS_FRAME;
   if (ac.icon === 'heart') return 'ui_heart_full';
   if (ac.icon === 'half') return 'ui_heart_half';
   return ac.item ? gearIconFrameOf(ac.item) : 'ui_heart_full';
@@ -126,10 +133,11 @@ export function callSymbolFor(p: Pick<PlayerState, 'id' | 'status' | 'callMs' | 
 }
 
 /**
- * Disque derrière un symbole : couleur et opacité (avant fondu). Cœurs / demi-cœurs (frames `ui_heart_*`) : disque clair ; icônes d'objet : disque sombre
+ * Disque derrière un symbole : couleur et opacité (avant fondu). Cœurs / demi-cœurs (frames `ui_heart_*`) : disque clair ; croix rouge : disque blanc cassé ; icônes d'objet : disque sombre
  * (`darkColor`, la couleur de contour du HUD, fournie par l'appelant).
  */
 export function callSymbolBack(frame: string, darkColor: number): { color: number; alpha: number } {
+  if (frame === CALL_SYMBOL_CROSS_FRAME) return { color: CALL_SYMBOL_CROSS_BACK_COLOR, alpha: CALL_SYMBOL_CROSS_BACK_ALPHA };
   return frame.startsWith('ui_heart') ? { color: CALL_SYMBOL_HEART_BACK_COLOR, alpha: CALL_SYMBOL_HEART_BACK_ALPHA } : { color: darkColor, alpha: CALL_SYMBOL_BACK_ALPHA };
 }
 

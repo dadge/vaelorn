@@ -225,9 +225,9 @@ describe('aimant : pas de « vol » d\'un objet à un allié mieux placé', () =
 });
 
 describe('harnais du tutoriel', () => {
-  it('joue SANS équipement (comme GameScene : gear:false)', () => {
+  it("joue AVEC l'équipement (rangée du HUD, ramassage, échange : objets posés par script) mais SANS butin d'équipement aléatoire (comme GameScene : gear:true, gearDrops:false)", () => {
     const run = new TutorialRun();
-    expect(run.sim.state.gearEnabled).toBe(false);
-    expect(run.sim.state.room.gearBudget ?? 0).toBe(0);
+    expect(run.sim.state.gearEnabled).toBe(true);
+    expect(run.sim.state.gearDropsDisabled).toBe(true);
   });
 });

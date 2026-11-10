@@ -236,12 +236,12 @@ describe('HeartInputGuard : garde PAR joueur', () => {
 
 describe('modeSimFlags : options de simulation selon le mode de la scène', () => {
   it('partie normale : équipement, butin, appel automatique et emplacement cœur actifs', () => {
-    expect(modeSimFlags({ tutorial: false, demo: false })).toEqual({ gear: true, loot: true, autoCall: true, heartSlot: true });
+    expect(modeSimFlags({ tutorial: false, demo: false })).toEqual({ gear: true, gearDrops: true, loot: true, autoCall: true, heartSlot: true });
   });
-  it('tutoriel : emplacement cœur ET appel automatique actifs (il les enseigne), ni équipement ni butin aléatoire', () => {
-    expect(modeSimFlags({ tutorial: true, demo: false })).toEqual({ gear: false, loot: false, autoCall: true, heartSlot: true });
+  it('tutoriel : emplacement cœur, appel automatique ET équipement actifs (il les enseigne ; objets posés par script), ni butin de vie ni butin d équipement aléatoires', () => {
+    expect(modeSimFlags({ tutorial: true, demo: false })).toEqual({ gear: true, gearDrops: false, loot: false, autoCall: true, heartSlot: true });
   });
   it('démo : ancien comportement (les pilotes automatiques n utilisent pas B) : pas d emplacement cœur, d appel automatique ni d équipement', () => {
-    expect(modeSimFlags({ tutorial: false, demo: true })).toEqual({ gear: false, loot: true, autoCall: false, heartSlot: false });
+    expect(modeSimFlags({ tutorial: false, demo: true })).toEqual({ gear: false, gearDrops: false, loot: true, autoCall: false, heartSlot: false });
   });
 });

@@ -467,6 +467,8 @@ export const UI_COLORS = {
   heartEmptyEdge: 0x2a1c34,
   checkGreen: 0x5be37d,
   crossRed: 0xff5a5a,
+  /** Croix MÉDICALE de la demande de soins (appel automatique) : rouge vif, plus saturé que le cœur et la croix « raté » ; opaque. */
+  medCross: 0xe8142a,
   skull: 0xeae6d2,
   skullShade: 0xb8b49c,
   keyGold: 0xf5c53d,

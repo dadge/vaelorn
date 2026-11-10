@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SimEvent, SpecialKind } from '../core/types';
-import { Sfx, sfxForEvent, sfxForSpecial } from './sfx';
+import { Sfx, sfxForEvent, sfxForSpecial, sfxVolume } from './sfx';
 
 const KINDS: SpecialKind[] = ['whirlwind', 'fireNova', 'dash', 'healNova', 'arrowFan', 'quake', 'smash', 'bladeDance'];
 
@@ -39,6 +39,21 @@ describe('sons : appel', () => {
     expect(sfxForEvent({ type: 'autoCallStarted', playerId: 0, icon: 'heart', to: [1] })).toBe('autoCall');
     expect(sfxForEvent({ type: 'autoCallStarted', playerId: 1, icon: 'gear', to: [0, 2] })).toBe('autoCall');
     expect(() => new Sfx().play('autoCall')).not.toThrow();
+  });
+
+  it("la croix rouge (autoCallStarted, icon 'cross') a son propre son « autoCallCross » : distinct de « autoCall » et de « call », discret, jouable sans audio sans lever", () => {
+    expect(sfxForEvent({ type: 'autoCallStarted', playerId: 2, icon: 'cross', to: [0] })).toBe('autoCallCross');
+    for (const icon of ['heart', 'half', 'gear'] as const) expect(sfxForEvent({ type: 'autoCallStarted', playerId: 0, icon, to: [1] })).toBe('autoCall');
+    const s = new Sfx();
+    expect(() => s.play('autoCallCross')).not.toThrow();
+    s.destroy();
+  });
+
+  it("volumes : la croix rouge (urgente mais jamais agressive) reste PLUS DISCRÈTE que l'appel manuel et plus forte que le « tic » d'un objet ; aucun son d'appel automatique ne dépasse l'appel manuel", () => {
+    expect(sfxVolume('autoCallCross')).toBeLessThan(sfxVolume('call'));
+    expect(sfxVolume('autoCallCross')).toBeGreaterThan(sfxVolume('autoCall'));
+    expect(sfxVolume('autoCall')).toBeLessThan(sfxVolume('call'));
+    expect(sfxVolume('autoCallCross')).toBeLessThanOrEqual(0.05);
   });
 
   it('le son « call » peut être joué sans audio disponible (Node) sans lever', () => {

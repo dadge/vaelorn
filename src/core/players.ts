@@ -383,7 +383,10 @@ export function cancelCall(p: PlayerState): void {
 
 // ───────────────────────────── Appel automatique ─────────────────────────────
 
-/** Décrémente les minuteurs de l'appel AUTOMATIQUE (`autoCall.ms`, `autoCallCooldownMs`) ; un minuteur à zéro SUPPRIME son champ (l'état redevient identique à celui d'avant). MUTE `p`. */
+/**
+ * Décrémente les minuteurs de l'appel AUTOMATIQUE (`autoCall.ms`, `autoCallCooldownMs`) ; un minuteur à zéro SUPPRIME son champ (l'état redevient identique à celui d'avant).
+ * Le délai de répétition de la croix rouge (`autoCallCross.ms`) décroît jusqu'à 0 SANS supprimer le champ (sa présence signifie « croix déjà partie », il est supprimé au réarmement). MUTE `p`.
+ */
 export function stepAutoCallTimers(p: PlayerState, dtMs: number): void {
   if (p.autoCall) {
     const ms = stepCallTimer(p.autoCall.ms, dtMs);
@@ -395,6 +398,7 @@ export function stepAutoCallTimers(p: PlayerState, dtMs: number): void {
     if (cd > 0) p.autoCallCooldownMs = cd;
     else delete p.autoCallCooldownMs;
   }
+  if (p.autoCallCross) p.autoCallCross.ms = stepCallTimer(p.autoCallCross.ms, dtMs);
 }
 
 /** Efface le signal d'appel automatique en cours (délai de récupération et mémoire des objets signalés inchangés). MUTE `p`. */
@@ -402,11 +406,12 @@ export function cancelAutoCall(p: PlayerState): void {
   delete p.autoCall;
 }
 
-/** Remet à zéro tout l'appel automatique : signal, délai de récupération, objets signalés (chute, entrée de salle). MUTE `p`. */
+/** Remet à zéro tout l'appel automatique : signal, délai de récupération, objets signalés et suivi de la croix rouge (chute, entrée de salle). MUTE `p`. */
 export function resetAutoCall(p: PlayerState): void {
   delete p.autoCall;
   delete p.autoCallCooldownMs;
   delete p.autoCallSeen;
+  delete p.autoCallCross;
 }
 
 /** Le joueur émet-il un signal d'appel AUTOMATIQUE affichable ? (vivant, `autoCall.ms > 0`) */

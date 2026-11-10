@@ -22,9 +22,9 @@ function walkConditions(c: Condition | undefined, out: Condition[] = []): Condit
 }
 
 describe('étapes du tutoriel : données', () => {
-  it('36 étapes aux ids uniques, regroupées par salle dans l ordre du niveau', () => {
-    expect(TUTORIAL_STEPS.length).toBe(36);
-    expect(new Set(TUTORIAL_STEPS.map((s) => s.id)).size).toBe(36);
+  it('44 étapes aux ids uniques, regroupées par salle dans l ordre du niveau', () => {
+    expect(TUTORIAL_STEPS.length).toBe(44);
+    expect(new Set(TUTORIAL_STEPS.map((s) => s.id)).size).toBe(44);
     const roomOrder = tutorialLevel.rooms.map((r) => r.id);
     let last = -1;
     for (const s of TUTORIAL_STEPS) {
@@ -52,11 +52,11 @@ describe('étapes du tutoriel : données', () => {
 
   it('couvre toutes les mécaniques demandées (relevage, appel, panneaux, objectifs de salle et personnel)', () => {
     const ids = TUTORIAL_STEPS.map((s) => s.id);
-    for (const must of ['move', 'sign', 'roomGoals', 'personalGoal', 'attack', 'special', 'specialRecharge', 'hearts', 'lever', 'plates', 'block', 'keyPick', 'keyDoor', 'refuel', 'lightBrazier', 'revive', 'heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'callReceive', 'callSend', 'wipe', 'finalGoals']) {
+    for (const must of ['move', 'sign', 'roomGoals', 'personalGoal', 'attack', 'special', 'specialRecharge', 'hearts', 'lever', 'plates', 'block', 'keyPick', 'keyDoor', 'refuel', 'lightBrazier', 'revive', 'heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'gearLeft', 'gearSwap', 'crossCall', 'crossWho', 'autoCallRecap1', 'autoCallRecap2', 'callReceive', 'callSend', 'wipe', 'finalGoals']) {
       expect(ids, must).toContain(must);
     }
     const highlights = new Set(TUTORIAL_STEPS.flatMap((s) => s.highlights ?? []));
-    for (const h of ['roomGoals', 'personalGoal', 'hearts', 'heartSlot', 'special', 'keys', 'torch']) expect(highlights.has(h as never), h).toBe(true);
+    for (const h of ['roomGoals', 'personalGoal', 'hearts', 'heartSlot', 'gear', 'special', 'keys', 'torch']) expect(highlights.has(h as never), h).toBe(true);
   });
 
   it('les références (panneaux, mécanismes, zones, objectifs) existent dans la salle de l étape', () => {
@@ -112,7 +112,7 @@ describe('étapes du tutoriel : i18n fr / en', () => {
       'tutorial.card.youDown', 'tutorial.card.reviveInterrupted', 'tutorial.skip.step', 'tutorial.skip.room', 'tutorial.skip.hint',
       'tutorial.quit.hint', 'tutorial.end.title', 'tutorial.end.body', 'tutorial.end.nosave', 'tutorial.end.solo', 'tutorial.end.press',
       'tutorial.end.menu', 'tutorial.key.space', 'tutorial.key.enter', 'tutorial.key.escape', 'menu.tutorial', 'menu.tutorial.hint',
-      ...['roomGoals', 'personalGoal', 'hearts', 'special', 'keys', 'torch', 'prompt', 'sign'].map((x) => `tutorial.legend.${x}`),
+      ...['roomGoals', 'personalGoal', 'hearts', 'heartSlot', 'gear', 'special', 'keys', 'torch', 'prompt', 'sign'].map((x) => `tutorial.legend.${x}`),
       ...BUTTON_NAMES.map((b) => `tutorial.name.${b}`),
     ];
     for (const k of keys) {
@@ -185,5 +185,142 @@ describe('étapes du tutoriel : emplacement cœur (salle t_heart)', () => {
     }
     const full = heartSteps.find((s) => s.id === 'heartFull')!;
     expect(full.partner?.some((op) => op.op === 'walk' && 'pickup' in op.at)).toBe(true);
+  });
+});
+
+// ───────────────────────────── Appels automatiques : objets laissés, échange, croix rouge, récapitulatif ─────────────────────────────
+
+describe('étapes du tutoriel : appels automatiques', () => {
+  const byRoom = (id: string): string[] => TUTORIAL_STEPS.filter((s) => s.room === id).map((s) => s.id);
+  const step = (id: string) => TUTORIAL_STEPS.find((s) => s.id === id)!;
+
+  it('salle t_gear (objet moins puissant, échange d accessoire), salle t_cross (croix rouge), récapitulatif dans le grand couloir, dans cet ordre', () => {
+    expect(byRoom('t_gear')).toEqual(['gearLeft', 'gearSwap', 'exit.gear']);
+    expect(byRoom('t_cross')).toEqual(['crossCall', 'crossWho', 'exit.cross']);
+    expect(byRoom('t_call')).toEqual(['callReceive', 'callSend', 'autoCallRecap1', 'autoCallRecap2', 'exit.call']);
+    const rooms = tutorialLevel.rooms.map((r) => r.id);
+    expect(rooms.indexOf('t_heart')).toBeLessThan(rooms.indexOf('t_gear'));
+    expect(rooms.indexOf('t_gear')).toBeLessThan(rooms.indexOf('t_cross'));
+    expect(rooms.indexOf('t_cross')).toBeLessThan(rooms.indexOf('t_call'));
+  });
+
+  it('les conditions de réussite sont des ACTIONS (l appel part avec le symbole de l objet, le partenaire en profite, l échange est fait, le partenaire est soigné)', () => {
+    const j = (id: string): string => JSON.stringify(step(id).done);
+    expect(j('gearLeft')).toContain('"icon":"gear"');
+    expect(j('gearLeft')).toContain('gearPicked');
+    expect(j('gearSwap')).toContain('gearSwapped');
+    expect(j('gearSwap')).toContain('"icon":"gear"');
+    expect(j('gearSwap')).toContain('gearPicked');
+    expect(j('crossCall')).toContain('"icon":"cross"');
+    expect(j('crossCall')).toContain('heartUsed');
+    expect(j('crossCall')).toContain('"targetId":1');
+  });
+
+  it('mise en scène : le joueur reçoit de quoi REFUSER (protection II contre I) et de quoi ÉCHANGER (accessoire contre un autre) ; le partenaire est blessé SOUS 30 % et le joueur a un cœur rangé', () => {
+    const left = step('gearLeft').script!;
+    expect(left.equip).toEqual([{ id: 0, item: { slot: 'protection', level: 2 } }]);
+    expect(left.gear?.[0].item).toEqual({ slot: 'protection', level: 1 });
+    const swap = step('gearSwap').script!;
+    expect(swap.equip?.[0].item.slot).toBe('accessory');
+    expect(swap.gear?.[0].item.slot).toBe('accessory');
+    expect(swap.gear?.[0].item.accessory).not.toBe(swap.equip?.[0].item.accessory); // une AUTRE sorte : « échange », pas « ignorer »
+    const cross = step('crossCall').script!;
+    expect(cross.giveHeart).toEqual([{ id: 0, kind: 'full' }]);
+    expect(cross.wound?.[0].id).toBe(1);
+    expect(cross.wound?.[0].fraction).toBeLessThan(0.3); // sous le seuil de la croix (30 %)
+    expect(cross.wound?.[0].fraction).toBeGreaterThan(0);
+  });
+
+  it('les objets posés sont sur la rangée 6 (partenaire en ligne droite), dans la salle, sur une case libre ; le partenaire attend l appel puis vient prendre l objet', () => {
+    const room = tutorialLevel.rooms.find((r) => r.id === 't_gear')!;
+    for (const id of ['gearLeft', 'gearSwap']) {
+      for (const g of step(id).script!.gear ?? []) {
+        expect(g.tile[1], id).toBe(6);
+        expect(room.layout[g.tile[1]][g.tile[0]], id).toBe('.');
+      }
+      const ops = step(id).partner!;
+      expect(ops[0]).toMatchObject({ op: 'idle' });
+      expect(JSON.stringify(ops[0])).toContain('autoCallStarted');
+      expect(ops.some((o) => o.op === 'walk' && 'gear' in o.at)).toBe(true);
+    }
+  });
+
+  it('le partenaire de la croix démarre loin du joueur (hors de la vue : la croix apparaît au bord de l écran) et sur la rangée 6', () => {
+    const room = tutorialLevel.rooms.find((r) => r.id === 't_cross')!;
+    const [a, b] = [room.playerSpawns[0], room.playerSpawns[1]];
+    expect(b[1]).toBe(6);
+    expect(b[0] - a[0]).toBeGreaterThan(40); // la vue montre ≈ 26,7 tuiles de large (≈ 32 sur un fond de téléphone large) : le partenaire est nettement hors de la vue, même à 23 tuiles il apparaissait au bord (puce « Passer » par-dessus)
+  });
+
+  it("l'étape heartFull n'est validée / attendue que par l'appel de DEMI-CŒUR du joueur (une croix rouge de sa part, blessé en arrivant, ne compte pas)", () => {
+    const s = step('heartFull');
+    expect(JSON.stringify(s.done)).toContain('"icon":"half"');
+    expect(JSON.stringify(s.partner![0])).toContain('"icon":"half"');
+  });
+
+  it("l'étape crossCall redonne le cœur tant que le partenaire n'est pas soigné (keepHeart) : un B prématuré ne bloque pas", () => {
+    expect(step('crossCall').script?.keepHeart).toBe(true);
+  });
+
+  it('les textes (fr et en) emploient les jetons de bouton attendus : {interact} pour l échange et {heart} pour soigner ; le récapitulatif cite l appel manuel {call}', () => {
+    expect(step('gearSwap').buttons).toContain('interact');
+    expect(fr['tutorial.step.gearSwap']).toContain('{interact}');
+    expect(en['tutorial.step.gearSwap']).toContain('{interact}');
+    expect(step('crossCall').buttons).toContain('heart');
+    expect(fr['tutorial.step.crossCall']).toContain('{heart}');
+    expect(en['tutorial.step.crossCall']).toContain('{heart}');
+    for (const l of [fr, en]) expect(l['tutorial.step.autoCallRecap2']).toContain('{call}');
+  });
+
+  it('RÉCAPITULATIF : toutes les règles de l appel automatique figurent dans le tutoriel (fr et en) — déclencheurs, symbole, destinataires, durée, anti-spam, exceptions', () => {
+    const recap = (l: Record<string, string>): string => `${l['tutorial.step.autoCallRecap1']}\n${l['tutorial.step.autoCallRecap2']}`.toLowerCase();
+    const fr1 = recap(fr);
+    // 4 déclencheurs
+    expect(fr1).toContain('emplacement cœur est plein');
+    expect(fr1).toContain('pas plus puissant'); // un niveau ÉGAL est aussi refusé
+    expect(fr1).toContain('à terre'); // pas de croix à terre
+    expect(fr1).toContain('échanger');
+    expect(fr1).toContain('croix rouge');
+    expect(fr1).toContain('30 %');
+    // symbole à la place du point, qui le voit, durée, ne fige pas / appel manuel, anti-spam, solo, verrou, chute
+    expect(fr1).toContain('symbole');
+    expect(fr1).toContain('point');
+    expect(fr1).toContain('seulement les alliés');
+    expect(fr1).toContain('valentine');
+    expect(fr1).toContain('3 s');
+    expect(fr1).toContain('ne te fige pas');
+    expect(fr1).toContain('appel manuel');
+    expect(fr1).toContain('anti-spam');
+    expect(fr1).toContain('4 s');
+    expect(fr1).toContain('10 s');
+    expect(fr1).toContain('jamais en solo');
+    expect(fr1).toContain('verrouillé');
+    expect(fr1).toContain('chute');
+    const en1 = recap(en);
+    for (const w of ['full', 'no stronger', 'swapped', 'downed', 'red cross', '30%', 'symbol', 'dot', 'only the allies', 'valentine', '3 s', 'does not freeze', 'manual call', 'anti-spam', '4 s', '10 s', 'never in solo', 'locked', 'fall']) {
+      expect(en1, w).toContain(w);
+    }
+  });
+
+  it('chaque page du récapitulatif est une étape `tip` assez longue pour être lue (≥ 12 s)', () => {
+    for (const id of ['autoCallRecap1', 'autoCallRecap2']) {
+      expect(step(id).kind).toBe('tip');
+      expect(step(id).minMs).toBeGreaterThanOrEqual(12_000);
+    }
+  });
+
+  it('débit de lecture : les pages longues (récapitulatif, qui voit la croix) ne se ferment pas plus vite que ≈ 26 caractères / s, dans les deux langues', () => {
+    for (const id of ['autoCallRecap1', 'autoCallRecap2', 'crossWho']) {
+      for (const l of [fr, en]) {
+        const chars = l[`tutorial.step.${id}`].length;
+        expect(chars / (step(id).minMs / 1000), `${id} (${chars} car.)`).toBeLessThanOrEqual(26);
+      }
+    }
+  });
+
+  it("le texte de l'étape crossCall accorde le partenaire avec « {name} » (jamais « sur lui / elle ») et ne dit pas « tomber » (= à terre) pour un partenaire seulement blessé", () => {
+    expect(fr['tutorial.step.crossCall']).not.toMatch(/sur (lui|elle)/);
+    expect(fr['tutorial.step.crossCall']).not.toMatch(/tomb/);
+    expect(fr['tutorial.step.crossCall']).toContain('sur {name}');
   });
 });

@@ -680,7 +680,8 @@ describe('simulation : appel automatique de bout en bout (2 joueurs)', () => {
     s.state.players[2].hp = 10; // seul blessé
     putHeart(s, 100, 100);
     putHeart(s, 300, 100, 'half');
-    const ev = stepN(s, 2).filter((e) => e.type === 'autoCallStarted');
+    // (le joueur 2 à 10 PV est aussi sous le seuil de la croix rouge : cet appel-là est couvert par `autoCallCross.test.ts`)
+    const ev = stepN(s, 2).filter((e) => e.type === 'autoCallStarted' && e.icon !== 'cross');
     expect(ev).toEqual([
       { type: 'autoCallStarted', playerId: 0, icon: 'heart', to: [2] },
       { type: 'autoCallStarted', playerId: 1, icon: 'half', to: [2] },

@@ -1,5 +1,5 @@
 /**
- * Les 36 étapes du tutoriel (DONNÉES). Chaque étape `do` est validée par une ACTION du joueur ; une étape `tip` se ferme seule.
+ * Les 44 étapes du tutoriel (DONNÉES). Chaque étape `do` est validée par une ACTION du joueur ; une étape `tip` se ferme seule.
  * Les textes sont des clés i18n `tutorial.step.<id>` (src/i18n/parts/tutorial.*.json) avec jetons de boutons résolus par appareil
  * (`deviceHints.ts`). Les conditions de réussite sont fondées sur l'ÉTAT quand c'est possible (pas seulement sur un événement) :
  * un joueur qui a déjà accompli l'action avant que l'étape ne s'affiche n'est jamais bloqué.
@@ -7,7 +7,8 @@
  * Couverture : déplacement, panneaux, bloc « Objectifs de la salle » (haut à droite), « Ton objectif » (haut à gauche), attaque,
  * cœurs, spécial et recharge, ennemis restants, levier, plaques, porte, objectif d'équipe, bloc poussable, clé et porte de couleur,
  * torche et braseros (salle sombre), RELEVAGE, EMPLACEMENT CŒUR (ranger, se soigner avec B, soigner un coéquipier blessé, emplacement plein = appel automatique),
- * APPEL (recevoir puis lancer), mort d'équipe, sortie scellée.
+ * APPELS AUTOMATIQUES (cœur qu'on ne peut pas ranger, objet moins puissant laissé, échange d'accessoire, croix rouge = demande de soins, page récapitulative de toutes les règles), APPEL (recevoir puis lancer),
+ * mort d'équipe, sortie scellée.
  */
 import type { PartnerOp, TutorialStepDef } from './types';
 
@@ -272,7 +273,8 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
     kind: 'do',
     minMs: 2500,
     // validée quand l appel automatique est parti ET que le partenaire a pris le cœur resté au sol (il vient de lui-même : l appel a un effet visible)
-    done: { k: 'all', of: [{ k: 'event', type: 'autoCallStarted', by: 0 }, { k: 'event', type: 'heartStored', by: 1 }] },
+    // (l'appel doit porter le symbole du demi-cœur : une croix rouge du joueur, blessé en arrivant, ne doit pas la valider à tort)
+    done: { k: 'all', of: [{ k: 'event', type: 'autoCallStarted', by: 0, match: { icon: 'half' } }, { k: 'event', type: 'heartStored', by: 1 }] },
     noCompact: true,
     markers: [{ tile: [8, 6] }, { tile: [12, 6] }],
     highlights: ['heartSlot'],
@@ -284,7 +286,7 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
       ],
     },
     // l'appel automatique du joueur prévient le partenaire (emplacement libre) : il vient ramasser le cœur resté au sol
-    partner: [{ op: 'idle', until: { k: 'event', type: 'autoCallStarted', by: 0 } }, { op: 'walk', at: { pickup: true } }],
+    partner: [{ op: 'idle', until: { k: 'event', type: 'autoCallStarted', by: 0, match: { icon: 'half' } } }, { op: 'walk', at: { pickup: true } }],
   }),
   step({
     id: 'exit.heart',
@@ -296,7 +298,96 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
     partner: goExit,
   }),
 
-  // ───────── t_call : APPEL (recevoir, puis lancer) ─────────
+  // ───────── t_gear : OBJETS LAISSÉS (équipement moins puissant, échange d'accessoire) : appel automatique avec le symbole de l'objet ─────────
+  step({
+    id: 'gearLeft',
+    room: 't_gear',
+    kind: 'do',
+    minMs: 2500,
+    // validée quand l'appel automatique est parti (symbole de l'objet) ET que le partenaire, qui n'a rien à cet emplacement, est venu prendre l'objet resté au sol
+    done: {
+      k: 'all',
+      of: [
+        { k: 'event', type: 'autoCallStarted', by: 0, match: { icon: 'gear' } },
+        { k: 'event', type: 'gearPicked', by: 1 },
+      ],
+    },
+    noCompact: true,
+    markers: [{ tile: [9, 6] }],
+    highlights: ['gear'],
+    // le joueur porte une protection de niveau II (de quoi refuser une protection de niveau I) ; au sol, une protection de niveau I
+    script: { afterMs: 0, equip: [{ id: 0, item: { slot: 'protection', level: 2 } }], gear: [{ tile: [9, 6], item: { slot: 'protection', level: 1 } }] },
+    partner: [{ op: 'idle', until: { k: 'event', type: 'autoCallStarted', by: 0 } }, { op: 'walk', at: { gear: true } }],
+  }),
+  step({
+    id: 'gearSwap',
+    room: 't_gear',
+    kind: 'do',
+    minMs: 2500,
+    // échange manuel (A) : le nouvel accessoire est équipé, l'ancien est posé aux pieds, l'appel part avec son symbole, le partenaire (sans accessoire) vient le prendre
+    done: {
+      k: 'all',
+      of: [
+        { k: 'event', type: 'gearSwapped', by: 0 },
+        { k: 'event', type: 'autoCallStarted', by: 0, match: { icon: 'gear' } },
+        { k: 'event', type: 'gearPicked', by: 1 },
+      ],
+    },
+    buttons: ['interact'],
+    noCompact: true, // « l'ancien est posé à tes pieds, l'appel part » doit rester lisible
+    markers: [{ tile: [15, 6] }],
+    highlights: ['gear', 'prompt'],
+    script: {
+      afterMs: 0,
+      equip: [{ id: 0, item: { slot: 'accessory', level: 1, accessory: 'lantern' } }],
+      gear: [{ tile: [15, 6], item: { slot: 'accessory', level: 1, accessory: 'magnet' } }],
+    },
+    partner: [{ op: 'idle', until: { k: 'event', type: 'autoCallStarted', by: 0 } }, { op: 'walk', at: { gear: true } }],
+  }),
+  step({
+    id: 'exit.gear',
+    room: 't_gear',
+    kind: 'do',
+    minMs: 0,
+    done: { k: 'event', type: 'roomCleared' },
+    markers: [{ exit: true }],
+    partner: goExit,
+  }),
+
+  // ───────── t_cross : CROIX ROUGE = demande de soins (PV à 30 % ou moins), qui peut soigner ─────────
+  step({
+    id: 'crossCall',
+    room: 't_cross',
+    kind: 'do',
+    minMs: 3000,
+    // validée quand la croix rouge est partie du partenaire (sous 30 % de ses PV, hors de la vue) ET que le joueur l'a soigné avec son cœur rangé
+    done: {
+      k: 'all',
+      of: [
+        { k: 'event', type: 'autoCallStarted', by: 1, match: { icon: 'cross' } },
+        { k: 'event', type: 'heartUsed', by: 0, match: { targetId: 1 } },
+      ],
+    },
+    buttons: ['heart'],
+    noCompact: true, // qui peut soigner et comment doit rester sous les yeux
+    markers: [{ partner: true }],
+    highlights: ['heartSlot'],
+    // un cœur est rangé d'office (de quoi soigner : sans cœur ni Valentine, personne ne verrait la croix) et le partenaire tombe à 20 % de ses PV ; `keepHeart` : un appui prématuré sur B (le joueur est
+    // blessé depuis la salle précédente, loin du partenaire : le cœur serait consommé sur lui) ne bloque pas l'étape, le cœur est redonné tant que le partenaire n'est pas soigné
+    script: { afterMs: 0, giveHeart: [{ id: 0, kind: 'full' }], keepHeart: true, wound: [{ id: 1, fraction: 0.2 }] },
+  }),
+  step({ id: 'crossWho', room: 't_cross', kind: 'tip', minMs: 22000, highlights: ['heartSlot'] }),
+  step({
+    id: 'exit.cross',
+    room: 't_cross',
+    kind: 'do',
+    minMs: 0,
+    done: { k: 'event', type: 'roomCleared' },
+    markers: [{ exit: true }],
+    partner: goExit,
+  }),
+
+  // ───────── t_call : APPEL (recevoir, puis lancer), puis RÉCAPITULATIF des appels automatiques ─────────
   step({
     id: 'callReceive',
     room: 't_call',
@@ -321,6 +412,10 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
       { op: 'walk', at: { human: true } },
     ],
   }),
+  // récapitulatif : TOUTES les règles de l'appel automatique, en deux pages de lecture (les étapes précédentes les ont fait vivre une à une)
+  // (durées de lecture ≈ 20 caractères / s : le texte est long, mieux vaut lentement que trop vite)
+  step({ id: 'autoCallRecap1', room: 't_call', kind: 'tip', minMs: 22000 }),
+  step({ id: 'autoCallRecap2', room: 't_call', kind: 'tip', minMs: 30000 }),
   step({
     id: 'exit.call',
     room: 't_call',

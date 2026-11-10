@@ -932,6 +932,9 @@ export class PlayerHud {
       const bg = this.heartSlotBg;
       out.heartSlot = box(bg.x - 3, bg.y - 3, this.heartSlotHint.x + this.heartSlotHint.width + 3, bg.y + bg.height + 3);
     }
+    const g0 = this.gearBgs[0];
+    const gN = this.gearBgs[this.gearBgs.length - 1];
+    if (g0 && gN) out.gear = box(g0.x - 3, g0.y - 3, gN.x + gN.width + 3, gN.y + gN.height + 3); // rangée d'équipement (absente en démo : aucune case créée)
     const k0 = this.keyIcons[0];
     const kN = this.keyIcons[this.keyIcons.length - 1];
     if (k0 && kN) out.keys = box(k0.x - 3, k0.y - 3, kN.x + kN.displayWidth + 3, k0.y + k0.displayHeight + 3);

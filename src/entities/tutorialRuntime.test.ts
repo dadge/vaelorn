@@ -4,7 +4,7 @@ import { createSimulation } from '../core/simulation';
 import type { TickInputs } from '../core/types';
 import { VIRTUAL_PAD_INDEX } from '../input/VirtualPad';
 import { TUTORIAL_LEVEL_ID, TUTORIAL_SEED, tutorialLevel } from '../levels/tutorial';
-import { PARTNER_PREFERENCE, TUTORIAL_HEART_TTL_MS, TutorialRuntime, applyScripted, pickPartnerCharacter, tutorialPlayers } from './tutorialRuntime';
+import { PARTNER_PREFERENCE, TUTORIAL_GEAR_TTL_MS, TUTORIAL_HEART_TTL_MS, TutorialRuntime, applyScripted, pickPartnerCharacter, tutorialPlayers } from './tutorialRuntime';
 
 describe('partenaire et joueurs simulés', () => {
   it('le partenaire est le premier personnage de la famille différent du joueur', () => {
@@ -101,5 +101,40 @@ describe('applyScripted : mise en scène du soin', () => {
     const pk = sim.state.room.pickups?.[0];
     expect(pk?.kind).toBe('full');
     expect(pk?.ttlMs).toBeGreaterThan(TUTORIAL_HEART_TTL_MS - 200);
+  });
+});
+
+describe('applyScripted : mise en scène de l équipement et du cœur rangé', () => {
+  const makeSim = () =>
+    createSimulation({ levelId: TUTORIAL_LEVEL_ID, players: tutorialPlayers(undefined), seed: TUTORIAL_SEED, startRoomIndex: 6, gear: true, gearDrops: false, heartSlot: true, loot: false }, tutorialLevel);
+
+  it('équiper le joueur, poser un objet au sol (durée de vie longue), ranger un cœur d office ; refus si invalide', () => {
+    const sim = makeSim();
+    sim.step(SIM_STEP_MS, {});
+    expect(applyScripted(sim, { k: 'equip', id: 0, item: { slot: 'protection', level: 2 } })).toBe(true);
+    expect(sim.state.players[0].loadout.protection).toBe(2);
+    expect(applyScripted(sim, { k: 'gear', x: 9.5 * 16, y: 6.5 * 16, item: { slot: 'protection', level: 1 } })).toBe(true);
+    sim.step(SIM_STEP_MS, {});
+    const d = sim.state.room.gearDrops?.[0];
+    expect(d?.item).toEqual({ slot: 'protection', level: 1 });
+    expect(d?.ttlMs).toBeGreaterThan(TUTORIAL_GEAR_TTL_MS - 200);
+    expect(applyScripted(sim, { k: 'giveHeart', id: 0, kind: 'full' })).toBe(true);
+    expect(sim.state.players[0].heart).toBe('full');
+    expect(applyScripted(sim, { k: 'giveHeart', id: 0, kind: 'half' })).toBe(false); // jamais de remplacement
+    expect(applyScripted(sim, { k: 'gear', x: 100, y: 100, item: { slot: 'accessory', level: 1 } })).toBe(false); // accessoire sans sorte
+    expect(applyScripted(sim, { k: 'equip', id: 9 as never, item: { slot: 'boots', level: 1 } })).toBe(false); // joueur inconnu
+  });
+
+  it('le directeur transmet les nouvelles mises en scène dans l ordre : équiper, ranger un cœur, blesser, cœurs au sol, objets au sol', () => {
+    const rt = new TutorialRuntime(tutorialLevel, { startRoomIndex: 6 });
+    const sim = makeSim();
+    // première étape de la salle t_gear (gearLeft) : équipement du joueur, objet posé au sol
+    const events = sim.step(SIM_STEP_MS, rt.decorate({}, sim.state));
+    rt.observe(events, sim.state, []);
+    const actions = rt.takeScripted();
+    expect(actions.map((a) => a.k)).toEqual(['equip', 'gear']);
+    expect(actions[0]).toMatchObject({ k: 'equip', id: 0, item: { slot: 'protection', level: 2 } });
+    for (const a of actions) expect(applyScripted(sim, a)).toBe(true);
+    expect(rt.takeScripted()).toEqual([]); // une seule fois par étape
   });
 });

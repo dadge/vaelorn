@@ -82,6 +82,19 @@ export function resolveTarget(target: Target, room: RoomDef, state: GameState): 
     const r = room.exit.rect;
     return { x: (r.x + r.w / 2) * TILE, y: (r.y + r.h / 2) * TILE };
   }
+  if ('gear' in target) {
+    const me = state.players[PARTNER_ID];
+    let best: Vec2 | null = null;
+    let bestD = Infinity;
+    for (const d of state.room.gearDrops ?? []) {
+      const dd = me ? Math.hypot(d.pos.x - me.pos.x, d.pos.y - me.pos.y) : 0;
+      if (dd < bestD) {
+        bestD = dd;
+        best = { x: d.pos.x, y: d.pos.y };
+      }
+    }
+    return best;
+  }
   if ('pickup' in target) {
     const me = state.players[PARTNER_ID];
     let best: Vec2 | null = null;
@@ -100,7 +113,7 @@ export function resolveTarget(target: Target, room: RoomDef, state: GameState): 
 
 /** Rayon d'arrivée (px) pour une cible. */
 export function arrivalRadius(target: Target): number {
-  if ('tile' in target || 'spawn' in target || 'pickup' in target) return ARRIVE_TILE_PX;
+  if ('tile' in target || 'spawn' in target || 'pickup' in target || 'gear' in target) return ARRIVE_TILE_PX;
   if ('exit' in target) return ARRIVE_EXIT_PX;
   if ('human' in target) return ARRIVE_HUMAN_PX;
   return ARRIVE_MECH_PX;

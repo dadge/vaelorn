@@ -147,7 +147,7 @@ export function requiredFrameSpecs(): FrameSpec[] {
   for (let i = 0; i < 3; i++) add(`fx_hit_${i}`);
   for (let i = 0; i < 4; i++) add(`fx_revive_${i}`);
   add('fx_marker', 8);
-  for (const n of ['heart_full', 'heart_half', 'heart_empty', 'check', 'cross', 'down']) add(`ui_${n}`, 8);
+  for (const n of ['heart_full', 'heart_half', 'heart_empty', 'check', 'cross', 'medcross', 'down']) add(`ui_${n}`, 8);
   for (let i = 0; i < 4; i++) add(`ui_key_${i}`, 8);
   return out;
 }

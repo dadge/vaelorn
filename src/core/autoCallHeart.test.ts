@@ -46,8 +46,8 @@ describe('règle de l emplacement cœur : appel quand l emplacement est PLEIN', 
   it('emplacement plein ET blessé : l appel part quand même (les PV ne comptent plus) ; l allié blessé mais à l emplacement plein n est pas destinataire', () => {
     const [a, b, c] = team(3);
     a.heart = 'half';
-    a.hp = 5; // blessé : sous l ancienne règle il aurait consommé le cœur, aucun appel
-    b.hp = 5; // blessé mais emplacement plein : ne peut pas le ranger
+    a.hp = a.maxHp / 2; // blessé (au-dessus du seuil de la croix rouge) : sous l ancienne règle il aurait consommé le cœur, aucun appel
+    b.hp = b.maxHp / 2; // blessé mais emplacement plein : ne peut pas le ranger
     b.heart = 'full';
     const ev = calls(slot([a, b, c], [heart(a.pos.x, a.pos.y)]));
     expect(ev).toHaveLength(1);

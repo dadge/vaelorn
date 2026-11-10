@@ -62,7 +62,7 @@ describe('evalCondition sur un état réel', () => {
   });
 
   it('near / far : distance joueur ↔ partenaire (en tuiles)', () => {
-    const run = new TutorialRun({ startRoomIndex: 6 }); // t_call : 47 tuiles d écart
+    const run = new TutorialRun({ startRoomIndex: 8 }); // t_call : 47 tuiles d écart
     run.tick();
     expect(humanPartnerDistancePx(run.state) / 16).toBeGreaterThan(40);
     expect(evalCondition({ k: 'far', tiles: 16 }, ctxOf(run))).toBe(true);

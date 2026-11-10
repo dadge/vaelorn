@@ -336,8 +336,11 @@ export interface PlayerLoadout extends PlayerGear {
   ringKills?: number;
 }
 
-/** Symbole d'un appel AUTOMATIQUE : cœur entier, demi-cœur, ou objet d'équipement (icône 8×8 de l'objet, voir `AutoCallState.item`). */
-export type AutoCallIcon = 'heart' | 'half' | 'gear';
+/**
+ * Symbole d'un appel AUTOMATIQUE : cœur entier, demi-cœur, objet d'équipement (icône 8×8 de l'objet, voir `AutoCallState.item`) ou CROIX ROUGE (demande de soins : le joueur est à 30 % de ses PV max ou moins,
+ * voir `CROSS_CALL_THRESHOLD`).
+ */
+export type AutoCallIcon = 'heart' | 'half' | 'gear' | 'cross';
 
 /**
  * Signal d'APPEL AUTOMATIQUE d'un joueur : il vient de passer sur un objet au sol qu'il ne prend pas (cœur alors qu'il est plein, objet d'équipement
@@ -349,7 +352,7 @@ export interface AutoCallState {
   icon: AutoCallIcon;
   /** Pour `icon === 'gear'` : l'objet (emplacement, niveau, sorte d'accessoire) dont on affiche l'icône ; absent pour un cœur. */
   item?: GearItem;
-  /** Référence de l'objet au sol : 'p<id>' (nourriture) ou 'g<id>' (équipement). Le signal s'arrête quand l'objet disparaît (ramassé, périmé). */
+  /** Référence de l'objet au sol : 'p<id>' (nourriture) ou 'g<id>' (équipement) ; 'x' pour la croix rouge (aucun objet). Le signal d'un objet s'arrête quand l'objet disparaît (ramassé, périmé). */
   ref: string;
   /** Durée restante du signal (ms) : `AUTO_CALL_DURATION_MS` au déclenchement, 0 = terminé (le champ est alors supprimé). */
   ms: number;
@@ -414,6 +417,11 @@ export interface PlayerState {
   autoCallCooldownMs?: number;
   /** Objets au sol (références 'p<id>' / 'g<id>') déjà signalés par ce joueur et dont il n'est pas encore sorti du rayon : un seul appel par couple (joueur, objet). Absent = aucun. */
   autoCallSeen?: string[];
+  /**
+   * Suivi de la CROIX ROUGE (demande de soins, `autoCall.ts`) : présent = la croix est déjà partie pour ce joueur depuis qu'il est tombé à 30 % de ses PV max ou moins (désarmée) ; `ms` = temps restant avant sa prochaine
+   * RÉPÉTITION (≥ 0 ; la croix ne repart que si ce délai est écoulé ET que le joueur est toujours à 30 % ou moins). Supprimé quand les PV remontent à 60 % ou plus et à chaque entrée de salle. Absent = armée.
+   */
+  autoCallCross?: { ms: number };
   /**
    * EMPLACEMENT CŒUR (`heartSlot.ts`, option `SimConfig.heartSlot`) : le cœur (10 PV) ou demi-cœur (5 PV) rangé, utilisé volontairement avec le bouton B. Un seul objet, jamais cumulé.
    * Champ OPTIONNEL : absent = emplacement vide, donc un état sans cœur rangé (ou sans l'option) est identique à celui d'avant l'ajout. Perdu à la chute (il tombe alors au sol).
@@ -988,6 +996,11 @@ export interface GameState {
    */
   autoCallDisabled?: boolean;
   /**
+   * Butin d'équipement ALÉATOIRE désactivé ? (`SimConfig.gearDrops === false` : tutoriel) : les ennemis ne laissent ni objet d'équipement ni bonus temporaire (aucun tirage du flux `gearRngState`), mais l'équipement
+   * (objets posés par script, ramassage, échange, appel automatique) fonctionne. Champ posé UNIQUEMENT quand il vaut true : absent = butin actif, donc un état de partie normale reste identique à celui d'avant.
+   */
+  gearDropsDisabled?: boolean;
+  /**
    * Emplacement cœur actif ? (`SimConfig.heartSlot === true`). Champ posé UNIQUEMENT quand il vaut true : absent = ancien comportement exact (cœur consommé au contact, cristal au
    * contact, aucun bouton B), donc un état sans l'option est identique à celui d'avant son ajout.
    */
@@ -1088,8 +1101,13 @@ export interface SimConfig {
    */
   gear?: boolean;
   /**
-   * Appel AUTOMATIQUE actif (défaut true) : un joueur qui passe sur un objet qu'il ne prend pas (cœur alors qu'il est plein, objet d'équipement pas meilleur que le sien)
-   * prévient ses coéquipiers pour qui il serait utile. false = désactivé (démo, tutoriel, bots). Purement informatif : n'a AUCUN effet sur le gameplay ni sur les flux aléatoires.
+   * Butin d'équipement ALÉATOIRE actif (défaut true ; sans effet si `gear` est faux) : false = les ennemis ne laissent ni objet ni bonus temporaire (le tutoriel : l'équipement y est posé par script, aucun tirage parasite).
+   * Les objets posés (`spawnScriptedGear`), le ramassage, l'échange et l'appel automatique fonctionnent normalement.
+   */
+  gearDrops?: boolean;
+  /**
+   * Appel AUTOMATIQUE actif (défaut true) : un joueur qui passe sur un objet qu'il ne prend pas (cœur alors qu'il est plein, objet d'équipement pas meilleur que le sien), qui échange un accessoire (l'ancien est signalé)
+   * ou qui tombe à 30 % de ses PV max (croix rouge) prévient ses coéquipiers pour qui c'est utile. false = désactivé (démo, bots). Purement informatif : n'a AUCUN effet sur le gameplay ni sur les flux aléatoires.
    */
   autoCall?: boolean;
   /**

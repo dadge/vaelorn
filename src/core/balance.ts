@@ -37,6 +37,7 @@
  *  [B28] AUTO_CALL_* ............... appel AUTOMATIQUE (objet laissé aux coéquipiers) : durée du signal (= celle de l'appel manuel, 3 s), délai de récupération
  *        propre au joueur (4 s, distinct de celui de l'appel manuel) et marge de ré-armement par couple (joueur, objet au sol)
  *  [B29] HEART_HEAL_RADIUS ......... EMPLACEMENT CŒUR : rayon de contact (px) pour soigner un coéquipier blessé avec B (= portée du relevage, `REVIVE_RANGE`)
+ *  [B30] CROSS_CALL_* .............. CROIX ROUGE (demande de soins, appel automatique) : seuil 30 % des PV max, réarmement à 60 %, répétition toutes les 10 s
  *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
@@ -305,6 +306,19 @@ export const AUTO_CALL_COOLDOWN_MS = 4_000;
  * être sorti du rayon de contact + cette marge puis y être revenu (pas de va-et-vient au bord du rayon).
  */
 export const AUTO_CALL_REARM_MARGIN = 4;
+
+/**
+ * [B30] CROIX ROUGE (demande de soins) : fraction des PV max à laquelle (ou en dessous de laquelle) un joueur VIVANT demande des soins : une croix rouge remplace le point de son indicateur d'appel
+ * pour les alliés qui peuvent réellement le soigner (emplacement cœur plein, ou Valentine). 0,30 = 30 % des PV max.
+ */
+export const CROSS_CALL_THRESHOLD = 0.3;
+/**
+ * [B30] Fraction des PV max à partir de laquelle la croix est RÉARMÉE (le joueur a été soigné) : tant que les PV restent sous ce seuil depuis le premier déclenchement, la croix ne repart que par la
+ * répétition (`CROSS_CALL_REPEAT_MS`). Réarmée aussi à l'entrée d'une nouvelle salle. 0,60 = 60 % des PV max.
+ */
+export const CROSS_CALL_REARM_FRACTION = 0.6;
+/** [B30] Répétition (ms) de la croix tant que le joueur reste à CROSS_CALL_THRESHOLD ou moins : un nouvel appel au plus toutes les 10 s (signal de 3 s allumé, 7 s éteint). Propre à la croix : sans lien avec `AUTO_CALL_COOLDOWN_MS`. */
+export const CROSS_CALL_REPEAT_MS = 10_000;
 
 /**
  * [B29] EMPLACEMENT CŒUR : rayon de contact (px, centre à centre) dans lequel un joueur qui appuie sur B soigne un coéquipier VIVANT et BLESSÉ avec le cœur rangé : la portée du relevage

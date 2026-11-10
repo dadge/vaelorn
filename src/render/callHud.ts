@@ -4,8 +4,8 @@
  * Phaser que par TYPE (`import type`) et ne décide d'aucune règle de jeu.
  *
  *  - `CallEdgeHud` : un par joueur (dans son HUD) ; dessine, au bord de SA vue, un point + 3 arcs concentriques (vers l'intérieur) par appelant HORS de
- *    sa vue. Pour un appel AUTOMATIQUE (objet laissé aux coéquipiers) le point est remplacé par un petit symbole (cœur / demi-cœur / icône de l'objet :
- *    image d'atlas, créée à la demande) sur un disque (clair pour un cœur, sombre pour un objet) cerclé de la couleur de l'émetteur. Un émetteur VISIBLE dans la vue (appel automatique seulement) n'a ni arcs ni anneaux : son symbole flotte au-dessus de sa tête, dans ce seul HUD (donc filtré par destinataire). Un seul objet `Graphics` réutilisé : il n'est redessiné que tant qu'un appel est affichable (puis vidé une fois).
+ *    sa vue. Pour un appel AUTOMATIQUE (objet laissé aux coéquipiers) le point est remplacé par un petit symbole (cœur / demi-cœur / icône de l'objet / croix rouge de la demande de soins :
+ *    image d'atlas, créée à la demande) sur un disque (clair pour un cœur, blanc cassé pour la croix, sombre pour un objet) cerclé de la couleur de l'émetteur. Un émetteur VISIBLE dans la vue (appel automatique seulement) n'a ni arcs ni anneaux : son symbole flotte au-dessus de sa tête, dans ce seul HUD (donc filtré par destinataire). Un seul objet `Graphics` réutilisé : il n'est redessiné que tant qu'un appel est affichable (puis vidé une fois).
  *  - `CallWorldFx` : un pour la scène ; dessine les anneaux d'onde autour de chaque appelant dans le monde (vus par toutes les
  *    caméras qui contiennent l'appelant, l'appelant compris).
  * Aucune allocation par frame : tableaux et points sont préalloués.

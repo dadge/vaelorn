@@ -5,7 +5,7 @@
  * `src/tutorial/`). Ce niveau n'est JAMAIS dans `LEVELS` (src/levels/index.ts) : il n'apparaît ni dans la campagne, ni dans
  * le menu « niveau de départ », ni dans les sauvegardes. Il est quand même validé par `validateLevel` (tests).
  *
- * Une salle = un chapitre (8 salles). Contraintes de conception :
+ * Une salle = un chapitre (10 salles). Contraintes de conception :
  *  - `playerSpawns[0]` = le joueur, `playerSpawns[1]` = le partenaire scripté (les deux autres servent de bourrage : la
  *    validation exige 4 spawns reliés) ;
  *  - toutes les cibles du partenaire sont sur la RANGÉE 6 (centre des passages de 5 tuiles, rangées 4..8) : il avance en
@@ -204,10 +204,41 @@ const heart: RoomDef = {
   exit: { rect: EXIT, requires: [] },
 };
 
-// ───────────────────────────── Salle 7 : l'appel (grande salle : le partenaire est hors de la vue) ─────────────────────────────
+// ───────────────────────────── Salle 7 : l'armurerie (objet laissé car moins puissant, échange d'accessoire : appel automatique) ─────────────────────────────
+
+const gear: RoomDef = {
+  id: 't_gear',
+  nameKey: 'room.tutorial.t_gear.name',
+  theme: 'crypt',
+  layout: hall(W, H, [], [[14, 2], [14, 9], [22, 2], [22, 9]]),
+  // le partenaire attend sur la rangée 6 (x = 18), sans équipement : les objets sont posés et l'équipement du joueur donné par le script de l'étape (voir `TutorialStepDef.script`)
+  playerSpawns: [[3, 5], [18, 6], [3, 7], [4, 7]],
+  enemies: [],
+  mechanisms: [decorBrazier([27, 2])],
+  decor: wallTorches([6, 18, 30]),
+  exit: { rect: EXIT, requires: [] },
+};
+
+// ───────────────────────────── Salle 8 : le poste de soins (croix rouge : demande de soins du partenaire sous 30 % de ses PV) ─────────────────────────────
 
 const callPillars: TileXY[] = [];
 for (let x = 8; x <= 56; x += 8) callPillars.push([x, 2], [x, 10]);
+
+const cross: RoomDef = {
+  id: 't_cross',
+  nameKey: 'room.tutorial.t_cross.name',
+  theme: 'crypt',
+  layout: hall(64, 13, [], callPillars),
+  // grande salle (comme t_call) : le partenaire est blessé à 47 tuiles du joueur, HORS de la vue (la vue montre ≈ 26,7 tuiles de large) : la croix remplace son point au bord de l'écran, sans que la puce
+  // « Passer » ni les boutons tactiles ne la masquent
+  playerSpawns: [[3, 6], [50, 6], [3, 8], [4, 9]],
+  enemies: [],
+  mechanisms: [decorBrazier([30, 3])],
+  decor: wallTorches([10, 30, 50]),
+  exit: { rect: { x: 61, y: 5, w: 2, h: 4 }, requires: [] },
+};
+
+// ───────────────────────────── Salle 9 : l'appel (grande salle : le partenaire est hors de la vue) ─────────────────────────────
 
 const call: RoomDef = {
   id: 't_call',
@@ -222,7 +253,7 @@ const call: RoomDef = {
   exit: { rect: { x: 61, y: 5, w: 2, h: 4 }, requires: [] },
 };
 
-// ───────────────────────────── Salle 8 : le sceau (mort d'équipe, objectifs, sortie finale) ─────────────────────────────
+// ───────────────────────────── Salle 10 : le sceau (mort d'équipe, objectifs, sortie finale) ─────────────────────────────
 
 const seal: RoomDef = {
   id: 't_seal',
@@ -245,11 +276,11 @@ export const tutorialLevel: LevelDef = {
   id: TUTORIAL_LEVEL_ID,
   nameKey: 'level.tutorial.name',
   theme: 'crypt',
-  estimatedMinutes: 5,
+  estimatedMinutes: 6,
   // texte jamais joué (le tutoriel n'a pas de dialogue) mais exigé par la validation
   intro: [{ speaker: 'aldric', textKey: 'level.tutorial.intro.1' }],
   outro: [{ speaker: 'aldric', textKey: 'level.tutorial.outro.1' }],
-  rooms: [yard, workshop, vault, dark, revive, heart, call, seal],
+  rooms: [yard, workshop, vault, dark, revive, heart, gear, cross, call, seal],
   objectives: [
     { id: 'o_kills', slot: 0, roomId: 't_yard', kind: 'kills', count: 2, labelKey: 'objective.tutorial.o_kills' },
     { id: 'o_lever', slot: 1, roomId: 't_workshop', kind: 'mechanism', mechanismId: 'lv1', labelKey: 'objective.tutorial.o_lever' },

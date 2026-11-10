@@ -1,5 +1,5 @@
 /**
- * Icônes d'interface 8×8 : cœurs (plein / demi / vide), coche, croix, crâne « à terre », étoile de l'attaque spéciale (`ui_special`).
+ * Icônes d'interface 8×8 : cœurs (plein / demi / vide), coche, croix, croix médicale rouge (`ui_medcross`, demande de soins), crâne « à terre », étoile de l'attaque spéciale (`ui_special`).
  * (Les icônes de clé `ui_key_<n>` sont produites par mechanisms.ts : buildKeyIcons.)
  */
 import { OUTLINE, UI_COLORS as U } from '../palettes';
@@ -34,6 +34,18 @@ const CROSS = [
   '.ogooog.',
   'ogo..ogo',
   'oo....oo',
+];
+
+/** Croix MÉDICALE rouge 8×8 (deux barres), contour sombre et reflet blanc : symbole de la demande de soins (appel automatique `cross`), lisible sur disque clair comme sur tout fond. Aucun pixel semi-transparent. */
+const MEDCROSS = [
+  '..oooo..',
+  '..oWRo..',
+  'oooRRooo',
+  'oWRRRRRo',
+  'oRRRRRRo',
+  'oooRRooo',
+  '..oRRo..',
+  '..oooo..',
 ];
 
 const SKULL = [
@@ -91,6 +103,7 @@ export function buildUiFrames(): Record<string, Bitmap> {
     ui_heart_empty: pad(heart('empty')),
     ui_check: pad(Bitmap.fromRows(CHECK, { o: OUTLINE, g: U.checkGreen })),
     ui_cross: pad(Bitmap.fromRows(CROSS, { o: OUTLINE, g: U.crossRed })),
+    ui_medcross: pad(Bitmap.fromRows(MEDCROSS, { o: OUTLINE, W: U.white, R: U.medCross })),
     ui_down: pad(Bitmap.fromRows(SKULL, { o: OUTLINE, b: U.skull, s: U.skullShade })),
     ui_special: pad(Bitmap.fromRows(SPECIAL, { o: OUTLINE, W: U.white, g: U.keyGold, G: U.keyShade })),
   };

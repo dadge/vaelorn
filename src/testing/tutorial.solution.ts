@@ -12,7 +12,7 @@ import { applyScripted } from '../entities/tutorialRuntime';
 import { TutorialDirector } from '../tutorial/TutorialDirector';
 import type { HudRegionId } from '../tutorial/types';
 
-export const ALL_REGIONS: readonly HudRegionId[] = ['roomGoals', 'personalGoal', 'hearts', 'special', 'keys', 'torch', 'prompt', 'sign'];
+export const ALL_REGIONS: readonly HudRegionId[] = ['roomGoals', 'personalGoal', 'hearts', 'gear', 'special', 'keys', 'torch', 'prompt', 'sign'];
 
 const px = (tx: number, ty: number): Vec2 => ({ x: (tx + 0.5) * 16, y: (ty + 0.5) * 16 });
 
@@ -34,6 +34,8 @@ export interface TutorialRunOptions {
   skipAll?: boolean;
   /** Mise à terre du joueur (mort d'équipe réelle) : à ce tick dans la salle 0. */
   dieAtMs?: number;
+  /** Stratégie 'idle' : appuie sur B (soin, 2 pas) toutes les `pressHeartEveryMs` ms (appui prématuré, loin du partenaire). */
+  pressHeartEveryMs?: number;
 }
 
 /** Exécution headless d'un tutoriel. */
@@ -61,10 +63,11 @@ export class TutorialRun {
         ],
         seed: opts.seed ?? TUTORIAL_SEED,
         startRoomIndex: opts.startRoomIndex,
-        // comme GameScene : le tutoriel ne produit ni n'accepte d'objets d'équipement ni de butin aléatoire (les cœurs sont posés par le script)
-        gear: false,
+        // comme GameScene (`modeSimFlags`) : l'équipement est actif (rangée du HUD, ramassage, échange) mais AUCUN butin aléatoire, de vie ou d'équipement (les cœurs et objets sont posés par le script)
+        gear: true,
+        gearDrops: false,
         loot: false,
-        autoCall: true, // l'appel automatique y est actif : « emplacement plein = appel automatique avec le symbole du cœur »
+        autoCall: true, // l'appel automatique y est actif : cœur, objet moins puissant, échange d'accessoire, croix rouge
         heartSlot: true, // emplacement cœur : ranger, B sur soi, B sur un coéquipier blessé
       },
       tutorialLevel,
@@ -174,7 +177,12 @@ export class TutorialRun {
     const me = state.players[0];
     if (me.status !== 'alive') return idleFrame();
     const strat = this.opts.strategy ?? 'solver';
-    if (strat === 'idle') return idleFrame();
+    if (strat === 'idle') {
+      const f = idleFrame();
+      const every = this.opts.pressHeartEveryMs;
+      if (every !== undefined && every > 0) f.heart = Math.floor(state.timeMs / SIM_STEP_MS) % Math.max(3, Math.round(every / SIM_STEP_MS)) < 2;
+      return f;
+    }
     const pos = me.pos;
     const room = tutorialLevel.rooms[state.roomIndex];
     if (strat !== 'solver') return this.combatOnly(strat, state, pos);
@@ -274,6 +282,30 @@ export class TutorialRun {
         const target = state.room.pickups?.[0];
         return target ? this.walk(pos, target.pos, 2).f : idleFrame();
       }
+      case 'gearLeft': {
+        // marche sur l'objet moins puissant posé au sol : il n'est pas pris, l'appel part, le partenaire vient le prendre (l'objet disparaît)
+        const drop = state.room.gearDrops?.[0];
+        return drop ? this.walk(pos, drop.pos, 2).f : idleFrame();
+      }
+      case 'gearSwap': {
+        // se place sur l'accessoire d'une autre sorte posé au sol puis appuie sur A (l'ancien, verrouillé pour lui, est repris par le partenaire)
+        const drop = state.room.gearDrops?.find((d) => d.item.slot === 'accessory' && d.lockedFor === null);
+        if (!drop) return idleFrame();
+        const w = this.walk(pos, drop.pos, 2);
+        return w.arrived ? pulseInteract(w.f) : w.f;
+      }
+      case 'crossCall': {
+        // le partenaire est tombé à 20 % de ses PV : se place SUR lui et appuie sur B (cœur rangé d'office)
+        const partner = state.players[1];
+        const w = this.walk(pos, partner.pos, 6);
+        if (!w.arrived) return w.f;
+        this.pulse++;
+        return { ...idleFrame(), heart: this.pulse % 6 < 3 };
+      }
+      case 'crossWho':
+      case 'autoCallRecap1':
+      case 'autoCallRecap2':
+        return idleFrame();
       case 'callReceive':
         return this.walk(pos, state.players[1].pos, 30).f;
       case 'callSend': {

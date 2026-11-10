@@ -9,6 +9,7 @@ import { LEVELS } from '../levels';
 import { SIM_STEP_MS } from '../core/constants';
 import { TUTORIAL_STEPS } from '../tutorial/steps';
 import { tutorialLevel } from '../levels/tutorial';
+import type { GearItem } from '../core/types';
 import { TutorialRun, type HumanStrategy } from './tutorial.solution';
 
 const MAX_MS = 10 * 60_000;
@@ -29,7 +30,7 @@ describe('tutoriel : terminable de bout en bout', () => {
     expect(run.skips).toBe(0);
     expect(run.state.objectives.every((o) => o.done)).toBe(true);
     expect(run.state.clearedRooms).toEqual(tutorialLevel.rooms.map((r) => r.id));
-    console.info(`[tutoriel] terminé en ${(ms / 1000).toFixed(0)} s simulées`);
+    console.info(`[tutoriel] ${TUTORIAL_STEPS.length} étapes, terminé en ${(ms / 1000).toFixed(0)} s simulées`);
   }, T);
 
   it('personnage différent (partenaire choisi en conséquence) : terminé aussi', () => {
@@ -183,5 +184,122 @@ describe('tutoriel : emplacement cœur', () => {
       last = run.state.players[0].hp;
     }
     expect(unexplained).toBe(0);
+  }, T);
+});
+
+describe('tutoriel : appels automatiques (objet laissé, échange d accessoire, croix rouge, récapitulatif)', () => {
+  it('le parcours complet : appel de l objet moins puissant, échange avec appel de l ANCIEN accessoire, croix rouge du partenaire soigné, toutes les nouvelles étapes validées', () => {
+    const run = new TutorialRun();
+    let swapCallItem: GearItem | undefined;
+    let sawSwap = false;
+    while (!run.done && run.sim.state.timeMs < MAX_MS) {
+      const n = run.events.length;
+      run.tick();
+      for (const e of run.events.slice(n)) {
+        if (e.type === 'gearSwapped') sawSwap = true;
+        if (e.type === 'autoCallStarted' && e.playerId === 0 && e.icon === 'gear' && sawSwap && !swapCallItem) swapCallItem = run.state.players[0].autoCall?.item;
+      }
+    }
+    expect(run.done).toBe(true);
+    const ev = run.events;
+    // 1. équipement refusé (moins puissant) : appel avec le symbole de l'objet, le partenaire le prend
+    const gearCalls = ev.filter((e) => e.type === 'autoCallStarted' && e.playerId === 0 && e.icon === 'gear');
+    expect(gearCalls.length).toBe(2); // objet refusé + ancien accessoire de l'échange
+    expect(gearCalls.every((e) => e.type === 'autoCallStarted' && e.to.length === 1 && e.to[0] === 1)).toBe(true);
+    const picked = ev.filter((e) => e.type === 'gearPicked' && e.playerId === 1);
+    expect(picked.length).toBe(2);
+    // 2. échange manuel : le nouvel accessoire (aimant) est équipé, l'ancien (lanterne) est posé et SIGNALÉ avec son icône
+    const swap = ev.find((e) => e.type === 'gearSwapped');
+    expect(swap).toMatchObject({ type: 'gearSwapped', playerId: 0, item: { slot: 'accessory', accessory: 'magnet' }, dropped: { slot: 'accessory', accessory: 'lantern' } });
+    expect(swapCallItem).toEqual({ slot: 'accessory', level: 1, accessory: 'lantern' });
+    // 3. croix rouge : le partenaire blessé sous 30 % la lance, le joueur (cœur rangé d'office) la reçoit et le soigne
+    const crossCalls = ev.filter((e) => e.type === 'autoCallStarted' && e.icon === 'cross');
+    expect(crossCalls.length).toBeGreaterThanOrEqual(1);
+    expect(crossCalls.every((e) => e.type === 'autoCallStarted' && e.playerId === 1 && e.to.includes(0))).toBe(true);
+    expect(ev.some((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 1)).toBe(true);
+    const done = new Set(run.director.snapshot().done);
+    for (const id of ['gearLeft', 'gearSwap', 'exit.gear', 'crossCall', 'crossWho', 'exit.cross', 'autoCallRecap1', 'autoCallRecap2', 'exit.call']) expect(done.has(id), id).toBe(true);
+  }, T);
+
+  it('équipement actif dans le tutoriel, mais AUCUN tirage parasite : pas de butin d équipement ni de vie aléatoire, flux gearRngState et lootRngState inchangés, seuls les objets posés par script existent', () => {
+    const run = new TutorialRun();
+    expect(run.state.gearEnabled).toBe(true);
+    expect(run.state.gearDropsDisabled).toBe(true);
+    expect(run.state.lootEnabled).toBe(false);
+    const gear0 = run.state.gearRngState;
+    const loot0 = run.state.lootRngState;
+    run.run(MAX_MS);
+    expect(run.done).toBe(true);
+    expect(run.state.gearRngState).toBe(gear0);
+    expect(run.state.lootRngState).toBe(loot0);
+    expect(run.events.some((e) => e.type === 'buffDropped')).toBe(false);
+    // objets d'équipement posés : la protection I, l'aimant à échanger et la lanterne posée par l'échange (+ éventuel éparpillement de la démonstration de mort d'équipe : `scattered`)
+    const dropped = run.events.filter((e) => e.type === 'gearDropped' && !e.scattered);
+    expect(dropped.length).toBe(3);
+  }, T);
+
+  it('humain inactif dans l armurerie : aucun appel, le partenaire ne prend rien tout seul (il attend l appel), les objets restent au sol', () => {
+    const run = new TutorialRun({ startRoomIndex: 6, strategy: 'idle' });
+    run.run(60_000);
+    expect(run.events.some((e) => e.type === 'autoCallStarted')).toBe(false);
+    expect(run.events.some((e) => e.type === 'gearPicked')).toBe(false);
+    expect(run.state.room.gearDrops?.length).toBe(1); // protection I posée à l'étape gearLeft
+    expect(run.director.view().stepId).toBe('gearLeft');
+  }, T);
+
+  it('humain inactif au poste de soins : la croix part dès que le partenaire est blessé (le joueur a un cœur rangé), et se RÉPÈTE toutes les 10 s tant qu il n est pas soigné', () => {
+    const run = new TutorialRun({ startRoomIndex: 7, strategy: 'idle' });
+    run.run(35_000);
+    const crosses = run.events.filter((e) => e.type === 'autoCallStarted' && e.icon === 'cross');
+    expect(crosses.length).toBeGreaterThanOrEqual(3);
+    expect(crosses.length).toBeLessThanOrEqual(4);
+    expect(run.state.players[0].heart).toBe('full');
+    const p1 = run.state.players[1];
+    expect(p1.hp).toBeLessThanOrEqual(p1.maxHp * 0.3);
+    expect(run.director.snapshot().done).not.toContain('crossCall');
+  }, T);
+
+  it("B PRÉMATURÉ au poste de soins (joueur blessé, loin du partenaire, cœur consommé sur soi) : le cœur est redonné, l'étape n'est jamais bloquée et le solveur soigne ensuite le partenaire", () => {
+    const run = new TutorialRun({ startRoomIndex: 7, strategy: 'idle', pressHeartEveryMs: 400 });
+    // le joueur arrive blessé (comme après la salle du cœur) : B se rabat sur lui-même (aucun allié à portée)
+    run.state.players[0].hp = Math.floor(run.state.players[0].maxHp * 0.5);
+    run.run(8_000);
+    const selfUses = run.events.filter((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 0);
+    expect(selfUses.length).toBeGreaterThanOrEqual(2); // le cœur a été gaspillé sur soi PUIS redonné (sans `keepHeart` : un seul usage et plus rien)
+    expect(run.director.step.id).toBe('crossCall'); // étape toujours en cours
+    // sans l'appui répété : le joueur a un cœur à redonner tant que le partenaire n'est pas soigné
+    const p0 = run.state.players[0];
+    expect(p0.hp).toBeGreaterThan(Math.floor(p0.maxHp * 0.5));
+    // finalement, un joueur qui joue bien (solveur) termine l'étape depuis cet état
+    const solver = new TutorialRun({ startRoomIndex: 7 });
+    solver.state.players[0].hp = Math.floor(solver.state.players[0].maxHp * 0.5);
+    solver.run(3 * 60_000);
+    expect(solver.events.some((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 1)).toBe(true);
+    expect(solver.director.snapshot().done).toContain('crossCall');
+  }, T);
+
+  it('départ direct dans chaque nouvelle salle (?room=N) : l étape de la salle est jouable de bout en bout avec le solveur', () => {
+    for (const [room, last] of [[6, 'exit.gear'], [7, 'exit.cross']] as const) {
+      const run = new TutorialRun({ startRoomIndex: room });
+      for (let i = 0; i < 60 * 120 && run.state.roomIndex === room; i++) run.tick();
+      expect(run.state.roomIndex, `salle ${room}`).toBe(room + 1);
+      expect(run.director.snapshot().done, `salle ${room}`).toContain(last);
+    }
+  }, T);
+
+  it('déterminisme : deux parcours complets identiques donnent le même état de simulation et le même snapshot du directeur', () => {
+    const a = new TutorialRun();
+    const b = new TutorialRun();
+    a.run(MAX_MS);
+    b.run(MAX_MS);
+    expect(a.sim.serialize()).toBe(b.sim.serialize());
+    expect(JSON.stringify(a.director.snapshot())).toBe(JSON.stringify(b.director.snapshot()));
+  }, T);
+
+  it('personnage différent (partenaire Valentine) : les nouvelles salles se terminent aussi', () => {
+    const run = new TutorialRun({ human: 'sandrine', partner: 'valentine', startRoomIndex: 6 });
+    for (let i = 0; i < 60 * 240 && run.state.roomIndex < 9; i++) run.tick();
+    expect(run.state.roomIndex).toBe(9);
+    expect(run.director.snapshot().done).toEqual(expect.arrayContaining(['gearLeft', 'gearSwap', 'crossCall']));
   }, T);
 });

@@ -46,10 +46,13 @@ describe('partenaire scripté : machine virtuelle', () => {
       [1, { op: 'walk', at: { mech: 'pB' } }],
       [1, { op: 'walk', at: { mech: 'lv1' } }],
       [3, { op: 'walk', at: { tile: [14, 5] } }], // un brasero est solide : on vise la tuile voisine
-      [7, { op: 'walk', at: { zone: 'z_seal' } }],
+      [9, { op: 'walk', at: { zone: 'z_seal' } }],
       [0, { op: 'goExit' }],
       [5, { op: 'walk', at: { tile: [12, 6] } }], // t_heart : un cœur posé par le script
-      [6, { op: 'goExit' }],
+      [6, { op: 'goExit' }], // t_gear
+      [6, { op: 'walk', at: { tile: [15, 6] } }], // t_gear : l objet posé par le script (accessoire à échanger)
+      [7, { op: 'goExit' }], // t_cross
+      [8, { op: 'goExit' }], // t_call
     ];
     for (const [room, op] of targets) {
       const r = tutorialLevel.rooms[room];
@@ -70,7 +73,7 @@ describe('partenaire scripté : machine virtuelle', () => {
   });
 
   it('callEvery : n appelle jamais avant le délai de récupération (aucun appel perdu) et s arrête avec `until`', () => {
-    const { frames, events } = play([{ op: 'callEvery', ms: 5200, until: { k: 'near', tiles: 0.1 } }], { room: 6, maxMs: 20_000 });
+    const { frames, events } = play([{ op: 'callEvery', ms: 5200, until: { k: 'near', tiles: 0.1 } }], { room: 8, maxMs: 20_000 });
     const callFrames = frames.map((f, i) => (f.call ? i : -1)).filter((i) => i >= 0);
     expect(callFrames.length).toBeGreaterThanOrEqual(3);
     for (let i = 1; i < callFrames.length; i++) expect((callFrames[i] - callFrames[i - 1]) * SIM_STEP_MS).toBeGreaterThanOrEqual(CALL_COOLDOWN_MS);

@@ -204,6 +204,7 @@ Frames : `gear_<emplacement>_<niveau>` (16×16 × 15) et `gear_icon_<emplacement
 | `ui_heart_*` | 8×8 | Cœurs de PV : plein, demi, vide | Icônes 8×8 |
 | `ui_check` | 8×8 | Coche verte (objectif accompli) | Icône 8×8 |
 | `ui_cross` | 8×8 | Croix rouge | Icône 8×8 |
+| `ui_medcross` | 8×8 | Croix médicale rouge (demande de soins, appel automatique) | Icône 8×8 |
 | `ui_down` | 8×8 | Crâne : joueur à terre | Icône 8×8 |
 | `ui_key_*` | 8×8 | Icône de clé (couleur du slot) | Icône 8×8 en 4 couleurs |
 

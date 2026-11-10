@@ -56,7 +56,10 @@ export const LOGGED_EVENT_TYPES: ReadonlySet<SimEvent['type']> = new Set<SimEven
   // emplacement cœur
   'heartStored',
   'heartUsed',
+  // appel automatique (objet refusé, échange d'accessoire, croix rouge) et équipement
   'autoCallStarted',
+  'gearPicked',
+  'gearSwapped',
 ]);
 
 /** Taille maximale du journal d'événements d'une étape. */
@@ -78,6 +81,8 @@ export function eventActor(e: SimEvent): PlayerId | null {
     case 'torchRefueled':
     case 'callStarted':
     case 'autoCallStarted':
+    case 'gearPicked':
+    case 'gearSwapped':
     case 'heartStored':
     case 'heartUsed':
     case 'objectiveCompleted':
