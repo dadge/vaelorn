@@ -16,8 +16,9 @@ import {
   VAMPIRE_HEAL_HP,
   VAMPIRE_KILLS_PER_HEAL,
 } from '../core/balance';
-import { GEAR_SLOTS, ROMAN_LEVELS, buffDurationMs, gearLevelOf, itemOfSlot } from '../core/gear';
-import type { ActiveBuff, BuffKind, DroppedBuffKind, GearItem, GearSlot, PlayerGear } from '../core/types';
+import { PLAYER_COLORS } from '../core/constants';
+import { GEAR_SLOTS, ROMAN_LEVELS, buffDurationMs, gearLevelOf, itemOfSlot, pickupDecision } from '../core/gear';
+import type { ActiveBuff, BuffKind, DroppedBuffKind, GearItem, GearSlot, PlayerGear, PlayerId } from '../core/types';
 
 /** Couleur d'un niveau (halo au sol, pastille du HUD) : I argenté, II bleu clair, III doré. Indice 0 = vide (gris). */
 export const GEAR_LEVEL_COLORS: readonly number[] = [0x6e6a82, 0xdfe8ff, 0x7fd0ff, 0xffd85a];
@@ -126,6 +127,46 @@ export const GEAR_SWAP_PROMPT_KEY = 'gear.swap.prompt';
 /** Texte flottant de l'échange manuel : « Cor de guerre II : l'appel donne +30 % de vitesse aux alliés » (même format que le ramassage). */
 export function gearSwappedText(item: GearItem, tr: Translate): string {
   return gearPickedText(item, false, tr);
+}
+
+// ───────────────────────────── Équipement récupérable (joueur relevé) ─────────────────────────────
+
+/** Clé i18n du texte flottant du joueur relevé qui peut reprendre ses objets (« Reprends tes objets ! » / « Grab your gear! »). */
+export const GEAR_RECOVER_TEXT_KEY = 'gear.recoverable';
+
+/** Rayon (px monde) de base de l'anneau qui entoure un objet récupérable par son propriétaire relevé. */
+export const GEAR_RECOVER_RING_RADIUS = 11;
+/** Période (ms) de la pulsation lente de l'anneau (une pulsation par seconde : très en dessous de la limite de 3 Hz). */
+export const GEAR_RECOVER_PULSE_PERIOD_MS = 1000;
+
+/**
+ * Couleur de l'anneau et du halo d'un objet RÉCUPÉRABLE (`GearDropState.recoverFor`) : celle de son propriétaire (`PLAYER_COLORS`). null si l'objet n'est pas récupérable (champ absent) ou si son propriétaire est
+ * de nouveau à terre (il ne peut pas le reprendre : plus de signal).
+ */
+export function gearRecoverColor(recoverFor: PlayerId | undefined, ownerAlive: boolean): number | null {
+  if (recoverFor === undefined || !ownerAlive) return null;
+  return PLAYER_COLORS[recoverFor] ?? 0xffffff;
+}
+
+/**
+ * Le propriétaire (vivant) d'un objet récupérable peut-il réellement le reprendre ? Vrai s'il est vivant et que la règle de ramassage (`pickupDecision`) donne 'equip' ou 'upgrade' : sinon (à terre, ou il porte déjà
+ * mieux / un autre accessoire) l'objet n'est plus « réservé » à lui dans les faits et ne porte plus son signal (anneau, halo). Sans propriétaire connu (joueur absent) : faux.
+ */
+export function gearOwnerCanRecover(owner: { status: string; loadout: PlayerGear } | undefined, item: GearItem): boolean {
+  if (!owner || owner.status !== 'alive') return false;
+  const d = pickupDecision(owner.loadout, item);
+  return d === 'equip' || d === 'upgrade';
+}
+
+/** Rayon de l'anneau à l'instant `timeMs` : pulsation lente de ±1 px (sinusoïde, 1 Hz) ; fixe avec `reducedMotion`. */
+export function gearRecoverRingRadius(timeMs: number, reducedMotion = false): number {
+  if (reducedMotion) return GEAR_RECOVER_RING_RADIUS;
+  return GEAR_RECOVER_RING_RADIUS + Math.sin((Math.max(0, timeMs) / GEAR_RECOVER_PULSE_PERIOD_MS) * Math.PI * 2);
+}
+
+/** Texte flottant du joueur relevé qui peut reprendre ses objets (aucun texte quand aucun objet n'est récupérable : l'événement n'est alors jamais émis). */
+export function gearRecoverableText(tr: Translate): string {
+  return tr(GEAR_RECOVER_TEXT_KEY);
 }
 
 /** Frame de la silhouette (atténuée) d'un emplacement VIDE dans le HUD. */

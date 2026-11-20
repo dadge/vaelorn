@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { GEAR_RECOVER_GRACE_MS } from '../core/balance';
 import { GAME_HEIGHT, GAME_WIDTH } from '../core/constants';
 import { getDictionary } from '../i18n/i18n';
 import { CARD_MARGIN, cardFontSize, cardWidth } from '../render/tutorialHudLogic';
 import { tutorialLevel } from '../levels/tutorial';
 import { BUTTON_NAMES, DEVICE_KINDS } from './deviceHints';
-import { TUTORIAL_STEPS, firstStepIndexOfRoom, isExitStep } from './steps';
+import { REVIVE_GEAR_WAIT_MS, TUTORIAL_STEPS, firstStepIndexOfRoom, isExitStep } from './steps';
 import type { Condition, PartnerOp } from './types';
 
 const fr = getDictionary('fr') as Record<string, string>;
@@ -24,9 +25,9 @@ function walkConditions(c: Condition | undefined, out: Condition[] = []): Condit
 }
 
 describe('étapes du tutoriel : données', () => {
-  it('44 étapes aux ids uniques, regroupées par salle dans l ordre du niveau', () => {
-    expect(TUTORIAL_STEPS.length).toBe(44);
-    expect(new Set(TUTORIAL_STEPS.map((s) => s.id)).size).toBe(44);
+  it('45 étapes aux ids uniques, regroupées par salle dans l ordre du niveau', () => {
+    expect(TUTORIAL_STEPS.length).toBe(45);
+    expect(new Set(TUTORIAL_STEPS.map((s) => s.id)).size).toBe(45);
     const roomOrder = tutorialLevel.rooms.map((r) => r.id);
     let last = -1;
     for (const s of TUTORIAL_STEPS) {
@@ -54,7 +55,7 @@ describe('étapes du tutoriel : données', () => {
 
   it('couvre toutes les mécaniques demandées (relevage, appel, panneaux, objectifs de salle et personnel)', () => {
     const ids = TUTORIAL_STEPS.map((s) => s.id);
-    for (const must of ['move', 'sign', 'roomGoals', 'personalGoal', 'attack', 'special', 'specialRecharge', 'hearts', 'lever', 'plates', 'block', 'keyPick', 'keyDoor', 'refuel', 'lightBrazier', 'revive', 'heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'gearLeft', 'gearSwap', 'crossCall', 'crossWho', 'autoCallRecap1', 'autoCallRecap2', 'callReceive', 'callSend', 'wipe', 'finalGoals']) {
+    for (const must of ['move', 'sign', 'roomGoals', 'personalGoal', 'attack', 'special', 'specialRecharge', 'hearts', 'lever', 'plates', 'block', 'keyPick', 'keyDoor', 'refuel', 'lightBrazier', 'revive', 'reviveGear', 'heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'gearLeft', 'gearSwap', 'crossCall', 'crossWho', 'autoCallRecap1', 'autoCallRecap2', 'callReceive', 'callSend', 'wipe', 'finalGoals']) {
       expect(ids, must).toContain(must);
     }
     const highlights = new Set(TUTORIAL_STEPS.flatMap((s) => s.highlights ?? []));
@@ -88,7 +89,7 @@ describe('étapes du tutoriel : données', () => {
   });
 
   it('le partenaire ne reçoit jamais d ordre d attaque : seules les opérations walk/stand/press/idle/callEvery/goExit existent', () => {
-    for (const s of TUTORIAL_STEPS) for (const op of s.partner ?? []) expect(['idle', 'walk', 'stand', 'press', 'callEvery', 'reviveHuman', 'goExit']).toContain(op.op);
+    for (const s of TUTORIAL_STEPS) for (const op of s.partner ?? []) expect(['idle', 'wait', 'walk', 'stand', 'press', 'callEvery', 'reviveHuman', 'goExit']).toContain(op.op);
   });
 
   it('les opérations essentielles sont celles qui conditionnent la suite (plaque B, levier rouge, levier de la herse de sortie du relevage, cercle du sceau)', () => {
@@ -137,6 +138,62 @@ describe('étapes du tutoriel : i18n fr / en', () => {
     for (const k of ['tutorial.btn.key', 'tutorial.btn.move.custom']) {
       expect(placeholders(fr[k])).toEqual(placeholders(en[k]));
     }
+  });
+});
+
+describe('étapes du tutoriel : relevage et équipement récupérable (salle t_revive)', () => {
+  const rstep = (id: string) => TUTORIAL_STEPS.find((s) => s.id === id)!;
+  it('la salle t_revive : revive, reviveGear (le relevé reprend ses objets), exit.revive, dans cet ordre', () => {
+    expect(TUTORIAL_STEPS.filter((s) => s.room === 't_revive').map((s) => s.id)).toEqual(['revive', 'reviveGear', 'exit.revive']);
+  });
+  it("mise en scène : le partenaire porte un objet qu'il perdra à sa chute ; le joueur porte le même emplacement au même niveau ou mieux (il ne le prend pas : un niveau égal est refusé) ; un emplacement que l'armurerie n'utilise pas", () => {
+    const eq = rstep('revive').script!.equip!;
+    const partner = eq.find((q) => q.id === 1)!;
+    const human = eq.find((q) => q.id === 0)!;
+    expect(partner.item.slot).toBe(human.item.slot);
+    expect(human.item.level).toBeGreaterThanOrEqual(partner.item.level);
+    // l'armurerie (gearLeft / gearSwap) suppose le partenaire SANS protection ni accessoire
+    expect(['protection', 'accessory']).not.toContain(partner.item.slot);
+    expect(rstep('revive').knockDown).toEqual({ afterMs: 1200, ids: [1] });
+  });
+  it("la condition de réussite est une ACTION : le propriétaire relevé reprend son objet (ramassage `recovered`), avec une issue de secours si plus aucun objet n'est au sol ; le partenaire court vers l'objet", () => {
+    const s = rstep('reviveGear');
+    expect(s.kind).toBe('do');
+    expect(JSON.stringify(s.done)).toContain('gearPicked');
+    expect(JSON.stringify(s.done)).toContain('"recovered":true');
+    expect(JSON.stringify(s.done)).toContain('noGear');
+    expect(s.partner?.some((op) => op.op === 'walk' && 'gear' in op.at)).toBe(true);
+    expect(s.partner?.some((op) => 'essential' in op && op.essential)).toBe(false);
+  });
+  it("le partenaire ATTEND avant de courir reprendre son objet (le texte promet des objets qui brillent et un partenaire qu'on regarde les ramasser : la reprise ne doit pas être quasi instantanée) ; pas de cadre HUD sur la rangée du JOUEUR (l'étape parle des objets du partenaire)", () => {
+    const s = rstep('reviveGear');
+    const iWait = s.partner!.findIndex((op) => op.op === 'wait');
+    const iWalk = s.partner!.findIndex((op) => op.op === 'walk');
+    expect(iWait).toBe(0);
+    expect(iWalk).toBeGreaterThan(iWait);
+    const wait = s.partner![iWait] as { op: 'wait'; ms: number };
+    expect(wait.ms).toBe(REVIVE_GEAR_WAIT_MS);
+    expect(wait.ms).toBeGreaterThanOrEqual(3000); // au moins quelques secondes d'anneau visible
+    expect(wait.ms).toBeLessThan(GEAR_RECOVER_GRACE_MS); // et la reprise reste dans la grâce de relevage
+    expect(wait.ms).toBeLessThan(s.minMs); // la reprise a lieu pendant que la carte est affichée
+    expect(s.highlights ?? []).not.toContain('gear');
+  });
+  it("l'étape wipe nuance la perte : repris seulement si un allié relève à temps ; défaite d'équipe = tout perdu (fr / en)", () => {
+    expect(fr['tutorial.step.wipe']).toContain('relève à temps');
+    expect(en['tutorial.step.wipe']).toContain('revives you in time');
+    expect(fr['tutorial.step.wipe']).toContain("Défaite d'équipe");
+    expect(en['tutorial.step.wipe']).toContain('Team wipe');
+  });
+  it("textes fr / en : le relevage annonce les objets repris, l'étape dédiée l'explique (trop tard ou pris par un autre = perdus)", () => {
+    expect(fr['tutorial.step.reviveGear']).toContain('{name}');
+    expect(en['tutorial.step.reviveGear']).toContain('{name}');
+    expect(fr['tutorial.step.revive']).toContain('reprendre ses objets');
+    expect(en['tutorial.step.revive']).toContain('pick their fallen gear up');
+    expect(fr['tutorial.step.reviveGear']).toContain('perdus');
+    expect(en['tutorial.step.reviveGear']).toContain('gone for good');
+  });
+  it("débit de lecture : l'étape reviveGear ne se ferme pas plus vite que ≈ 26 caractères / s, dans les deux langues", () => {
+    for (const l of [fr, en]) expect(l['tutorial.step.reviveGear'].length / (rstep('reviveGear').minMs / 1000)).toBeLessThanOrEqual(26);
   });
 });
 

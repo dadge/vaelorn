@@ -1,18 +1,21 @@
 /**
- * Les 44 étapes du tutoriel (DONNÉES). Chaque étape `do` est validée par une ACTION du joueur ; une étape `tip` se ferme seule.
+ * Les 45 étapes du tutoriel (DONNÉES). Chaque étape `do` est validée par une ACTION du joueur ; une étape `tip` se ferme seule.
  * Les textes sont des clés i18n `tutorial.step.<id>` (src/i18n/parts/tutorial.*.json) avec jetons de boutons résolus par appareil
  * (`deviceHints.ts`). Les conditions de réussite sont fondées sur l'ÉTAT quand c'est possible (pas seulement sur un événement) :
  * un joueur qui a déjà accompli l'action avant que l'étape ne s'affiche n'est jamais bloqué.
  *
  * Couverture : déplacement, panneaux, bloc « Objectifs de la salle » (haut à droite), « Ton objectif » (haut à gauche), attaque,
  * cœurs, spécial et recharge, ennemis restants, levier, plaques, porte, objectif d'équipe, bloc poussable, clé et porte de couleur,
- * torche et braseros (salle sombre), RELEVAGE, EMPLACEMENT CŒUR (ranger, se soigner avec B, soigner un coéquipier blessé, emplacement entier = appel automatique),
+ * torche et braseros (salle sombre), RELEVAGE (et équipement récupérable par le joueur relevé), EMPLACEMENT CŒUR (ranger, se soigner avec B, soigner un coéquipier blessé, emplacement entier = appel automatique),
  * APPELS AUTOMATIQUES (cœur qu'on ne peut pas ranger, objet moins puissant laissé, échange d'accessoire, croix rouge = demande de soins, page récapitulative de toutes les règles), APPEL (recevoir puis lancer),
  * mort d'équipe, sortie scellée.
  */
 import type { PartnerOp, TutorialStepDef } from './types';
 
 const goExit: PartnerOp[] = [{ op: 'goExit' }];
+
+/** Pause (ms de simulation) du partenaire relevé avant qu'il ne coure reprendre son objet (étape `reviveGear`) : le temps de voir l'anneau et le halo de sa couleur. Largement sous la grâce de relevage (8 s, [B32]) et sous `minMs`. */
+export const REVIVE_GEAR_WAIT_MS = 4000;
 
 /** Raccourci : texte `tutorial.step.<id>`. */
 function step(def: Omit<TutorialStepDef, 'textKey'>): TutorialStepDef {
@@ -219,6 +222,30 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
     markers: [{ partner: true }],
     highlights: ['prompt'],
     knockDown: { afterMs: 1200, ids: [1] },
+    // mise en scène de l'ÉQUIPEMENT RÉCUPÉRABLE : le partenaire porte un artefact de niveau II, perdu à sa chute (éparpillé à ses pieds), qu'il reprendra une fois relevé (étape `reviveGear`) ; le joueur porte le MÊME
+    // artefact (niveau II : un objet de niveau égal est refusé), de quoi NE PAS prendre celui du partenaire en venant le relever (un allié qui n'a rien à cet emplacement le ramasserait : démonstration volée).
+    // L'artefact n'est utilisé par aucune étape suivante (l'armurerie emploie la protection et les accessoires : le partenaire doit y avoir ces emplacements VIDES).
+    script: {
+      afterMs: 0,
+      equip: [
+        { id: 1, item: { slot: 'artifact', level: 2 } },
+        { id: 0, item: { slot: 'artifact', level: 2 } },
+      ],
+    },
+  }),
+  step({
+    id: 'reviveGear',
+    room: 't_revive',
+    kind: 'do',
+    minMs: 10000,
+    // validée quand le partenaire relevé a REPRIS son objet (ramassage par son propriétaire), ou quand plus aucun objet n'est au sol (étape passée trop vite, objet périmé) : jamais bloquée
+    done: { k: 'any', of: [{ k: 'event', type: 'gearPicked', by: 1, match: { recovered: true } }, { k: 'noGear' }] },
+    noCompact: true, // « il peut le reprendre, trop tard ou pris par un autre : perdu » doit rester lisible
+    markers: [{ partner: true }],
+    // pas de `highlights: ['gear']` : la rangée du HUD est celle du JOUEUR, l'étape parle des objets du PARTENAIRE (au sol, repérés par leur anneau de couleur)
+    // le partenaire relevé ATTEND 4 s avant de courir reprendre son objet (le verrou est levé pour lui au relevage) : sans cette pause, l'objet, à ~20 px de lui, serait repris en 0,1 s et le texte (« ses objets brillent de
+    // sa couleur », « regarde-le les ramasser ») décrirait une scène déjà finie ; l'équipement perdu reste longtemps au sol dans le tutoriel (`knockDown(id, TUTORIAL_GEAR_TTL_MS)`) : un joueur lent voit lui aussi la leçon
+    partner: [{ op: 'wait', ms: REVIVE_GEAR_WAIT_MS }, { op: 'walk', at: { gear: true } }],
   }),
   step({
     id: 'exit.revive',

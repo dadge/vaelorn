@@ -40,6 +40,7 @@
   "gear.name.weapon.2": "Hache",
   "gear.name.weapon.3": "Arc",
   "gear.picked": "{name} : {effect}",
+  "gear.recoverable": "Reprends tes objets !",
   "gear.slot.accessory": "Accessoire",
   "gear.slot.artifact": "Artefact",
   "gear.slot.boots": "Bottes",

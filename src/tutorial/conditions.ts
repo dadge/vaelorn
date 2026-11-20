@@ -183,6 +183,8 @@ export function evalCondition(c: Condition, ctx: ConditionCtx): boolean {
       return !!human && human.keys.length > 0;
     case 'holdsHeart':
       return !!human && human.heart !== undefined;
+    case 'noGear':
+      return (state.room.gearDrops ?? []).length === 0;
     case 'blockDead':
       return isBlockDead(state, room, c.id);
     case 'regionVisible':

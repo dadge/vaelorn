@@ -8,7 +8,7 @@ import { SIM_STEP_MS } from '../core/constants';
 import { createSimulation, type GameSimulation } from '../core/simulation';
 import type { ActionFrame, CharacterId, GameState, PlayerId, SimEvent, Vec2 } from '../core/types';
 import { TUTORIAL_LEVEL_ID, TUTORIAL_SEED, tutorialLevel } from '../levels/tutorial';
-import { applyScripted } from '../entities/tutorialRuntime';
+import { TUTORIAL_GEAR_TTL_MS, applyScripted } from '../entities/tutorialRuntime';
 import { TutorialDirector } from '../tutorial/TutorialDirector';
 import type { HudRegionId } from '../tutorial/types';
 
@@ -36,6 +36,8 @@ export interface TutorialRunOptions {
   dieAtMs?: number;
   /** Stratégie 'idle' : appuie sur B (soin, 2 pas) toutes les `pressHeartEveryMs` ms (appui prématuré, loin du partenaire). */
   pressHeartEveryMs?: number;
+  /** Étape `revive` : l'humain attend (immobile) que le temps simulé atteigne cette valeur avant d'aller relever le partenaire (joueur lent : lit longuement, cherche l'allié). */
+  reviveNotBeforeMs?: number;
 }
 
 /** Exécution headless d'un tutoriel. */
@@ -100,7 +102,7 @@ export class TutorialRun {
     const partner = this.director.partnerFrame(state);
     const events = this.sim.step(SIM_STEP_MS, { 0: human, 1: partner });
     this.director.observe(events, state, { regions: ALL_REGIONS });
-    for (const id of this.director.takeKnockDowns()) this.sim.knockDown(id);
+    for (const id of this.director.takeKnockDowns()) this.sim.knockDown(id, TUTORIAL_GEAR_TTL_MS);
     for (const a of this.director.takeScripted()) applyScripted(this.sim, a);
     for (const e of events) this.events.push(e);
     if (state.roomIndex === 0) this.partnerMinHp = Math.min(this.partnerMinHp, state.players[1].hp);
@@ -250,6 +252,7 @@ export class TutorialRun {
       case 'revive': {
         const partner = state.players[1];
         if (partner.status === 'down') {
+          if (state.timeMs < (this.opts.reviveNotBeforeMs ?? 0)) return idleFrame();
           const w = this.walk(pos, partner.pos, 10);
           return w.arrived ? { ...idleFrame(), revive: true } : w.f;
         }
@@ -304,6 +307,9 @@ export class TutorialRun {
         this.pulse++;
         return { ...idleFrame(), heart: this.pulse % 6 < 3 };
       }
+      case 'reviveGear':
+        // le joueur regarde le partenaire relevé reprendre son objet (l'humain n'a rien à faire : il porte mieux, il ne prend pas l'objet du partenaire)
+        return idleFrame();
       case 'crossWho':
       case 'autoCallRecap1':
       case 'autoCallRecap2':

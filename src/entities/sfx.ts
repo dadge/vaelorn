@@ -63,6 +63,7 @@ export type SfxName =
   | 'gearDrop'
   | 'gearPick'
   | 'gearLost'
+  | 'gearRecover'
   | 'gearSwap'
   | 'buffStart'
   | 'vampireHeal';
@@ -140,6 +141,8 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   gearDrop: { f0: 820, f1: 1180, durMs: 80, type: 'triangle', vol: 0.03 },
   gearPick: { f0: 520, f1: 780, durMs: 110, type: 'square', vol: 0.05, then: { f0: 780, f1: 1170, delayMs: 100 } },
   gearLost: { f0: 330, f1: 90, durMs: 420, type: 'sawtooth', vol: 0.08, then: { f0: 220, f1: 70, delayMs: 160 } },
+  // joueur relevé qui peut reprendre ses objets : petite montée douce (variante discrète du tintement d'apparition, plus bas en volume que le ramassage)
+  gearRecover: { f0: 600, f1: 900, durMs: 90, type: 'triangle', vol: 0.03 },
   // accessoires et bonus temporaires (placeholders) : double clic à l'échange, arpège rapide au démarrage d'un bonus, petite goutte grave pour l'anneau du vampire
   gearSwap: { f0: 600, f1: 420, durMs: 70, type: 'square', vol: 0.05, then: { f0: 420, f1: 700, delayMs: 80 } },
   buffStart: { f0: 500, f1: 700, durMs: 80, type: 'triangle', vol: 0.06, then: { f0: 700, f1: 1050, delayMs: 70 } },
@@ -253,6 +256,8 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
       return 'gearPick';
     case 'gearLost':
       return 'gearLost';
+    case 'gearRecoverable':
+      return 'gearRecover';
     case 'gearSwapped':
       return 'gearSwap';
     case 'buffDropped':

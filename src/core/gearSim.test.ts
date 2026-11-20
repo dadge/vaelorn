@@ -384,7 +384,7 @@ describe('perte à la chute et éparpillement', () => {
     expect(ofType(ev, 'gearLost')).toHaveLength(1);
     expect(s.state.players[0].loadout.boots).toBe(0);
   });
-  it('le joueur tombé NE PEUT PAS reprendre ses objets pendant les 20 s, même relevé ; un allié les prend s\'ils sont meilleurs', () => {
+  it('le joueur tombé NE PEUT PAS reprendre ses objets tant qu\'il n\'est pas RELEVÉ par un allié (un simple changement d\'état ne lève pas le verrou : voir gearRecover.test.ts pour le vrai relevage) ; un allié les prend s\'ils sont meilleurs', () => {
     const s = mk(2);
     equipped(s, 0, { boots: 3, weapon: 1 });
     equipped(s, 1, { boots: 1, weapon: 3 }); // l'allié : bottes inférieures, arme supérieure

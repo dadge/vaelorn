@@ -64,6 +64,20 @@ describe('partenaire scripté : machine virtuelle', () => {
     }
   });
 
+  it('wait : le partenaire reste immobile `ms` ms de simulation puis passe à la suite ; le minuteur repart de zéro pour une seconde attente ; JSON pur', () => {
+    const { frames, vm } = play([{ op: 'wait', ms: 1000 }, { op: 'wait', ms: 500 }, { op: 'walk', at: { tile: [16, 6] } }], { maxMs: 3000 });
+    const firstMove = frames.findIndex((f) => f.moveX !== 0 || f.moveY !== 0);
+    // 1000 + 500 ms = 90 pas d'immobilité (60 Hz), puis la marche
+    expect(firstMove * SIM_STEP_MS).toBeGreaterThanOrEqual(1500);
+    expect(firstMove * SIM_STEP_MS).toBeLessThan(1500 + 100);
+    expect(frames.slice(0, firstMove).every((f) => f.moveX === 0 && f.moveY === 0 && !f.revive && !f.interact)).toBe(true);
+    expect(vm.waitMs).toBeUndefined(); // remis à zéro à la fin de l'attente (état identique à celui d'avant l'ajout)
+    expect(() => JSON.stringify(vm)).not.toThrow();
+    // un ancien état sans `waitMs` reste valide
+    const old = newVm();
+    expect('waitMs' in old).toBe(false);
+  });
+
   it('press : UNE impulsion d un pas puis relâchement (front montant)', () => {
     const { frames } = play([{ op: 'press', button: 'interact' }, { op: 'idle' }], { maxMs: 200 });
     const interact = frames.map((f) => f.interact);

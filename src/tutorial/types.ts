@@ -45,6 +45,8 @@ export type Condition =
   | { k: 'holdsKey' }
   /** Le joueur a un cœur / demi-cœur rangé dans son emplacement cœur. */
   | { k: 'holdsHeart' }
+  /** Plus aucun objet d'équipement au sol dans la salle (ramassés ou périmés : une étape qui attend un ramassage ne reste jamais bloquée si les objets ont disparu). */
+  | { k: 'noGear' }
   /** Le bloc poussable `id` est irrécupérable (collé à une paroi sur un axe où le socle est ailleurs : plus personne ne peut le ramener). */
   | { k: 'blockDead'; id: string }
   /** La zone du HUD est actuellement visible à l'écran. */
@@ -68,6 +70,8 @@ export type Target =
 export type PartnerOp =
   /** Ne rien faire ; avec `until`, attendre la condition puis passer à la suite. */
   | { op: 'idle'; until?: Condition }
+  /** Rester immobile `ms` millisecondes de SIMULATION (minuteur du partenaire : `VmState.waitMs`), puis passer à la suite (laisse au joueur le temps de VOIR ce qui précède). */
+  | { op: 'wait'; ms: number }
   | { op: 'walk'; at: Target; essential?: boolean }
   /** Marcher puis tenir la position (plaque, cercle) jusqu'à `until`. */
   | { op: 'stand'; at: Target; until?: Condition; essential?: boolean }
@@ -209,6 +213,8 @@ export interface VmState {
   /** Temps restant (ms) d'un détour perpendiculaire (déblocage) et son sens. */
   detourMs: number;
   detourSign: 1 | -1;
+  /** Temps déjà attendu (ms) par l'instruction `wait` courante (champ optionnel : absent = 0, anciens états valides). */
+  waitMs?: number;
 }
 
 /** État complet du directeur (JSON pur : snapshot / restore, déterminisme). */

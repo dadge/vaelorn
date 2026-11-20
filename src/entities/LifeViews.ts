@@ -7,11 +7,11 @@
 import type Phaser from 'phaser';
 import { TILE } from '../core/constants';
 import { swapCandidate } from '../core/gear';
-import type { BuffDropState, GameState, GearDropState, HealCrystalDef, HealCrystalState, PickupState, RoomDef } from '../core/types';
+import type { BuffDropState, GameState, GearDropState, HealCrystalDef, HealCrystalState, PickupState, PlayerState, RoomDef } from '../core/types';
 import { t } from '../i18n/i18n';
 import { ATLAS_KEY } from '../render/art';
 import { DEPTH_LABELS, FX_GLOW_KEY, makeWorldText } from '../render/fx';
-import { GEAR_SWAP_PROMPT_KEY, buffColor, buffFrame, gearAlpha, gearBob, gearFrame, gearLabel, gearLevelColor } from '../render/gearFx';
+import { GEAR_SWAP_PROMPT_KEY, buffColor, buffFrame, gearAlpha, gearBob, gearFrame, gearLabel, gearLevelColor, gearOwnerCanRecover, gearRecoverColor, gearRecoverRingRadius } from '../render/gearFx';
 import { CRYSTAL_HALO_COLOR, crystalFrame, pickupAlpha, pickupBob, pickupFrame, pickupHaloColor } from '../render/lifeFx';
 import { DEPTH, type ViewContext } from './common';
 
@@ -31,6 +31,12 @@ interface PickupView {
   sprite: Phaser.GameObjects.Image;
   halo: Phaser.GameObjects.Image;
   seen: number;
+  /** Anneau de la couleur du propriétaire relevé (objets d'équipement récupérables seulement), créé à la demande. */
+  ring?: Phaser.GameObjects.Arc;
+  /** Couleur courante du trait de l'anneau (mémorisée : `setStrokeStyle` n'est rappelé que si elle change). */
+  ringColor?: number;
+  /** Teinte actuelle du halo (évite de la réappliquer à chaque image). */
+  haloTint?: number;
 }
 
 interface CrystalView {
@@ -118,14 +124,18 @@ export class LifeViews {
         this.pickups.delete(this.stale[i]);
       }
     }
-    this.syncGear(state.room.gearDrops ?? [], timeMs);
+    this.syncGear(state.room.gearDrops ?? [], state.players, timeMs);
     this.syncBuffDrops(state.room.buffDrops ?? [], timeMs);
     this.syncSwapPrompts(state);
     this.syncCrystals(state, timeMs);
   }
 
-  /** Objets d'équipement au sol : même halo doux que les cœurs (teinté par le niveau), clignotement des 4 dernières secondes, `prefers-reduced-motion` respecté. */
-  private syncGear(list: readonly GearDropState[], timeMs: number): void {
+  /**
+   * Objets d'équipement au sol : même halo doux que les cœurs (teinté par le niveau), clignotement des 4 dernières secondes, `prefers-reduced-motion` respecté. Un objet RÉCUPÉRABLE (`recoverFor` : son propriétaire
+   * a été relevé et peut le reprendre) prend un halo plus large ET un anneau de la couleur de ce joueur, tant qu'il est vivant ET qu'il peut réellement le reprendre (`gearOwnerCanRecover` : sinon l'objet n'est plus réservé à lui dans les faits) ; l'anneau suit le même clignotement de fin de vie (≤ 3 Hz) et pulse lentement (1 Hz,
+   * fixe avec `prefers-reduced-motion`).
+   */
+  private syncGear(list: readonly GearDropState[], players: readonly PlayerState[], timeMs: number): void {
     const { scene, rig } = this.ctx;
     const rm = this.reducedMotion;
     for (let i = 0; i < list.length; i++) {
@@ -143,6 +153,26 @@ export class LifeViews {
       const a = gearAlpha(g.ttlMs, timeMs, rm);
       v.sprite.setPosition(g.pos.x, g.pos.y - 3 + bob).setAlpha(a).setDepth(DEPTH.flat + 0.6);
       v.halo.setPosition(g.pos.x, g.pos.y - 3 + bob).setAlpha(a * (rm ? 0.4 : 0.4 + 0.12 * Math.sin(timeMs / 170 + g.id))).setDepth(DEPTH.flat + 0.45);
+      // objet récupérable par son propriétaire relevé : halo et anneau à sa couleur
+      const owner = g.recoverFor === undefined ? undefined : players.find((q) => q.id === g.recoverFor);
+      const rc = gearRecoverColor(g.recoverFor, gearOwnerCanRecover(owner, g.item));
+      const wantTint = rc ?? gearLevelColor(g.item.level);
+      if (v.haloTint !== wantTint) {
+        v.halo.setTint(wantTint).setScale(rc === null ? 0.9 : 1.35);
+        v.haloTint = wantTint;
+      }
+      if (rc !== null) {
+        if (!v.ring) {
+          v.ring = this.ctx.rig.registerWorld(this.ctx.scene.add.circle(g.pos.x, g.pos.y, 11).setStrokeStyle(1.5, rc).setFillStyle());
+          v.ringColor = rc;
+        } else if (v.ringColor !== rc) {
+          v.ring.setStrokeStyle(1.5, rc); // la couleur ne change que si le propriétaire change : pas de réécriture à chaque image
+          v.ringColor = rc;
+        }
+        v.ring.setPosition(g.pos.x, g.pos.y - 3 + bob).setRadius(gearRecoverRingRadius(timeMs, rm)).setAlpha(a * 0.9).setDepth(DEPTH.flat + 0.65).setVisible(true);
+      } else if (v.ring) {
+        v.ring.setVisible(false);
+      }
     }
     if (this.gears.size > list.length) {
       this.staleGear.length = 0;
@@ -154,6 +184,7 @@ export class LifeViews {
         if (v) {
           v.sprite.destroy();
           v.halo.destroy();
+          v.ring?.destroy();
         }
         this.gears.delete(this.staleGear[i]);
       }
@@ -288,6 +319,7 @@ export class LifeViews {
     for (const v of this.gears.values()) {
       v.sprite.destroy();
       v.halo.destroy();
+      v.ring?.destroy();
     }
     this.gears.clear();
     for (const v of this.buffs.values()) {

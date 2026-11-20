@@ -51,7 +51,7 @@ import { t, onLanguageChange } from '../i18n/i18n';
 import { MenuNavigator, VIRTUAL_PAD_INDEX, inputManager, listGamepads } from '../input';
 import { getLevelByIndex } from '../levels';
 import { TUTORIAL_SEED, tutorialLevel } from '../levels/tutorial';
-import { TutorialRuntime, applyScripted, tutorialPlayers } from '../entities/tutorialRuntime';
+import { TUTORIAL_GEAR_TTL_MS, TutorialRuntime, applyScripted, tutorialPlayers } from '../entities/tutorialRuntime';
 import { TutorialHud } from '../render/tutorialHud';
 import { visibleRegionIds } from '../render/tutorialHudLogic';
 import type { ButtonName } from '../tutorial/types';
@@ -60,7 +60,7 @@ import { DEPTH_LABELS, FxManager, damageNumberColor, ensureFxTextures } from '..
 import { SpecialFx } from '../render/specialFx';
 import { heartStoredTextKey, heartUsedFx } from '../render/heartSlotFx';
 import { CRYSTAL_HALO_COLOR, pickupHaloColor, pickupTextColor, pickupTextFor } from '../render/lifeFx';
-import { GEAR_FLOAT_WRAP_PX, buffColor, buffStartedText, gearLevelColor, gearPickedColor, gearPickedText, gearSwappedText } from '../render/gearFx';
+import { GEAR_FLOAT_WRAP_PX, buffColor, buffStartedText, gearLevelColor, gearPickedColor, gearPickedText, gearRecoverableText, gearSwappedText } from '../render/gearFx';
 import { CallWorldFx } from '../render/callHud';
 import { heroFrame } from '../render/art/animations';
 import { spriteTier } from '../render/art/enemyTiers';
@@ -528,11 +528,11 @@ export class GameScene extends Phaser.Scene {
         const events = this.sim.step(SIM_STEP_MS, inputs);
         if (i === 0) this.latched = null;
         stepped = true;
-        this.autoSaver?.handleEvents(events); // début de salle / fin de niveau : jamais en pleine salle
+        this.autoSaver?.handleEvents(events); // début de salle, fin de niveau, et (en pleine salle) perte / reprise d'équipement et de cœur
         for (let k = 0; k < events.length; k++) this.handleEvent(events[k], state);
         if (tutorial) {
           tutorial.observe(events, state, regionIds);
-          for (const id of tutorial.takeKnockDowns()) this.sim.knockDown(id); // chute scénarisée (relevage, mort d'équipe)
+          for (const id of tutorial.takeKnockDowns()) this.sim.knockDown(id, TUTORIAL_GEAR_TTL_MS); // chute scénarisée (relevage, mort d'équipe) ; l'équipement perdu reste longtemps au sol (le joueur lit avant de relever)
           for (const a of tutorial.takeScripted()) applyScripted(this.sim, a); // blessure / cœurs posés (soin d'un coéquipier)
         }
       }
@@ -767,6 +767,14 @@ export class GameScene extends Phaser.Scene {
         // +1 PV de l'anneau du vampire : petit texte rouge sombre, discret (il peut tomber souvent)
         const pos = this.playerPos(e.playerId, state);
         fx.floatText(pos.x, pos.y - 12, t('gear.vampire.heal', { n: e.healed }), 0xff5a7a, 700, 14, 8);
+        break;
+      }
+      case 'gearRecoverable': {
+        // joueur RELEVÉ : « Reprends tes objets ! » à sa couleur (ses objets restés au sol portent un anneau de la même couleur, dessiné par LifeViews) ; jamais émis sans objet récupérable
+        const pos = this.playerPos(e.playerId, state);
+        const color = PLAYER_COLORS[e.playerId] ?? 0xffffff;
+        fx.ring(pos.x, pos.y, color, 24, 520);
+        fx.floatText(pos.x, pos.y - 18, gearRecoverableText(t), color, 2200, 18, 9, GEAR_FLOAT_WRAP_PX);
         break;
       }
       case 'gearLost': {

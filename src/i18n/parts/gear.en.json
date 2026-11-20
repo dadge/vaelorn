@@ -40,6 +40,7 @@
   "gear.name.weapon.2": "Axe",
   "gear.name.weapon.3": "Bow",
   "gear.picked": "{name} : {effect}",
+  "gear.recoverable": "Grab your gear!",
   "gear.slot.accessory": "Accessory",
   "gear.slot.artifact": "Artifact",
   "gear.slot.boots": "Boots",

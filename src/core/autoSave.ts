@@ -17,12 +17,15 @@
  * CŒUR RANGÉ (emplacement cœur, champ optionnel du schéma v3) : avec `heartProvider`, même cycle que l'équipement. Écrit au début de chaque salle ('start' | 'next' ; et à la défaite
  * collective, où il est alors vide), remis à zéro à la fin d'un niveau ; la perte (`heartLost`) est écrite DÈS la chute, comme `gearLost`, et l'USAGE (`heartUsed`) DÈS qu'il a lieu : quitter puis « Continuer » ne restitue jamais un
  * cœur perdu (le cœur tombé au sol n'est pas sauvegardé : le sol est neuf à chaque début de salle).
+ * RELEVÉ = ÉQUIPEMENT RÉCUPÉRABLE : un joueur relevé qui reprend un objet perdu à sa chute (`gearPicked` ou, pour un accessoire repris par échange manuel, `gearSwapped`, avec `recovered`) le voit ÉCRIT aussitôt dans la sauvegarde (`withGearRecovered`, seulement avec `gearProvider`),
+ * comme la perte l'avait été : sans cela « quitter puis Continuer » ferait perdre ce qu'il vient de reprendre alors que la perte, elle, était déjà enregistrée. Seul l'objet repris est ajouté (règle de ramassage
+ * habituelle) : les autres ramassages de la salle restent écrits au début de la salle suivante, et un objet perdu que personne n'a repris n'est jamais restitué.
  * Une écriture identique à la dernière valeur connue du stockage est sautée. Une écriture qui échoue est signalée via
  * `onError` (une seule fois par type d'erreur consécutif) et retentée à la prochaine salle.
  *
  * `enabled: false` (mode `?quick=1`, `?nosave=1`, paramètres de dev) : l'état est suivi mais RIEN n'est jamais écrit.
  */
-import { applySimEvents, newGameSave, serializeSave, withGear, withHearts, type SaveContext, type SaveGame } from './save';
+import { applySimEvents, newGameSave, serializeSave, withGear, withGearRecovered, withHearts, type SaveContext, type SaveGame } from './save';
 import type { SaveRepository, SaveStorageError } from './saveRepository';
 import type { PickupKind, PlayerGear, PlayerSetup, SimEvent } from './types';
 
@@ -101,13 +104,24 @@ export class AutoSaver {
 
   /** À appeler avec les événements de chaque pas de simulation. Retourne true si une écriture a eu lieu. */
   handleEvents(events: readonly SimEvent[]): boolean {
-    const relevant = events.some(
-      (e) => (e.type === 'roomEntered' && (e.reason === 'start' || e.reason === 'next')) || e.type === 'levelCompleted' || e.type === 'gearLost' || e.type === 'heartLost' || e.type === 'heartUsed',
-    );
+    const recovered = this.gearProvider !== undefined && events.some((e) => (e.type === 'gearPicked' || e.type === 'gearSwapped') && e.recovered === true);
+    const relevant =
+      recovered ||
+      events.some(
+        (e) => (e.type === 'roomEntered' && (e.reason === 'start' || e.reason === 'next')) || e.type === 'levelCompleted' || e.type === 'gearLost' || e.type === 'heartLost' || e.type === 'heartUsed',
+      );
     // défaite collective : la salle de reprise ne change pas, mais l'équipement et le cœur (perdus) sont enregistrés
     const restart = (this.gearProvider !== undefined || this.heartProvider !== undefined) && events.some((e) => e.type === 'roomEntered' && e.reason === 'restart');
     if (!relevant && !restart) return false;
-    this.current = applySimEvents(this.current, this.levelId, events, this.context);
+    // événement par événement, DANS L'ORDRE (un objet repris puis une nouvelle chute au même pas : la perte, postérieure, l'emporte)
+    for (const e of events) {
+      if (e.type === 'gearPicked' || e.type === 'gearSwapped') {
+        // reprise par ramassage (`gearPicked`) ou par ÉCHANGE manuel d'accessoire (`gearSwapped` : l'accessoire repris remplace celui que le joueur portait déjà)
+        if (e.recovered === true && this.gearProvider) this.current = withGearRecovered(this.current, e.playerId, e.item, e.type === 'gearSwapped');
+      } else {
+        this.current = applySimEvents(this.current, this.levelId, [e], this.context);
+      }
+    }
     if (events.some((e) => e.type === 'roomEntered') && !events.some((e) => e.type === 'levelCompleted')) {
       if (this.gearProvider) this.current = withGear(this.current, this.gearProvider());
       if (this.heartProvider) this.current = withHearts(this.current, this.heartProvider());

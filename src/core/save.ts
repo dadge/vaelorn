@@ -29,9 +29,9 @@
  */
 import { CHARACTERS, CHARACTER_IDS } from './characters';
 import { MAX_PLAYERS } from './constants';
-import { ACCESSORY_KINDS, cloneGear, isGearEmpty, normalizeGear, sameGear } from './gear';
+import { ACCESSORY_KINDS, cloneGear, equipItem, isGearEmpty, normalizeGear, pickupDecision, sameGear } from './gear';
 import { isHeartKind } from './heartSlot';
-import type { CharacterId, Difficulty, PickupKind, PlayerGear, PlayerId, PlayerSetup, SimConfig, SimEvent } from './types';
+import type { CharacterId, Difficulty, GearItem, PickupKind, PlayerGear, PlayerId, PlayerSetup, SimConfig, SimEvent } from './types';
 
 // ───────────────────────────── Types ─────────────────────────────
 
@@ -515,6 +515,25 @@ export function withGearLost(save: SaveGame, playerIds: readonly number[]): Save
 }
 
 /**
+ * Équipement RÉCUPÉRÉ : un joueur relevé reprend un objet qu'il avait perdu à sa chute (événement `gearPicked` avec `recovered: true`). L'objet est ajouté à l'équipement SAUVEGARDÉ de ce joueur (identifiant = indice
+ * dans `players`) avec la règle de ramassage habituelle (`pickupDecision` : emplacement vide ou objet strictement meilleur ; sinon aucun changement). Sans cela, la perte serait écrite dès la chute mais jamais la
+ * récupération : quitter puis « Continuer » ferait perdre ce que le joueur a repris. Seul l'objet repris est ajouté (les autres ramassages de la salle ne sont toujours écrits qu'au début de la salle suivante), et
+ * jamais plus que ce que la règle de ramassage donnerait : aucune restitution d'un objet perdu qui n'a pas été repris. Même référence si rien ne change (joueur inconnu, objet déjà couvert).
+ */
+export function withGearRecovered(save: SaveGame, playerId: number, item: GearItem, swapped: boolean = false): SaveGame {
+  const p = Number.isInteger(playerId) && playerId >= 0 ? save.players[playerId] : undefined;
+  if (!p) return save;
+  const before = p.gear ?? normalizeGear(undefined);
+  const decision = pickupDecision(before, item);
+  // `swapped` : reprise par ÉCHANGE manuel d'accessoire (décision 'swap') : l'accessoire repris remplace celui de la sauvegarde, comme en mémoire
+  if (decision !== 'equip' && decision !== 'upgrade' && !(swapped && decision === 'swap')) return save;
+  const next = cloneGear(before);
+  equipItem(next, item);
+  const players = save.players.map((q, i) => (i === playerId ? makeSavedPlayer(q.characterId, q.difficulty, next, q.heart) : q));
+  return { ...save, players };
+}
+
+/**
  * Applique les événements d'un pas de simulation à la sauvegarde :
  *  - `roomEntered` 'start' | 'next' → salle atteinte (niveau `levelId` de la partie en cours) ;
  *  - `roomEntered` 'restart' (défaite collective) → IGNORÉ : la sauvegarde ne change pas ;
@@ -522,7 +541,8 @@ export function withGearLost(save: SaveGame, playerIds: readonly number[]): Save
  *  - `gearLost` → l'équipement sauvegardé du joueur tombé est vidé (règle stricte : pas de point de reprise) ;
  *  - `heartLost` → le cœur rangé sauvegardé du joueur tombé est vidé (même règle) ;
  *  - `heartUsed` → le cœur rangé sauvegardé de l'utilisateur est vidé AUSSI (un cœur utilisé ne revient jamais après « quitter puis Continuer » : aucune duplication).
- * Retourne la sauvegarde mise à jour (même référence si rien n'a changé). Les autres événements sont ignorés.
+ * Retourne la sauvegarde mise à jour (même référence si rien n'a changé). Les autres événements sont ignorés (en particulier `gearPicked` : l'équipement ramassé en cours de salle n'est écrit qu'au début de la
+ * salle suivante ; la seule exception, le ramassage par son propriétaire d'un objet perdu à sa chute après un relevage, est écrite par `AutoSaver` avec `withGearRecovered`).
  *
  * @param levelId niveau joué par la simulation qui émet ces événements
  */

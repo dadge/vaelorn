@@ -25,7 +25,9 @@
  *  6. ÉCHANGE D'ACCESSOIRE : un joueur qui ÉCHANGE à la main un accessoire d'une autre sorte (bouton A, `swapAccessory` de la simulation) pose l'ANCIEN à ses pieds, verrouillé pour lui tant qu'il n'a pas quitté
  *     le rayon (`lockMode === 'leave'`) : c'est un objet qu'il LAISSE (`gearLeftBy`). Un appel part alors avec l'icône de l'objet posé, aux mêmes conditions que pour un objet refusé (destinataires : alliés vivants
  *     pour qui l'objet serait utile, mêmes délais, un seul déclenchement par couple joueur / objet). Le verrou ne l'empêche pas : il EST le déclencheur. L'appel après échange part à l'instant du geste : il n'est PAS soumis au délai de `AUTO_CALL_COOLDOWN_MS` ni à un signal d'objet en cours (qu'il remplace) ; seuls un appel manuel en cours (cas rare : il l'emporte) ou une croix en cours le retardent ; si le joueur quitte l'objet avant la fin de ce retard, l'appel est perdu (écart accepté, TODO.md). Les objets ÉPARPILLÉS par une chute (`lockMode === 'life'`,
- *     le joueur est à terre) et le cœur qui tombe ne déclenchent rien (ce n'est pas un choix du joueur).
+ *     le joueur est à terre) et le cœur qui tombe ne déclenchent rien (ce n'est pas un choix du joueur : ni appel du joueur, ni appel d'un allié qui refuse l'objet, tant que l'objet est verrouillé pour le joueur à terre). RELEVÉ = ÉQUIPEMENT RÉCUPÉRABLE : une fois le joueur relevé, ses objets (`GearDropState.recoverFor`) ne sont plus verrouillés pour lui ;
+ *     tant que leur PROPRIÉTAIRE est vivant et peut les reprendre (`pickupDecision` 'equip' ou 'upgrade'), aucun allié qui les refuse ne lance d'appel à leur sujet (l'objet est à lui, il vient le prendre : pas d'appel fantôme) ;
+ *     le propriétaire lui-même, lui, n'appelle que s'il REFUSE l'un d'eux (il a ramassé mieux entre-temps : refus ordinaire, destinataires ordinaires).
  *  7. CROIX ROUGE = DEMANDE DE SOINS (`stepCross`, constantes [B30]) : un joueur VIVANT dont les PV tombent à `CROSS_CALL_THRESHOLD` (30 %) de ses PV max ou MOINS prévient les alliés VIVANTS qui PEUVENT réellement le
  *     soigner (`canHealWithCross` : emplacement cœur contenant un cœur utilisable — avec `options.heartSlot` —, ou VALENTINE, qui soigne avec sa flèche et son onde sans cœur), évalués au déclenchement ; aucun
  *     soigneur = aucun appel. Symbole : une croix rouge (`icon: 'cross'`, `ref: 'x'`). Un joueur à terre ne la déclenche pas (il a déjà sa flèche). Répétition : un nouvel appel au plus toutes les
@@ -97,6 +99,18 @@ export function gearRefusedBy(p: Pick<PlayerState, 'status' | 'id' | 'loadout'>,
  */
 export function gearLeftBy(p: Pick<PlayerState, 'status' | 'id'>, drop: Pick<GearDropState, 'lockedFor' | 'lockMode'>): boolean {
   return p.status === 'alive' && drop.lockMode === 'leave' && drop.lockedFor === p.id;
+}
+
+/**
+ * Cet objet est-il un objet RÉCUPÉRABLE que son propriétaire (relevé, vivant) va reprendre ? Vrai si `drop.recoverFor` désigne un joueur de `players` vivant pour qui `pickupDecision` vaut 'equip' ou 'upgrade'
+ * (l'objet est à lui : un allié qui le refuse ne l'annonce pas). Faux pour un objet ordinaire (`recoverFor` absent) ou si le propriétaire est à terre / ne peut pas le prendre (refus ordinaire).
+ */
+export function gearAwaitsOwner(players: readonly Pick<PlayerState, 'status' | 'id' | 'loadout'>[], drop: Pick<GearDropState, 'item' | 'recoverFor'>): boolean {
+  if (drop.recoverFor === undefined) return false;
+  const owner = players.find((q) => q.id === drop.recoverFor);
+  if (!owner || owner.status !== 'alive') return false;
+  const decision = pickupDecision(owner.loadout, drop.item);
+  return decision === 'equip' || decision === 'upgrade';
 }
 
 /** Cet objet d'équipement serait-il utile à ce joueur (vivant, non verrouillé, 'equip' ou 'upgrade') ? ('swap' = échange manuel : pas utile.) */
@@ -257,6 +271,8 @@ export function stepAutoCalls(
         const ref = gearRef(d.id);
         // objet refusé (décision 'ignore') OU objet que ce joueur vient de LAISSER par un échange d'accessoire (verrou 'leave' : le verrou est ici le déclencheur, pas un obstacle)
         if (seen?.includes(ref) || distSq(p.pos, d.pos) > gr || !((!busy && gearRefusedBy(p, d)) || gearLeftBy(p, d))) continue;
+        if (d.lockMode === 'life' && d.lockedFor !== null) continue; // équipement éparpillé par un joueur À TERRE (verrou 'life') : pas un choix de joueur, aucun appel (ni de lui, ni d'un allié qui le refuse)
+        if (d.recoverFor !== undefined && d.recoverFor !== p.id && gearAwaitsOwner(players, d)) continue; // objet d'un joueur relevé qui va le reprendre : pas d'appel d'un allié qui le refuse
         const to = recipients(players, p.id, (q) => gearUsefulTo(q, d));
         if (to.length === 0) continue;
         found = { ref, icon: 'gear', item: { ...d.item }, to };

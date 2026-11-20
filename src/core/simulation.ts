@@ -22,7 +22,7 @@
  *  (d) attaques des joueurs (mêlée instantanée / projectiles) ; puis ATTAQUES SPÉCIALES : coups différés des spéciaux en cours
  *      (Danse des lames), puis déclenchement des spéciaux sur front montant de `ActionFrame.special` (joueur vivant, ne relevant
  *      pas, recharge écoulée) → événement `specialUsed` ; `specialReady` est émis en (a) quand la recharge atteint 0 ;
- *  (e) relevage (`updateRevive`) → reviveStarted / reviveInterrupted / playerRevived ;
+ *  (e) relevage (`updateRevive`) → reviveStarted / reviveInterrupted / playerRevived ; un joueur relevé reprend la main sur ses objets perdus (`recoverGearOnRevive` → gearRecoverable) ;
  *  (f) mécanismes (`updateMechanisms`, y compris statues jumelles / sablier / pont de lumière : leurs tuiles solides sont reprises
  *      par `solidRects()` dès le pas suivant et `ejectPlayersFromSolids` extrait un joueur dont le disque déborde sur une tuile qui
  *      vient de s'éteindre/fermer), `aliveEnemyCount` comptant aussi les apparitions encore en attente (jeton 'clear') ;
@@ -91,6 +91,7 @@ import {
   GEAR_BUDGET_PER_PLAYER,
   GEAR_PICKUP_RADIUS,
   GEAR_SEED_XOR,
+  GEAR_RECOVER_GRACE_MS,
   GEAR_TTL_MS,
   HEAL_CRYSTAL_HEAL,
   HORN_RADIUS_PX,
@@ -487,16 +488,16 @@ export class GameSimulation implements IGameSimulation {
    * Mise à terre SCÉNARISÉE d'un joueur (tutoriel uniquement : démonstration du relevage et de la mort d'équipe).
    * À appeler ENTRE deux pas ; ignore l'invulnérabilité. Même effet qu'une chute au combat (`markPlayerDown`), et l'événement
    * `playerDown` sort au pas suivant. Retourne false (aucun effet) si la phase n'est pas 'playing', si l'id est inconnu ou si le joueur
-   * est déjà à terre. Déterministe : mêmes entrées + mêmes appels au même tick = même état. (Si un réseau est ajouté, cet appel
+   * est déjà à terre. `gearTtlMs` (tutoriel : durée de vie longue, le joueur lit la consigne avant de relever) : durée de vie au sol de l'équipement perdu (défaut `GEAR_TTL_MS`). Déterministe : mêmes entrées + mêmes appels au même tick = même état. (Si un réseau est ajouté, cet appel
    * devra devenir une entrée datée.)
    */
-  knockDown(id: PlayerId): boolean {
+  knockDown(id: PlayerId, gearTtlMs: number = GEAR_TTL_MS): boolean {
     if (this.state.phase !== 'playing') return false;
     const p = this.state.players.find((q) => q.id === id);
     if (!p || p.status !== 'alive') return false;
     markPlayerDown(p);
     this.pending.push({ type: 'playerDown', playerId: id });
-    this.loseGear(p, this.pending);
+    this.loseGear(p, this.pending, Number.isFinite(gearTtlMs) && gearTtlMs > 0 ? gearTtlMs : GEAR_TTL_MS);
     return true;
   }
 
@@ -633,15 +634,15 @@ export class GameSimulation implements IGameSimulation {
       }
     }
 
-    // (e) relevage
-    events.push(
-      ...updateRevive(
-        players,
-        (id) => arb.reviving.has(id),
-        (downed) => this.enemyThreatNear(downed),
-        dt,
-      ),
+    // (e) relevage ; un joueur RELEVÉ par un allié peut reprendre les objets qu'il avait perdus à sa chute (verrou levé, durée de vie remontée : `recoverGearOnRevive`)
+    const reviveEvents = updateRevive(
+      players,
+      (id) => arb.reviving.has(id),
+      (downed) => this.enemyThreatNear(downed),
+      dt,
     );
+    events.push(...reviveEvents);
+    for (const e of reviveEvents) if (e.type === 'playerRevived') this.recoverGearOnRevive(e.playerId, events);
 
     // (f) mécanismes
     if (s.phase === 'playing') {
@@ -1297,10 +1298,10 @@ export class GameSimulation implements IGameSimulation {
 
   /**
    * Un joueur TOMBÉ perd TOUT : les 6 emplacements et les bonus temporaires. L'équipement perdu est ÉPARPILLÉ autour de lui (`scatterPoints`, ramené sur des
-   * cases praticables), 20 s au sol (`GEAR_TTL_MS`), VERROUILLÉ pour lui (il ne peut pas les reprendre) ; ses alliés les ramassent s'ils sont meilleurs que
-   * les leurs. Règle stricte : aussi à la défaite d'équipe (pas de point de reprise). Idempotent : sans équipement, ne fait rien. Émet `gearLost` puis `gearDropped`.
+   * cases praticables), 20 s au sol (`GEAR_TTL_MS`), VERROUILLÉ pour lui tant qu'il est à terre : s'il est RELEVÉ, le verrou est levé et il peut les reprendre (`recoverGearOnRevive`) ; ses alliés les
+   * ramassent s'ils sont meilleurs que les leurs. Règle stricte : aussi à la défaite d'équipe (pas de point de reprise). Idempotent : sans équipement, ne fait rien. Émet `gearLost` puis `gearDropped`.
    */
-  private loseGear(p: PlayerState, events: SimEvent[]): void {
+  private loseGear(p: PlayerState, events: SimEvent[], ttlMs: number = GEAR_TTL_MS): void {
     this.loseHeart(p, events); // le cœur rangé est perdu avec l'équipement (mais tombe au sol) : même garde-fou, même idempotence
     const hadBuffs = p.loadout.buffs.length > 0;
     const lost = stripLoadout(p.loadout);
@@ -1310,7 +1311,40 @@ export class GameSimulation implements IGameSimulation {
     }
     events.push({ type: 'gearLost', playerId: p.id, items: lost, pos: { x: p.pos.x, y: p.pos.y } });
     const points = scatterPoints(p.pos, lost.length);
-    lost.forEach((item, i) => this.addGearDrop(item, this.findPickupSpot(points[i]), p.id, 'life', true, events));
+    lost.forEach((item, i) => this.addGearDrop(item, this.findPickupSpot(points[i]), p.id, 'life', true, events, ttlMs));
+  }
+
+  /**
+   * RELEVÉ = ÉQUIPEMENT RÉCUPÉRABLE. À l'instant où `id` vient d'être RELEVÉ par un allié (le seul chemin `down` → `alive` par relevage : `updateRevive`), les objets qu'il avait perdus à sa chute (`lockMode`
+   * 'life' verrouillés pour lui, éparpillés par `loseGear`) et qui sont encore au sol :
+   *  - perdent leur verrou pour lui (`lockedFor` = null) et gardent la trace de leur propriétaire (`recoverFor`) : il les ramasse en marchant dessus, selon les règles habituelles (`pickupDecision` : son équipement est
+   *    vide, tout est strictement meilleur ; un allié PEUT encore les prendre s'ils lui sont utiles : aucun transfert forcé, un objet déjà pris reste chez l'allié) ;
+   *  - voient leur durée de vie remontée à AU MOINS `GEAR_RECOVER_GRACE_MS` (jamais au-delà de `GEAR_TTL_MS`, jamais raccourcie : le relevage a pris ~3 s) ; cette grâce n'est donnée qu'UNE FOIS par objet, au moment
+   *    où son verrou est levé (un objet déjà récupérable d'une chute précédente n'est pas ré-armé : la durée de vie totale reste bornée).
+   * Ne touche NI aux objets des autres, NI au verrou 'leave' (accessoire posé volontairement), NI aux objets sans verrou (butin, cœur tombé : déjà ramassables), NI aux bonus temporaires (perdus pour de bon). Un
+   * objet périmé n'existe plus : rien n'est restitué. Hors phase 'playing' / 'roomCleared' (le ramassage est inactif), ou lors d'un redémarrage / changement de salle (le sol est neuf : `reviveAllDowned` ne passe
+   * pas ici) : aucun effet. Émet `gearRecoverable` (jamais à 0 objet). Idempotent. Aucun tirage aléatoire.
+   */
+  private recoverGearOnRevive(id: PlayerId, events: SimEvent[]): void {
+    const s = this.state;
+    if (s.phase !== 'playing' && s.phase !== 'roomCleared') return;
+    const p = s.players.find((q) => q.id === id);
+    if (!p || p.status !== 'alive') return;
+    const grace = Math.min(GEAR_RECOVER_GRACE_MS, GEAR_TTL_MS);
+    let count = 0;
+    for (const d of s.room.gearDrops as GearDropState[]) {
+      const mine = d.lockMode === 'life' && d.lockedFor === id;
+      if (!mine && d.recoverFor !== id) continue; // objet d'un autre (ou butin), verrou 'leave' : intacts
+      if (mine) {
+        d.lockedFor = null;
+        d.recoverFor = id;
+        // la grâce n'est donnée QU'UNE FOIS par objet (à son déverrouillage) : un objet déjà récupérable d'une chute précédente, resté au sol, n'est pas ré-armé par un relevage ultérieur (sinon chute / relevage
+        // en boucle le garderait au sol bien au-delà de `GEAR_TTL_MS`)
+        if (d.ttlMs < grace) d.ttlMs = grace;
+      }
+      count++; // un objet encore récupérable compte pour le retour visuel, même sans grâce supplémentaire
+    }
+    if (count > 0) events.push({ type: 'gearRecoverable', playerId: id, count, pos: { x: p.pos.x, y: p.pos.y } });
   }
 
   /**
@@ -1361,7 +1395,9 @@ export class GameSimulation implements IGameSimulation {
       }
       const replaced = equipItem(best.loadout, d.item);
       drops.splice(i, 1);
-      events.push({ type: 'gearPicked', dropId: d.id, playerId: best.id, item: d.item, replaced, pos: { x: d.pos.x, y: d.pos.y } });
+      const picked: Extract<SimEvent, { type: 'gearPicked' }> = { type: 'gearPicked', dropId: d.id, playerId: best.id, item: d.item, replaced, pos: { x: d.pos.x, y: d.pos.y } };
+      if (d.recoverFor === best.id) picked.recovered = true; // le propriétaire reprend SON objet après son relevage (la sauvegarde l'enregistre aussitôt)
+      events.push(picked);
     }
     for (let i = 0; i < buffDrops.length; ) {
       const d = buffDrops[i];
@@ -1394,7 +1430,9 @@ export class GameSimulation implements IGameSimulation {
     if (idx < 0) return;
     drops.splice(idx, 1);
     const old = equipItem(p.loadout, d.item);
-    events.push({ type: 'gearSwapped', playerId: p.id, item: d.item, dropped: old ?? d.item, pos: { x: d.pos.x, y: d.pos.y } });
+    const swapped: Extract<SimEvent, { type: 'gearSwapped' }> = { type: 'gearSwapped', playerId: p.id, item: d.item, dropped: old ?? d.item, pos: { x: d.pos.x, y: d.pos.y } };
+    if (d.recoverFor === p.id) swapped.recovered = true; // le propriétaire reprend SON accessoire par un échange manuel : la sauvegarde l'enregistre aussi (comme un ramassage)
+    events.push(swapped);
     if (old) this.addGearDrop(old, this.findPickupSpot(p.pos), p.id, 'leave', false, events);
   }
 

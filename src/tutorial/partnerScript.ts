@@ -38,6 +38,7 @@ export function loadProgram(vm: VmState, ops: readonly PartnerOp[]): void {
   vm.callCdMs = 0;
   vm.stuckMs = 0;
   vm.detourMs = 0;
+  delete vm.waitMs;
 }
 
 /** Frame vide (aucune entrée). */
@@ -192,6 +193,14 @@ export function stepVm(vm: VmState, env: VmEnv, override?: PartnerOp): ActionFra
   switch (op.op) {
     case 'idle':
       if (op.until && env.evalCond(op.until)) advance();
+      return frame;
+    case 'wait':
+      // minuteur en ms de simulation (déterministe) ; mis à zéro quand l'attente est finie (la suivante repart de 0)
+      vm.waitMs = (vm.waitMs ?? 0) + dtMs;
+      if (vm.waitMs >= op.ms) {
+        delete vm.waitMs;
+        advance();
+      }
       return frame;
     case 'walk': {
       const mv = moveToward(vm, me.pos, me.moving, resolveTarget(op.at, room, state), arrivalRadius(op.at), dtMs);

@@ -926,6 +926,12 @@ export interface GearDropState {
   /** Joueur qui ne peut PAS le ramasser (propriétaire qui l'a perdu / lâché), ou null. */
   lockedFor: PlayerId | null;
   lockMode: GearLockMode;
+  /**
+   * RELEVÉ = ÉQUIPEMENT RÉCUPÉRABLE : posé (une seule fois) quand le propriétaire d'un objet qu'il avait perdu à sa chute est RELEVÉ par un allié : le verrou `'life'` est alors levé (`lockedFor` = null) et ce champ garde le
+   * souvenir de À QUI l'objet appartient (halo à sa couleur, pas d'appel automatique d'un allié qui le refuse, sauvegarde du ramassage par son propriétaire). Absent partout ailleurs : un état sans relevage est identique
+   * à celui d'avant son ajout (ancien JSON valide).
+   */
+  recoverFor?: PlayerId;
 }
 
 /**
@@ -1090,12 +1096,17 @@ export type SimEvent =
   // ── Équipement ──
   /** Un objet d'équipement apparaît au sol (butin d'un ennemi, ou `scattered` : équipement perdu éparpillé par un joueur tombé). */
   | { type: 'gearDropped'; dropId: number; item: GearItem; pos: Vec2; scattered: boolean }
-  /** Un joueur ramasse (équipe) un objet ; `replaced` = l'objet qu'il remplace (disparu), ou null si l'emplacement était vide. */
-  | { type: 'gearPicked'; dropId: number; playerId: PlayerId; item: GearItem; replaced: GearItem | null; pos: Vec2 }
+  /** Un joueur ramasse (équipe) un objet ; `replaced` = l'objet qu'il remplace (disparu), ou null si l'emplacement était vide. `recovered: true` (champ ABSENT sinon) : objet que ce joueur avait perdu à sa chute et qu'il reprend après son relevage. */
+  | { type: 'gearPicked'; dropId: number; playerId: PlayerId; item: GearItem; replaced: GearItem | null; pos: Vec2; recovered?: true }
+  /**
+   * Un joueur RELEVÉ peut reprendre ses objets restés au sol (`count` >= 1, jamais émis à 0) : leur verrou est levé pour lui et leur durée de vie remontée à `GEAR_RECOVER_GRACE_MS` au moins. Sert au retour visuel
+   * (texte flottant « Reprends tes objets ! ») et au son discret ; n'a aucun effet sur l'état.
+   */
+  | { type: 'gearRecoverable'; playerId: PlayerId; count: number; pos: Vec2 }
   /** Un joueur tombé perd tout son équipement (`items`, éparpillés au sol) et ses bonus temporaires. */
   | { type: 'gearLost'; playerId: PlayerId; items: GearItem[]; pos: Vec2 }
   /** Un échange MANUEL d'accessoire (action A) : l'ancien, lâché aux pieds du joueur, est dans le `gearDropped` suivant. */
-  | { type: 'gearSwapped'; playerId: PlayerId; item: GearItem; dropped: GearItem; pos: Vec2 }
+  | { type: 'gearSwapped'; playerId: PlayerId; item: GearItem; dropped: GearItem; pos: Vec2; recovered?: true }
   /** Un bonus temporaire apparaît au sol (butin d'un ennemi). */
   | { type: 'buffDropped'; dropId: number; kind: DroppedBuffKind; pos: Vec2 }
   /** Un bonus temporaire démarre (ramassé, ou reçu du cor de guerre d'un allié : `fromPlayerId`). */

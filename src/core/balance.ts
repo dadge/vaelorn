@@ -39,6 +39,7 @@
  *  [B29] HEART_HEAL_RADIUS ......... EMPLACEMENT CŒUR : rayon de contact (px) pour soigner un coéquipier blessé avec B (= portée du relevage, `REVIVE_RANGE`)
  *  [B30] CROSS_CALL_* .............. CROIX ROUGE (demande de soins, appel automatique) : seuil 30 % des PV max, réarmement à 60 %, répétition toutes les 10 s
  *  [B31] *_CHATTY .................. Romain « parle beaucoup » (trait d'appel, `callTraits.ts`) : appel manuel et appel automatique d'objet SANS attente (0 ms ; un signal d'objet reste lisible 1 s avant d'être remplacé), croix rouge répétée toutes les 3 s
+ *  [B32] GEAR_RECOVER_GRACE_MS ..... RELEVÉ = ÉQUIPEMENT RÉCUPÉRABLE : durée de vie minimale (8 s) rendue, à l'instant du relevage, aux objets que le joueur a perdus à sa chute
  *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
@@ -335,6 +336,16 @@ export const AUTO_CALL_COOLDOWN_MS_CHATTY = 0;
 export const AUTO_CALL_MIN_SHOW_MS_CHATTY = 1_000;
 /** [B31] Répétition (ms) de la croix rouge d'un héros qui parle beaucoup : toutes les 3 s au lieu de 10 s (= la durée du signal : la croix est quasi continue tant qu'il reste à 30 % de PV ou moins). */
 export const CROSS_CALL_REPEAT_MS_CHATTY = 3_000;
+
+/**
+ * [B32] RELEVÉ = ÉQUIPEMENT RÉCUPÉRABLE : à l'instant où un joueur est RELEVÉ par un allié, chaque objet qu'il a perdu à sa chute et qui est encore au sol voit son verrou levé pour lui ET sa durée de vie
+ * remontée à AU MOINS cette durée (ms), sans jamais dépasser `GEAR_TTL_MS` ni raccourcir une durée plus longue. Pourquoi : le relevage maintenu prend ~3 s (`REVIVE_DURATION_MS`) et l'allié a pu mettre du
+ * temps à arriver ; les objets éparpillés sont à `GEAR_SCATTER_RADIUS` (20 px) du joueur, donc repris en quelques ticks (rayon de ramassage 14 px) : la grâce ne sert pas à « courir loin » mais à couvrir les objets repoussés
+ * par un mur (`findPickupSpot`), un joueur relevé qui s'éloigne ou est repoussé, et un relevage tardif, sans que la fin des 20 s d'origine ne les lui prenne à la dernière seconde. Donnée UNE SEULE FOIS par objet
+ * (au déverrouillage) : chute et relevage en boucle ne prolongent pas la durée de vie totale. 8 s, bien en dessous des 20 s d'origine (la récupération reste une possibilité, pas une garantie). Utilité à valider à la main
+ * (voir TODO.md : peut-être inutile).
+ */
+export const GEAR_RECOVER_GRACE_MS = 8_000;
 
 /**
  * [B29] EMPLACEMENT CŒUR : rayon de contact (px, centre à centre) dans lequel un joueur qui appuie sur B soigne un coéquipier VIVANT et BLESSÉ avec le cœur rangé : la portée du relevage

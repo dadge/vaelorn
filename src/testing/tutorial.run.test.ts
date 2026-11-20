@@ -3,6 +3,7 @@
  * (partenaire scripté + directeur + `knockDown`). Voir `tutorial.solution.ts`.
  */
 import { describe, expect, it } from 'vitest';
+import { GEAR_RECOVER_GRACE_MS } from '../core/balance';
 import { saveContextFromLevels } from '../core/save';
 import { MemorySaveRepository } from '../core/saveRepository';
 import { LEVELS } from '../levels';
@@ -113,6 +114,93 @@ describe('tutoriel : le relevage est incontournable', () => {
   }, T);
 });
 
+describe('tutoriel : le relevé reprend ses objets (équipement récupérable)', () => {
+  it("le partenaire porte un artefact II (le joueur le même : il ne le prend pas), le perd à sa chute, est relevé puis le reprend lui-même : étape `reviveGear` validée par ce ramassage, équipement identique à l'avant-chute", () => {
+    const run = new TutorialRun({ startRoomIndex: 4, strategy: 'solver' });
+    for (let i = 0; i < 60 * 40 && !run.director.snapshot().done.includes('reviveGear'); i++) run.tick();
+    expect(run.director.snapshot().done).toContain('revive');
+    expect(run.director.snapshot().done).toContain('reviveGear');
+    const ev = run.events;
+    expect(ev.filter((e) => e.type === 'gearLost' && e.playerId === 1)).toHaveLength(1);
+    expect(ev.filter((e) => e.type === 'gearRecoverable' && e.playerId === 1)).toHaveLength(1);
+    const recovered = ev.filter((e) => e.type === 'gearPicked' && e.playerId === 1 && e.recovered === true);
+    expect(recovered).toHaveLength(1);
+    // l'objet repris est celui que le partenaire portait ; le joueur n'a rien volé ; aucun objet ne reste au sol
+    expect(recovered[0]).toMatchObject({ item: { slot: 'artifact', level: 2 } });
+    expect(ev.some((e) => e.type === 'gearPicked' && e.playerId === 0)).toBe(false);
+    expect(run.state.players[1].loadout.artifact).toBe(2);
+    expect(run.state.players[0].loadout.artifact).toBe(2);
+    expect(run.state.room.gearDrops ?? []).toHaveLength(0);
+  }, T);
+
+  it("DÉMONSTRATION : le partenaire relevé n'attrape pas son objet tout de suite : l'anneau reste visible plusieurs secondes (attente `REVIVE_GEAR_WAIT_MS`) PENDANT que la carte reviveGear est affichée", () => {
+    const run = new TutorialRun({ startRoomIndex: 4, strategy: 'solver' });
+    let revivedAt = -1;
+    let recoverableAt = -1;
+    let pickedAt = -1;
+    let shownAt = -1;
+    let seen = 0;
+    for (let i = 0; i < 60 * 40 && !run.director.snapshot().done.includes('reviveGear'); i++) {
+      run.tick();
+      const t = run.state.timeMs;
+      for (; seen < run.events.length; seen++) {
+        const e = run.events[seen];
+        if (e.type === 'playerRevived' && e.playerId === 1 && revivedAt < 0) revivedAt = t;
+        if (e.type === 'gearRecoverable' && e.playerId === 1 && recoverableAt < 0) recoverableAt = t;
+        if (e.type === 'gearPicked' && e.playerId === 1 && e.recovered === true && pickedAt < 0) pickedAt = t;
+      }
+      if (shownAt < 0 && run.director.step.id === 'reviveGear' && run.director.view().visible) shownAt = t;
+    }
+    expect(revivedAt).toBeGreaterThan(0);
+    expect(recoverableAt).toBeGreaterThanOrEqual(revivedAt);
+    expect(shownAt).toBeGreaterThan(0);
+    // la reprise n'a lieu qu'APRÈS l'attente du partenaire, et la carte est déjà affichée depuis longtemps
+    expect(pickedAt - recoverableAt).toBeGreaterThanOrEqual(3000); // au moins 3 s d'anneau visible (valeur écrite en dur : indépendante de la constante)
+    expect(pickedAt).toBeGreaterThan(shownAt + 3000);
+    expect(pickedAt - recoverableAt).toBeLessThan(GEAR_RECOVER_GRACE_MS);
+  }, T);
+
+  it("joueur LENT (relève 35 s après le début, bien après les 20 s habituelles) : l'équipement perdu du tutoriel est toujours au sol, la leçon est donnée (anneau, attente, reprise) et l'équipement est identique", () => {
+    const run = new TutorialRun({ startRoomIndex: 4, strategy: 'solver', reviveNotBeforeMs: 35_000 });
+    for (let i = 0; i < 60 * 80 && !run.director.snapshot().done.includes('reviveGear'); i++) run.tick();
+    const ev = run.events;
+    const lost = ev.filter((e) => e.type === 'gearLost' && e.playerId === 1);
+    expect(lost).toHaveLength(1);
+    const revived = ev.findIndex((e) => e.type === 'playerRevived' && e.playerId === 1);
+    expect(revived).toBeGreaterThan(-1);
+    // l'objet n'a PAS péri avant le relevage : il est récupérable, repris par son propriétaire, jamais « noGear » d'office
+    expect(ev.filter((e) => e.type === 'gearRecoverable' && e.playerId === 1)).toHaveLength(1);
+    expect(ev.filter((e) => e.type === 'gearPicked' && e.playerId === 1 && e.recovered === true)).toHaveLength(1);
+    expect(run.state.players[1].loadout.artifact).toBe(2);
+    expect(run.state.timeMs).toBeGreaterThan(35_000);
+  }, T);
+
+  it("relevage très lent (objets périmés avant le relevage) : l'étape n'est jamais bloquée (plus d'objet au sol = validée), la salle se termine", () => {
+    const run = new TutorialRun({ startRoomIndex: 4, strategy: 'solver' });
+    // le partenaire est tombé, des objets au sol vieillissent : on les périme (même effet qu'un joueur trop lent) avant le relevage
+    for (let i = 0; i < 60 * 3; i++) run.tick();
+    for (const d of run.state.room.gearDrops ?? []) d.ttlMs = 1;
+    for (let i = 0; i < 60 * 90 && run.state.roomIndex === 4; i++) run.tick();
+    expect(run.state.roomIndex).toBe(5);
+    expect(run.director.snapshot().done).toContain('reviveGear');
+  }, T);
+
+  it("étape `reviveGear` sautée dès qu'elle s'affiche : la salle se termine quand même (le partenaire, sans ordre de reprise, ne bloque rien)", () => {
+    const run = new TutorialRun({ startRoomIndex: 4, strategy: 'solver' });
+    let skipped = false;
+    for (let i = 0; i < 60 * 90 && run.state.roomIndex === 4; i++) {
+      if (!skipped && run.director.step.id === 'reviveGear' && run.director.view().visible) {
+        expect(run.director.skipStep()).toBe('step');
+        skipped = true;
+      }
+      run.tick();
+    }
+    expect(skipped).toBe(true);
+    expect(run.state.roomIndex).toBe(5);
+    expect(run.director.snapshot().done).toContain('reviveGear');
+  }, T);
+});
+
 describe('tutoriel : déterminisme et absence de sauvegarde', () => {
   it('deux exécutions identiques donnent le même serialize() et le même snapshot() du directeur', () => {
     const a = new TutorialRun({ seed: 5 });
@@ -215,8 +303,8 @@ describe('tutoriel : appels automatiques (objet laissé, échange d accessoire, 
     const gearCalls = ev.filter((e) => e.type === 'autoCallStarted' && e.playerId === 0 && e.icon === 'gear');
     expect(gearCalls.length).toBe(2); // objet refusé + ancien accessoire de l'échange
     expect(gearCalls.every((e) => e.type === 'autoCallStarted' && e.to.length === 1 && e.to[0] === 1)).toBe(true);
-    const picked = ev.filter((e) => e.type === 'gearPicked' && e.playerId === 1);
-    expect(picked.length).toBe(2);
+    const picked = ev.filter((e) => e.type === 'gearPicked' && e.playerId === 1 && e.recovered !== true);
+    expect(picked.length).toBe(2); // (la reprise de son propre objet par le partenaire relevé, salle du relevage, est comptée à part)
     // 2. échange manuel : le nouvel accessoire (aimant) est équipé, l'ancien (lanterne) est posé et SIGNALÉ avec son icône
     const swap = ev.find((e) => e.type === 'gearSwapped');
     expect(swap).toMatchObject({ type: 'gearSwapped', playerId: 0, item: { slot: 'accessory', accessory: 'magnet' }, dropped: { slot: 'accessory', accessory: 'lantern' } });
@@ -227,7 +315,7 @@ describe('tutoriel : appels automatiques (objet laissé, échange d accessoire, 
     expect(crossCalls.every((e) => e.type === 'autoCallStarted' && e.playerId === 1 && e.to.includes(0))).toBe(true);
     expect(ev.some((e) => e.type === 'heartUsed' && e.playerId === 0 && e.targetId === 1)).toBe(true);
     const done = new Set(run.director.snapshot().done);
-    for (const id of ['gearLeft', 'gearSwap', 'exit.gear', 'crossCall', 'crossWho', 'exit.cross', 'autoCallRecap1', 'autoCallRecap2', 'exit.call']) expect(done.has(id), id).toBe(true);
+    for (const id of ['revive', 'reviveGear', 'gearLeft', 'gearSwap', 'exit.gear', 'crossCall', 'crossWho', 'exit.cross', 'autoCallRecap1', 'autoCallRecap2', 'exit.call']) expect(done.has(id), id).toBe(true);
   }, T);
 
   it('équipement actif dans le tutoriel, mais AUCUN tirage parasite : pas de butin d équipement ni de vie aléatoire, flux gearRngState et lootRngState inchangés, seuls les objets posés par script existent', () => {
