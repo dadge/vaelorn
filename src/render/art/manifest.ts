@@ -94,6 +94,8 @@ export const SPRITE_MANIFEST: Record<string, SpriteManifestEntry> = {
   'fx_bolt': e('Trait magique cyan', [8, 8], 'Projectile 8×8'),
   'fx_orb': e('Orbe magique magenta', [8, 8], 'Projectile 8×8'),
   'fx_shard': e('Éclat de cristal violet', [8, 8], 'Projectile 8×8'),
+  'fx_wave': e('Onde d’épée : croissant bleu-blanc orienté vers la droite (le rendu pivote), tir de l’épée d’un héros de mêlée', [8, 8], 'Projectile 8×8'),
+  'fx_axe': e('Hache lancée : manche brun, fer clair à droite (le rendu la fait tourner en vol), tir de la hache d’un héros de mêlée', [8, 8], 'Projectile 8×8'),
   'fx_heal': e('Croix de soin verte', [8, 8], 'Projectile 8×8'),
   'fx_hit_*': e('Impact en 3 frames (étincelle, gerbe, éclats)', [16, 16], 'Animation d\'impact 16×16, 3 frames'),
   'fx_revive_*': e('Relevage : anneau et étincelles montantes, 4 frames', [16, 16], 'Animation de relevage 16×16, 4 frames'),

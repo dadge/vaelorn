@@ -12,6 +12,7 @@
  *  - mêlée : instantanée au déclenchement (l'animation `attackAnimMs` est purement visuelle), arc devant le joueur
  *    (`isInArc` de geometry.ts), ligne de vue requise (pas de coup à travers un mur ou une porte fermée) ;
  *  - un projectile non perforant disparaît à son premier impact ; un perforant n'atteint chaque cible qu'une fois.
+ *  - TOUTE ARME fait tirer un héros de mêlée ([B34]) : onde d'épée (`wave`), hache lancée (`axe`, perforante), flèche (`arrow`) ; ces projectiles n'agissent jamais sur les alliés (seul 'heal' le fait).
  *
  * Ce module n'importe PAS ai.ts : la réaction d'un ennemi touché (recul, flash, étourdissement) est injectée via
  * `CombatContext.onEnemyHit` (la simulation y branche `onEnemyHit` de ai.ts).
@@ -118,7 +119,8 @@ export function canPlayerAttack(p: PlayerState): boolean {
  *  - il est vivant (`!dead`, `hp > 0`) ;
  *  - il est dans l'arc (`isInArc` : portée `attack.range` depuis le centre du joueur, ouverture `attack.arcDeg`, rayon de l'ennemi pris en compte) ;
  *  - aucun mur/porte fermée/bloc ne coupe le segment joueur → ennemi.
- * Retourne `[]` pour un personnage à distance.
+ * Retourne `[]` pour un personnage à distance. Se fonde sur l'attaque de BASE du personnage : un héros de mêlée ARMÉ tire ([B34], `effectiveAttack`) et ne frappe plus, `performPlayerAttack` ne
+ * l'appelle alors pas (les bots non plus : ils choisissent leur comportement sur l'attaque effective).
  * @param player attaquant
  * @param enemies candidats
  * @param grid grille statique (ligne de vue)
@@ -158,7 +160,7 @@ export function healPlayer(target: PlayerState, amount: number): number {
 }
 
 /**
- * Construit (sans l'ajouter nulle part) le projectile d'une attaque à distance (celle du personnage, ou celle de l'ARC équipé : `effectiveAttack`),
+ * Construit (sans l'ajouter nulle part) le projectile d'une attaque à distance (celle du personnage, ou celle de l'ARME équipée d'un héros de mêlée : `effectiveAttack`),
  * ou null si l'attaque effective n'est pas à distance ou si le départ est dans un mur. Dégâts BRUTS = `playerBaseDamage(personnage)` × multiplicateur d'arme ; durée de vie = `projectile.lifeMs` ;
  * perforation = `projectile.pierce`. Le projectile part devant le joueur dans la direction `dir`.
  * @param player tireur
@@ -175,7 +177,7 @@ export function buildPlayerProjectile(
   dir: Aim8 = playerAim(player),
 ): ProjectileState | null {
   const character = getCharacter(player.characterId);
-  const atk = effectiveAttack(character, player.loadout); // l'Arc fait tirer un héros au corps à corps
+  const atk = effectiveAttack(character, player.loadout); // toute arme fait tirer un héros au corps à corps ([B34])
   const proj = atk.projectile;
   if (atk.kind !== 'ranged' || !proj) return null;
   const v = dirVec(dir);
@@ -338,7 +340,7 @@ function setAttackDir(player: PlayerState): void {
 export function performPlayerAttack(ctx: CombatContext, player: PlayerState): boolean {
   if (!ctx.damageEnabled || !canPlayerAttack(player)) return false;
   const character = getCharacter(player.characterId);
-  const atk = effectiveAttack(character, player.loadout); // hache : cadence plus lente ; arc : tir à distance
+  const atk = effectiveAttack(character, player.loadout); // héros de mêlée armé : tir (onde / hache / flèche) ; hache : cadence plus lente
   player.attackCooldownMs = atk.cooldownMs;
   player.attackAnimMs = atk.animMs;
   const aim = playerAim(player);

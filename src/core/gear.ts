@@ -20,7 +20,7 @@
  *  - TIRAGE (`rollGearDrop`) : budget par salle = nombre de joueurs ; chaque ennemi ordinaire tué tire un objet avec la probabilité qui répartit
  *    le budget restant sur les ennemis restants (poids `GEAR_ENEMY_WEIGHTS`), compensée par l'exclusion mutuelle avec le cœur de vie ; le demi-boss
  *    consomme un objet du budget (niveau >= `GEAR_MINIBOSS_MIN_LEVEL`) ; les ennemis invoqués et les boss finaux ne laissent rien.
- *  - EFFETS : vitesse, dégâts reçus, recharge du spécial, temps de relevage, arme (dégâts, cadence, arc) via les fonctions de ce module, appelées
+ *  - EFFETS : vitesse, dégâts reçus, recharge du spécial, temps de relevage, arme (dégâts, cadence, tir à distance : épée = onde, hache = hache lancée, arc = flèche, [B34]) via les fonctions de ce module, appelées
  *    par `players.ts`, `combat.ts` et `simulation.ts`. Chaque famille est plafonnée (`GEAR_CAPS`).
  */
 import {
@@ -34,6 +34,10 @@ import {
   BUFF_SPEED_TOTAL_CAP,
   BUFF_STAR_DURATION_MS,
   GEAR_AXE_COOLDOWN_MULT,
+  GEAR_AXE_THROW_PIERCE,
+  GEAR_AXE_THROW_RADIUS,
+  GEAR_AXE_THROW_RANGE_PX,
+  GEAR_AXE_THROW_SPEED,
   GEAR_BONUS,
   GEAR_BOW_ARROW_RADIUS,
   GEAR_BOW_ARROW_SPEED,
@@ -48,6 +52,12 @@ import {
   GEAR_PICKUP_RADIUS,
   GEAR_SCATTER_RADIUS,
   GEAR_SLOT_WEIGHTS,
+  GEAR_THROW_DAMAGE_MULT,
+  GEAR_WAVE_COOLDOWN_MULT,
+  GEAR_WAVE_PIERCE,
+  GEAR_WAVE_RADIUS,
+  GEAR_WAVE_RANGE_PX,
+  GEAR_WAVE_SPEED,
   HORN_DURATION_MS,
   MAGNET_PULL_SPEED,
   VAMPIRE_HEAL_HP,
@@ -311,39 +321,48 @@ export function weaponMode(l: PlayerGear | undefined): WeaponMode {
 }
 
 /**
- * Attaque EFFECTIVE d'un héros avec son arme : la définition du personnage (même objet, aucune allocation) sans arme ou avec l'épée ;
- * hache → délai entre deux attaques × `GEAR_AXE_COOLDOWN_MULT` ; arc → un héros au corps à corps TIRE (flèche, portée `GEAR_BOW_RANGE_PX`,
- * même cadence et même animation que son corps à corps), un héros qui tire déjà garde son tir (inchangé).
+ * Attaque à distance d'un héros de MÊLÉE équipé d'une arme (même animation et même multiplicateur de force que sa mêlée) : `kind` de projectile, portée, vitesse,
+ * rayon, perforation et délai donnés par l'arme ([B34] pour l'épée et la hache, [B20] pour l'arc). Durée de vie = portée / vitesse.
+ */
+function thrownAttack(atk: AttackDef, kind: 'wave' | 'axe' | 'arrow', cooldownMult: number, range: number, speed: number, radius: number, pierce: boolean): AttackDef {
+  return {
+    kind: 'ranged',
+    cooldownMs: atk.cooldownMs * cooldownMult,
+    range,
+    animMs: atk.animMs,
+    damageMult: atk.damageMult,
+    projectile: { kind, speed, lifeMs: (range / speed) * 1000, radius, pierce },
+  };
+}
+
+/**
+ * Attaque EFFECTIVE d'un héros avec son arme ([B34] : toute arme permet de tirer de loin). Sans arme : la définition du personnage (même objet, aucune allocation).
+ *  - héros de MÊLÉE + arme → il TIRE (même animation et même force que sa mêlée) : épée → onde d'épée (`wave`, délai ×`GEAR_WAVE_COOLDOWN_MULT`), hache → hache lancée
+ *    (`axe`, perforante, délai ×`GEAR_AXE_COOLDOWN_MULT`), arc → flèche (portée `GEAR_BOW_RANGE_PX`, même cadence que sa mêlée) ;
+ *  - héros qui TIRE déjà (Sandrine, Valentine, Aelith) → son projectile et sa nature sont inchangés (Valentine garde son projectile de soin) : épée et arc ne changent rien à
+ *    l'attaque (le bonus de dégâts est dans `attackDamageMultiplier`), la hache ralentit la cadence (délai ×`GEAR_AXE_COOLDOWN_MULT`).
  */
 export function effectiveAttack(character: CharacterDef, l: PlayerGear | undefined): AttackDef {
   const atk = character.attack;
+  const ranged = atk.kind === 'ranged';
   switch (weaponMode(l)) {
+    case 'sword':
+      if (ranged) return atk;
+      return thrownAttack(atk, 'wave', GEAR_WAVE_COOLDOWN_MULT, GEAR_WAVE_RANGE_PX, GEAR_WAVE_SPEED, GEAR_WAVE_RADIUS, GEAR_WAVE_PIERCE);
     case 'axe':
-      return { ...atk, cooldownMs: atk.cooldownMs * GEAR_AXE_COOLDOWN_MULT };
+      if (ranged) return { ...atk, cooldownMs: atk.cooldownMs * GEAR_AXE_COOLDOWN_MULT };
+      return thrownAttack(atk, 'axe', GEAR_AXE_COOLDOWN_MULT, GEAR_AXE_THROW_RANGE_PX, GEAR_AXE_THROW_SPEED, GEAR_AXE_THROW_RADIUS, GEAR_AXE_THROW_PIERCE);
     case 'bow':
-      if (atk.kind === 'ranged') return atk;
-      return {
-        kind: 'ranged',
-        cooldownMs: atk.cooldownMs,
-        range: GEAR_BOW_RANGE_PX,
-        animMs: atk.animMs,
-        damageMult: atk.damageMult,
-        projectile: {
-          kind: 'arrow',
-          speed: GEAR_BOW_ARROW_SPEED,
-          lifeMs: (GEAR_BOW_RANGE_PX / GEAR_BOW_ARROW_SPEED) * 1000,
-          radius: GEAR_BOW_ARROW_RADIUS,
-          pierce: false,
-        },
-      };
+      if (ranged) return atk;
+      return thrownAttack(atk, 'arrow', 1, GEAR_BOW_RANGE_PX, GEAR_BOW_ARROW_SPEED, GEAR_BOW_ARROW_RADIUS, false);
     default:
       return atk;
   }
 }
 
 /**
- * Multiplicateur des dégâts de l'ATTAQUE NORMALE (pas des spéciaux) : épée ×1,20 ; hache ×1,35 ; arc ×0,70 pour un héros au corps à corps
- * (il tire) et ×1,15 pour un héros qui tire déjà ; sans arme ×1.
+ * Multiplicateur des dégâts de l'ATTAQUE NORMALE (pas des spéciaux). Héros qui tire déjà : épée ×1,20, hache ×1,35, arc ×1,15 ; héros de mêlée (il tire de loin) : épée ×0,90 et hache ×1,01
+ * (bonus × `GEAR_THROW_DAMAGE_MULT`), arc ×0,70 ; sans arme ×1. L'éclair de rage s'y ajoute (`rageMultiplier`).
  */
 export function attackDamageMultiplier(character: CharacterDef, l: GearWithBuffs | undefined): number {
   return weaponDamageMultiplier(character, l) * rageMultiplier(l);
@@ -356,13 +375,14 @@ export function rageMultiplier(l: { buffs?: readonly ActiveBuff[] } | undefined)
 
 /** Part « arme » de `attackDamageMultiplier` (sans l'éclair de rage). */
 function weaponDamageMultiplier(character: CharacterDef, l: PlayerGear | undefined): number {
+  const ranged = character.attack.kind === 'ranged';
   switch (weaponMode(l)) {
     case 'sword':
-      return 1 + GEAR_BONUS.weapon[0];
+      return (1 + GEAR_BONUS.weapon[0]) * (ranged ? 1 : GEAR_THROW_DAMAGE_MULT);
     case 'axe':
-      return 1 + GEAR_BONUS.weapon[1];
+      return (1 + GEAR_BONUS.weapon[1]) * (ranged ? 1 : GEAR_THROW_DAMAGE_MULT);
     case 'bow':
-      return character.attack.kind === 'ranged' ? 1 + GEAR_BOW_RANGED_BONUS : GEAR_BOW_MELEE_DAMAGE_MULT;
+      return ranged ? 1 + GEAR_BOW_RANGED_BONUS : GEAR_BOW_MELEE_DAMAGE_MULT;
     default:
       return 1;
   }

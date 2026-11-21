@@ -3,7 +3,7 @@
  * de l'atlas. Les scènes/entités ne composent jamais un nom à la main : elles passent par ici.
  */
 import { diagComponents, dirVec } from '../../core/geometry';
-import type { CharacterId, DiagDir, Dir, EnemyKind, TileGlyph, ZoneTheme } from '../../core/types';
+import type { CharacterId, DiagDir, Dir, EnemyKind, ProjectileKind, TileGlyph, ZoneTheme } from '../../core/types';
 import { hash2 } from './bitmap';
 import { RUNE_NAMES } from './contract';
 import { enemySpriteInfo } from './enemyTiers';
@@ -116,8 +116,20 @@ export function slashPose(dir: Dir, aim?: DiagDir): SlashPose {
 }
 
 /** Projectile : `fx_<kind>` (8×8, orienté vers la droite → pivoter selon la vitesse). */
-export function projectileFrame(kind: 'arrow' | 'bolt' | 'orb' | 'shard' | 'heal'): string {
+export function projectileFrame(kind: ProjectileKind): string {
   return `fx_${kind}`;
+}
+
+/** Vitesse de rotation (rad par ms de durée de vie restante) de la hache lancée en vol : ~2,9 tours par seconde (sous les 3 Hz que le projet s'impose pour les clignotements et rotations). */
+export const AXE_SPIN_RAD_PER_MS = 0.018;
+
+/**
+ * Rotation (rad) du sprite d'un projectile : l'angle de sa vitesse (`angle` = atan2(vy, vx), cardinal OU diagonal : les sprites sont dessinés orientés vers la droite) ; la HACHE LANCÉE
+ * (`axe`) tourne en plus sur elle-même, fonction pure de la durée de vie restante (aucun état de rendu : déterministe, identique à chaque image d'un même pas).
+ * `steady` (`prefers-reduced-motion`) : rendu fixe, la hache ne tourne pas (angle de tir seul).
+ */
+export function projectileRotation(kind: ProjectileKind, angle: number, lifeMs: number, steady = false): number {
+  return kind === 'axe' && !steady ? angle - Math.max(0, lifeMs) * AXE_SPIN_RAD_PER_MS : angle;
 }
 
 /** Impact (`step` 0..2) : `fx_hit_<step>`. */

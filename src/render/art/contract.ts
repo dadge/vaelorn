@@ -143,7 +143,7 @@ export function requiredFrameSpecs(): FrameSpec[] {
   for (const n of ['statue', 'banner', 'crate', 'bones', 'plant', 'crystal']) add(`decor_${n}`);
   add('sign');
   for (const d of ['up', 'down', 'left', 'right']) add(`fx_slash_${d}`, 24);
-  for (const n of ['arrow', 'bolt', 'orb', 'shard', 'heal']) add(`fx_${n}`, 8);
+  for (const n of ['arrow', 'bolt', 'orb', 'shard', 'heal', 'wave', 'axe']) add(`fx_${n}`, 8);
   for (let i = 0; i < 3; i++) add(`fx_hit_${i}`);
   for (let i = 0; i < 4; i++) add(`fx_revive_${i}`);
   add('fx_marker', 8);

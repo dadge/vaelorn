@@ -148,6 +148,8 @@ Taille = taille d'UNE frame. Les motifs utilisent `*` comme joker.
 | `fx_bolt` | 8×8 | Trait magique cyan | Projectile 8×8 |
 | `fx_orb` | 8×8 | Orbe magique magenta | Projectile 8×8 |
 | `fx_shard` | 8×8 | Éclat de cristal violet | Projectile 8×8 |
+| `fx_wave` | 8×8 | Onde d’épée : croissant bleu-blanc orienté vers la droite (le rendu pivote), tir de l’épée d’un héros de mêlée | Projectile 8×8 |
+| `fx_axe` | 8×8 | Hache lancée : manche brun, fer clair à droite (le rendu la fait tourner en vol), tir de la hache d’un héros de mêlée | Projectile 8×8 |
 | `fx_heal` | 8×8 | Croix de soin verte | Projectile 8×8 |
 | `fx_hit_*` | 16×16 | Impact en 3 frames (étincelle, gerbe, éclats) | Animation d'impact 16×16, 3 frames |
 | `fx_revive_*` | 16×16 | Relevage : anneau et étincelles montantes, 4 frames | Animation de relevage 16×16, 4 frames |

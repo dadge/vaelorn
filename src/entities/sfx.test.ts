@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SimEvent, SpecialKind } from '../core/types';
+import type { ProjectileKind, SimEvent, SpecialKind } from '../core/types';
 import { Sfx, sfxForEvent, sfxForSpecial, sfxVolume } from './sfx';
 
 const KINDS: SpecialKind[] = ['whirlwind', 'fireNova', 'dash', 'healNova', 'arrowFan', 'quake', 'smash', 'bladeDance'];
@@ -75,6 +75,23 @@ describe('sons : emplacement cœur', () => {
   it('les trois sons se jouent sans audio (Node) sans lever ; le refus est plus discret que l usage', () => {
     const s = new Sfx();
     for (const n of ['heartStore', 'heartMerge', 'heartUse', 'heartRefuse'] as const) expect(() => s.play(n)).not.toThrow();
+    s.destroy();
+  });
+});
+
+describe("sons : tirs des armes d'un héros de mêlée ([B34])", () => {
+  const fired = (kind: ProjectileKind): SimEvent => ({ type: 'projectileFired', projectileId: 1, kind, pos: { x: 0, y: 0 } });
+  it('onde et hache ont leur propre son de tir ; toutes les autres sortes gardent « shoot »', () => {
+    expect(sfxForEvent(fired('wave'))).toBe('shootWave');
+    expect(sfxForEvent(fired('axe'))).toBe('shootAxe');
+    for (const k of ['arrow', 'bolt', 'orb', 'shard', 'heal'] as ProjectileKind[]) expect(sfxForEvent(fired(k))).toBe('shoot');
+  });
+  it("ces sons restent discrets (jamais plus forts que le coup d'épée) et se jouent sans audio sans lever", () => {
+    expect(sfxVolume('shootWave')).toBeLessThanOrEqual(sfxVolume('attack'));
+    expect(sfxVolume('shootAxe')).toBeLessThanOrEqual(sfxVolume('attack'));
+    const s = new Sfx();
+    expect(() => s.play('shootWave')).not.toThrow();
+    expect(() => s.play('shootAxe')).not.toThrow();
     s.destroy();
   });
 });

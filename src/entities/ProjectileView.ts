@@ -5,7 +5,7 @@
 import type Phaser from 'phaser';
 import type { ProjectileState } from '../core/types';
 import { ATLAS_KEY } from '../render/art';
-import { projectileFrame } from '../render/art/animations';
+import { projectileFrame, projectileRotation } from '../render/art/animations';
 import { FX_GLOW_KEY } from '../render/fx';
 import { PosInterp } from './animation';
 import { DEPTH, ySortDepth, type ViewContext } from './common';
@@ -16,7 +16,18 @@ const HALO_COLORS: Record<string, number> = {
   orb: 0xe05aff,
   shard: 0x9a8aff,
   heal: 0x5be37d,
+  wave: 0xbfd4ff,
+  axe: 0xdfe6f2,
 };
+
+/** L'utilisateur demande-t-il moins d'animation (`prefers-reduced-motion`) ? Lu côté rendu ; faux si indisponible. */
+function prefersReducedMotion(): boolean {
+  try {
+    return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
 
 class ProjectileView {
   readonly interp: PosInterp;
@@ -25,6 +36,8 @@ class ProjectileView {
   private readonly halo: Phaser.GameObjects.Image;
   private readonly hostile: boolean;
   private lastRot = 0;
+  /** `prefers-reduced-motion` : la hache lancée ne tourne pas (angle de tir seul). */
+  private readonly steady = prefersReducedMotion();
 
   constructor(ctx: ViewContext, p: ProjectileState) {
     const { scene, rig } = ctx;
@@ -43,7 +56,7 @@ class ProjectileView {
     const { x, y } = this.interp.at(alpha);
     if (p.vel.x !== 0 || p.vel.y !== 0) this.lastRot = Math.atan2(p.vel.y, p.vel.x);
     this.sprite.setPosition(x, y);
-    this.sprite.setRotation(this.lastRot);
+    this.sprite.setRotation(projectileRotation(p.kind, this.lastRot, p.lifeMs, this.steady)); // la hache lancée tourne en vol (fixe avec prefers-reduced-motion) ; les autres suivent l'angle de tir (diagonale comprise)
     this.sprite.setDepth(ySortDepth(y) + 400);
     this.halo.setPosition(x, y);
   }

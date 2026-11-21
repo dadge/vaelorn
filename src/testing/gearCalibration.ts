@@ -15,7 +15,7 @@
  * Indice de PUISSANCE EFFECTIVE (`powerIndex`) : produit de ce que l'équipement change directement dans un combat, à vitesse et recharge près :
  *   puissance = (dégâts infligés × cadence d'attaque) / (dégâts reçus) × (1 + 0,3 × bonus de vitesse) × (1 + 0,2 × réduction de recharge du spécial)
  * avec, pour l'ARC d'un héros au corps à corps, un facteur ×1,5 (il tire à distance : moins de coups reçus pour le même effort) en plus de ses dégâts
- * ×0,7. Les ponts (0,3 / 0,2 / 1,5) sont des estimations de l'ingénieur d'équilibrage, pas des mesures : l'indice sert à comparer des réglages entre eux,
+ * ×0,7, et un facteur ×1,4 pour son ÉPÉE / sa HACHE (elles le font aussi tirer, de moins loin : [B34]). Les ponts (0,3 / 0,2 / 1,5 / 1,4) sont des estimations de l'ingénieur d'équilibrage, pas des mesures : l'indice sert à comparer des réglages entre eux,
  * la mesure qui fait foi reste celle des défaites, du temps sous 50 % de PV et de la durée.
  */
 import { getCharacter } from '../core/characters';
@@ -45,6 +45,8 @@ export const POWER_SPEED_WEIGHT = 0.3;
 export const POWER_SPECIAL_WEIGHT = 0.2;
 /** Facteur de sécurité de l'arc d'un héros au corps à corps (il tire à distance ; estimation, voir l'en-tête). */
 export const POWER_BOW_RANGE_FACTOR = 1.5;
+/** Même facteur pour l'ÉPÉE (onde, 140 px) et la HACHE (lancée, 120 px) d'un héros au corps à corps ([B34]) : portée moyenne, donc moins de coups évités que l'arc (190 px) ; estimation. */
+export const POWER_THROW_RANGE_FACTOR = 1.4;
 
 /**
  * Indice de PUISSANCE EFFECTIVE d'un héros avec cet équipement (1 = sans équipement). Voir l'en-tête du module pour la définition.
@@ -55,7 +57,7 @@ export function powerIndex(characterId: CharacterId, g: PlayerGear): number {
   const atk = effectiveAttack(ch, g);
   const rate = ch.attack.cooldownMs / Math.max(1, atk.cooldownMs);
   let dmg = attackDamageMultiplier(ch, g);
-  if (g.weapon === 3 && ch.attack.kind !== 'ranged') dmg *= POWER_BOW_RANGE_FACTOR;
+  if (g.weapon > 0 && ch.attack.kind !== 'ranged') dmg *= g.weapon === 3 ? POWER_BOW_RANGE_FACTOR : POWER_THROW_RANGE_FACTOR; // toute arme fait tirer un héros de mêlée
   const offense = dmg * rate;
   const defense = 1 / Math.max(0.01, 1 - damageReduction(g));
   const mobility = 1 + POWER_SPEED_WEIGHT * speedBonus(g);

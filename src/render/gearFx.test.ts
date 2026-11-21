@@ -172,20 +172,31 @@ describe('libellés (i18n fr / en)', () => {
     expect(gearPickedText({ slot: 'boots', level: 3 }, false, t)).toBe('Bottes ailées III : +30 % vitesse');
     expect(gearLabel({ slot: 'magic', level: 3 }, t)).toBe('Chapeau de sorcier III');
     expect(gearPickedText({ slot: 'protection', level: 1 }, false, t)).toBe('Casque I : -10 % dégâts reçus');
-    expect(gearPickedText({ slot: 'weapon', level: 2 }, false, t)).toBe('Hache II : +35 % dégâts, attaque 20 % plus lente');
-    expect(gearPickedText({ slot: 'weapon', level: 3 }, false, t)).toBe('Arc III : tir à distance');
+    // héros de mêlée (`ranged` faux) : TOUTE arme fait tirer de loin ([B34]) ; héros qui tire déjà : seulement le bonus
+    expect(gearPickedText({ slot: 'weapon', level: 1 }, false, t)).toBe("Épée I : tir à distance : onde d'épée");
+    expect(gearPickedText({ slot: 'weapon', level: 2 }, false, t)).toBe('Hache II : tir à distance : hache lancée, 20 % plus lente');
+    expect(gearPickedText({ slot: 'weapon', level: 3 }, false, t)).toBe('Arc III : tir à distance : flèches');
+    expect(gearPickedText({ slot: 'weapon', level: 1 }, true, t)).toBe('Épée I : +20 % dégâts');
+    expect(gearPickedText({ slot: 'weapon', level: 2 }, true, t)).toBe('Hache II : +35 % dégâts, attaque 20 % plus lente');
     expect(gearPickedText({ slot: 'weapon', level: 3 }, true, t)).toBe('Arc III : +15 % dégâts');
     setLanguage('en');
     expect(gearPickedText({ slot: 'boots', level: 3 }, false, t)).toBe('Winged boots III : +30% speed');
     expect(gearPickedText({ slot: 'artifact', level: 2 }, false, t)).toBe('Hourglass II : -25% special cooldown');
+    expect(gearPickedText({ slot: 'weapon', level: 1 }, false, t)).toBe('Sword I : ranged attack: sword wave');
+    expect(gearPickedText({ slot: 'weapon', level: 2 }, false, t)).toBe('Axe II : ranged attack: thrown axe, 20% slower');
+    expect(gearPickedText({ slot: 'weapon', level: 3 }, false, t)).toBe('Bow III : ranged attack: arrows');
     setLanguage('fr');
   });
   it('les pourcentages affichés viennent de balance.ts (jamais recopiés)', () => {
     expect(gearEffect({ slot: 'boots', level: 1 }).params).toEqual({ n: 10 });
     expect(gearEffect({ slot: 'artifact', level: 3 }).params).toEqual({ n: 35 });
     expect(gearEffect({ slot: 'magic', level: 3 }).params).toEqual({ n: 50 });
-    expect(gearEffect({ slot: 'weapon', level: 1 }).params).toEqual({ n: 20 });
-    expect(gearEffect({ slot: 'weapon', level: 2 }).params).toEqual({ n: 35, m: 20 });
+    expect(gearEffect({ slot: 'weapon', level: 1 }, true).params).toEqual({ n: 20 });
+    expect(gearEffect({ slot: 'weapon', level: 2 }, true).params).toEqual({ n: 35, m: 20 });
+    expect(gearEffect({ slot: 'weapon', level: 2 }).params).toEqual({ m: 20 }); // héros de mêlée : hache lancée, seul le ralentissement est annoncé
+    expect(gearEffect({ slot: 'weapon', level: 1 }).key).toBe('gear.effect.sword.melee');
+    expect(gearEffect({ slot: 'weapon', level: 2 }).key).toBe('gear.effect.axe.melee');
+    expect(gearEffect({ slot: 'weapon', level: 3 }).key).toBe('gear.effect.bow.melee');
   });
 });
 

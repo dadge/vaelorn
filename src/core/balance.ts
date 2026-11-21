@@ -41,6 +41,7 @@
  *  [B31] *_CHATTY .................. Romain « parle beaucoup » (trait d'appel, `callTraits.ts`) : appel manuel et appel automatique d'objet SANS attente (0 ms ; un signal d'objet reste lisible 1 s avant d'être remplacé), croix rouge répétée toutes les 3 s
  *  [B32] GEAR_RECOVER_GRACE_MS ..... RELEVÉ = ÉQUIPEMENT RÉCUPÉRABLE : durée de vie minimale (8 s) rendue, à l'instant du relevage, aux objets que le joueur a perdus à sa chute
  *  [B33] AIM_GRACE_MS, AIM_HYSTERESIS_DEG ... FRAPPE EN DIAGONALE : grâce (120 ms) de la visée diagonale au relâchement d'une touche, hystérésis (5°) du snap 8 directions d'un stick analogique
+ *  [B34] GEAR_THROW_DAMAGE_MULT, GEAR_WAVE_*, GEAR_AXE_THROW_* ... TOUTE ARME FAIT TIRER un héros de mêlée : dégâts du tir ×0,75 ; épée = onde 140 px / 240 px/s ; hache = hache lancée perforante 120 px / 170 px/s ; arc = flèche ([B20])
  *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
@@ -163,7 +164,7 @@ export const HEAL_CRYSTAL_MIN_BOSS_TILES = 17;
  *  - protection : dégâts reçus -10 / -20 / -30 % (Casque / Bouclier / Armure), appliqués APRÈS la difficulté et la résistance ;
  *  - artifact   : recharge du spécial -15 / -25 / -35 % (Amulette / Sablier / Orbe) ;
  *  - magic      : temps de relevage (de CELUI QUI RELÈVE) -20 / -35 / -50 % (Potion / Baguette / Chapeau de sorcier) ;
- *  - weapon     : fraction de dégâts EN PLUS de l'Épée (0,20) et de la Hache (0,35) ; l'Arc (niveau III) a ses constantes `GEAR_BOW_*`.
+ *  - weapon     : fraction de dégâts EN PLUS de l'Épée (0,20) et de la Hache (0,35) ; l'Arc (niveau III) a ses constantes `GEAR_BOW_*` ; pour un héros de mêlée, toute arme fait TIRER ([B34], plus bas : le bonus est alors multiplié par `GEAR_THROW_DAMAGE_MULT`).
  */
 export const GEAR_BONUS: Readonly<Record<BasicGearSlot, readonly [number, number, number]>> = {
   boots: [0.1, 0.2, 0.3],
@@ -200,6 +201,38 @@ export const GEAR_BOW_ARROW_RADIUS = 3;
 export const GEAR_BOW_MELEE_DAMAGE_MULT = 0.7;
 /** [B20] Arc : +15 % de dégâts pour un héros qui tire déjà (Valentine : son tir est un projectile de soin, l'effet de soin est inchangé). */
 export const GEAR_BOW_RANGED_BONUS = 0.15;
+
+// ───────────────────────── [B34] Armes à distance ─────────────────────────
+
+/**
+ * [B34] TOUTE ARME RAMASSÉE PERMET DE TIRER DE LOIN. Un héros de MÊLÉE (David, Romain, Brokk, Grok, Mira) qui porte une arme (épée I, hache II ou arc III) ne frappe plus au corps à corps :
+ * son attaque normale devient un TIR. L'arme choisit le projectile : épée → onde d'épée (`wave`), hache → hache lancée (`axe`), arc → flèche (constantes `GEAR_BOW_*`, [B20]).
+ * Sans arme, un héros de mêlée garde son corps à corps : l'arme est un compromis « portée contre mêlée » (pas de balayage d'un arc de 90–140°, pas de coup à bout portant garanti).
+ * Un héros qui TIRE déjà (Sandrine, Valentine, Aelith) garde son projectile : l'épée (+20 %), la hache (+35 %, délai ×1,2) et l'arc (+15 %) ne lui donnent que leur bonus.
+ *
+ * Dégâts d'un tir de mêlée avec l'épée / la hache = (1 + bonus d'arme) × `GEAR_THROW_DAMAGE_MULT` : un tir à distance est un peu moins fort que le coup de mêlée de l'arme
+ * (épée ×1,20 → ×0,90 ; hache ×1,35 → ×1,01 par tir, soit ×0,84 par seconde avec le délai ×1,2). Ordre voulu : hache > épée > arc par tir (1,01 > 0,90 > 0,70, l'arc reste l'arme
+ * LA MOINS forte mais la plus longue portée et la meilleure cadence) ; par seconde : hache ×0,84, épée ×0,82 (délai ×`GEAR_WAVE_COOLDOWN_MULT`), arc ×0,70.
+ */
+export const GEAR_THROW_DAMAGE_MULT = 0.75;
+/** [B34] Épée (niveau I) d'un héros de mêlée : portée (px) de l'ONDE D'ÉPÉE (croissant lumineux), moyenne : plus courte que l'arc (190), plus longue que la hache (120). */
+export const GEAR_WAVE_RANGE_PX = 140;
+/** [B34] Onde d'épée : vitesse (px/s), la plus rapide des armes de jet (durée de vie = portée / vitesse = ~583 ms). */
+export const GEAR_WAVE_SPEED = 240;
+/** [B34] Onde d'épée : rayon (px), large (le croissant balaie plus qu'une flèche) ; pour les MURS le rayon est ramené à 2 px comme tout projectile de joueur (`playerProjectileWallRadius`). */
+export const GEAR_WAVE_RADIUS = 6;
+/** [B34] Onde d'épée : non perforante (une cible par onde). */
+export const GEAR_WAVE_PIERCE = false;
+/** [B34] Onde d'épée : délai entre deux ondes = délai de mêlée du héros × 1,1 (un geste ample : l'arc garde la meilleure cadence ; la hache est à ×1,2, `GEAR_AXE_COOLDOWN_MULT`). */
+export const GEAR_WAVE_COOLDOWN_MULT = 1.1;
+/** [B34] Hache (niveau II) d'un héros de mêlée : portée (px) de la HACHE LANCÉE, courte (la plus courte des armes) : lourde, elle compense par sa perforation. */
+export const GEAR_AXE_THROW_RANGE_PX = 120;
+/** [B34] Hache lancée : vitesse (px/s), lente (durée de vie = portée / vitesse = ~706 ms). */
+export const GEAR_AXE_THROW_SPEED = 170;
+/** [B34] Hache lancée : rayon (px). */
+export const GEAR_AXE_THROW_RADIUS = 5;
+/** [B34] Hache lancée : PERFORANTE (elle traverse les ennemis alignés, une fois chacun) : contrepartie du balayage perdu de la mêlée. Délai entre deux jets : `GEAR_AXE_COOLDOWN_MULT` (×1,2). */
+export const GEAR_AXE_THROW_PIERCE = true;
 
 /** [B21] Budget d'objets d'équipement par salle de combat : 1 par joueur de la partie. */
 export const GEAR_BUDGET_PER_PLAYER = 1;

@@ -76,6 +76,25 @@ function shard(): Bitmap {
   return b;
 }
 
+/**
+ * Onde d'épée (épée d'un héros de mêlée, [B34]) : croissant lumineux orienté vers la DROITE (convexe à droite, ouvert à gauche), mêmes bleus que l'arc d'épée (`fx_slash_*`).
+ * Le rendu pivote selon la vitesse (y compris en diagonale).
+ */
+function wave(): Bitmap {
+  return Bitmap.fromRows(
+    ['..lm....', '...lmh..', '....lmh.', '....lmmh', '....lmmh', '....lmh.', '...lmh..', '..lm....'],
+    { l: F.slashLow, m: F.slashMid, h: F.slashHi },
+  );
+}
+
+/** Hache lancée (hache d'un héros de mêlée, [B34]) : manche brun, fer à tranchant clair sur la droite ; le rendu la FAIT TOURNER en vol (`projectileRotation`). */
+function axe(): Bitmap {
+  return Bitmap.fromRows(
+    ['...w....', '...wdh..', '...wdmh.', '...wdmmh', '...wdmh.', '...wdh..', '...w....', '...w....'],
+    { w: F.arrowShaft, d: F.slashLow, m: F.arrowHead, h: F.slashHi },
+  );
+}
+
 function heal(): Bitmap {
   const b = new Bitmap(8, 8);
   b.box(3, 0, 4, 7, F.heal);
@@ -197,6 +216,8 @@ export function buildFxFrames(): Record<string, Bitmap> {
     fx_bolt: bolt(),
     fx_orb: orb(),
     fx_shard: shard(),
+    fx_wave: wave(),
+    fx_axe: axe(),
     fx_heal: heal(),
     fx_marker: marker(),
     fx_shadow: shadow(),

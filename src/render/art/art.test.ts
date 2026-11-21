@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CharacterId, Dir, EnemyKind, TileGlyph, ZoneTheme } from '../../core/types';
+import type { CharacterId, Dir, EnemyKind, ProjectileKind, TileGlyph, ZoneTheme } from '../../core/types';
 import { ALL_PALETTE_COLORS, THEME_PALETTES, themeColorCount } from '../palettes';
 import {
   ATLAS_KEY,
@@ -18,7 +18,9 @@ import {
   leverFrame,
   manifestCovers,
   plateFrame,
+  AXE_SPIN_RAD_PER_MS,
   projectileFrame,
+  projectileRotation,
   requiredFrameSpecs,
   requiredFrames,
   reviveFrame,
@@ -362,7 +364,9 @@ describe('animations.ts : noms de frames', () => {
     }
     expect(keyFrame(5)).toBe('key_1');
     for (const d of DIRS) expect(hasFrame(slashFrame(d))).toBe(true);
-    for (const k of ['arrow', 'bolt', 'orb', 'shard', 'heal'] as const) expect(hasFrame(projectileFrame(k))).toBe(true);
+    // exhaustif : ajouter une sorte de projectile à `ProjectileKind` sans sprite fait échouer la compilation de ce test
+    const KINDS: Record<ProjectileKind, true> = { arrow: true, bolt: true, orb: true, shard: true, heal: true, wave: true, axe: true };
+    for (const k of Object.keys(KINDS) as ProjectileKind[]) expect(hasFrame(projectileFrame(k)), k).toBe(true);
     for (let i = -1; i < 5; i++) {
       expect(hasFrame(hitFrame(i))).toBe(true);
       expect(hasFrame(reviveFrame(i))).toBe(true);
@@ -398,5 +402,42 @@ describe('manifeste des sprites', () => {
       const hit = FRAME_NAMES.some((n) => (k.includes('*') ? new RegExp('^' + k.split('*').join('.*') + '$').test(n) : k === n));
       expect(hit, k).toBe(true);
     }
+  });
+});
+
+describe("projectiles d'armes : onde d'épée et hache lancée ([B34])", () => {
+  const data = buildAtlasData();
+  it("fx_wave et fx_axe : 8×8, dans le contrat, le manifeste et l'atlas", () => {
+    for (const n of ['fx_wave', 'fx_axe']) {
+      expect(hasFrame(n), n).toBe(true);
+      expect(requiredFrames()).toContain(n);
+      expect(manifestCovers(n), n).toBe(true);
+      const r = data.frames[n];
+      expect([r.w, r.h], n).toEqual([8, 8]);
+      let opaque = 0;
+      for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) if (data.pixels[((r.y + y) * data.width + r.x + x) * 4 + 3] > 0) opaque++;
+      expect(opaque, `${n} : sprite non vide`).toBeGreaterThanOrEqual(16);
+    }
+    expect(projectileFrame('wave')).toBe('fx_wave');
+    expect(projectileFrame('axe')).toBe('fx_axe');
+  });
+
+  it("rotation : l'angle de la vitesse (cardinal ou DIAGONAL) pour tous les projectiles, sauf la hache qui tourne en plus sur elle-même", () => {
+    const angles = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, -Math.PI / 4, -Math.PI / 2, (-3 * Math.PI) / 4];
+    for (const kind of ['arrow', 'bolt', 'orb', 'shard', 'heal', 'wave'] as ProjectileKind[]) {
+      for (const a of angles) for (const life of [0, 100, 700]) expect(projectileRotation(kind, a, life)).toBe(a);
+    }
+    // la hache : tourne en vol (la rotation change avec la durée de vie restante), de façon pure (mêmes entrées = même sortie) et monotone
+    const a = Math.PI / 4;
+    expect(projectileRotation('axe', a, 700)).toBe(projectileRotation('axe', a, 700));
+    expect(projectileRotation('axe', a, 600)).toBeGreaterThan(projectileRotation('axe', a, 700));
+    expect(projectileRotation('axe', a, 0)).toBe(a);
+    expect(projectileRotation('axe', a, -50)).toBe(a);
+    expect(projectileRotation('axe', a, 100) - projectileRotation('axe', a, 200)).toBeCloseTo(100 * AXE_SPIN_RAD_PER_MS, 9);
+  });
+
+  it("la hache tourne à 3 tours par seconde au plus, et pas du tout avec prefers-reduced-motion (rendu fixe : angle de tir seul)", () => {
+    expect((AXE_SPIN_RAD_PER_MS * 1000) / (2 * Math.PI)).toBeLessThanOrEqual(3);
+    for (const a of [0, Math.PI / 4, -Math.PI / 2]) for (const life of [0, 100, 700]) expect(projectileRotation('axe', a, life, true)).toBe(a);
   });
 });

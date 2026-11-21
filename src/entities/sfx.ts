@@ -11,6 +11,8 @@ import { spriteTier } from '../render/art/enemyTiers';
 export type SfxName =
   | 'attack'
   | 'shoot'
+  | 'shootWave'
+  | 'shootAxe'
   | 'enemyHit'
   | 'enemyDie'
   | 'playerHit'
@@ -82,6 +84,9 @@ interface SfxSpec {
 const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   attack: { f0: 420, f1: 200, durMs: 90, type: 'triangle', vol: 0.05 },
   shoot: { f0: 700, f1: 380, durMs: 80, type: 'square', vol: 0.03 },
+  // armes de jet d'un héros de mêlée ([B34]) : onde d'épée = « frrt » aigu et filant (même volume que la flèche), hache lancée = « vrom » plus grave et plus long ; jamais plus forts que le coup d'épée (`attack`)
+  shootWave: { f0: 980, f1: 520, durMs: 100, type: 'triangle', vol: 0.03 },
+  shootAxe: { f0: 360, f1: 190, durMs: 130, type: 'sawtooth', vol: 0.03 },
   enemyHit: { f0: 240, f1: 120, durMs: 80, type: 'square', vol: 0.05 },
   enemyDie: { f0: 300, f1: 60, durMs: 220, type: 'sawtooth', vol: 0.05 },
   playerHit: { f0: 180, f1: 70, durMs: 200, type: 'sawtooth', vol: 0.07 },
@@ -182,7 +187,7 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
     case 'playerAttack':
       return 'attack';
     case 'projectileFired':
-      return 'shoot';
+      return e.kind === 'wave' ? 'shootWave' : e.kind === 'axe' ? 'shootAxe' : 'shoot';
     case 'enemyHit':
       return 'enemyHit';
     case 'enemyDied':

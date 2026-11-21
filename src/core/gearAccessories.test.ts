@@ -154,8 +154,10 @@ describe('éclair de rage et étoile', () => {
     expect(rageMultiplier(createLoadout())).toBe(1);
     expect(rageMultiplier(undefined)).toBe(1);
     const david = CHARACTERS.david;
-    expect(attackDamageMultiplier(david, loadoutWith({ weapon: 1, buffs: rage.buffs }))).toBeCloseTo(1.2 * 1.5, 9);
-    expect(attackDamageMultiplier(david, loadoutWith({ weapon: 2 }))).toBeCloseTo(1.35, 9);
+    // héros de mêlée armé : il tire de loin, ses dégâts sont ceux de l'arme x 0,75 ([B34])
+    expect(attackDamageMultiplier(david, loadoutWith({ weapon: 1, buffs: rage.buffs }))).toBeCloseTo(1.2 * 0.75 * 1.5, 9);
+    expect(attackDamageMultiplier(david, loadoutWith({ weapon: 2 }))).toBeCloseTo(1.35 * 0.75, 9);
+    expect(attackDamageMultiplier(CHARACTERS.aelith, loadoutWith({ weapon: 1, buffs: rage.buffs }))).toBeCloseTo(1.2 * 1.5, 9);
     expect(attackDamageMultiplier(david, createLoadout())).toBe(1);
   });
   it('étoile : invulnérabilité tant que le bonus dure', () => {

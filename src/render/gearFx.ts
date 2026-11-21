@@ -79,7 +79,7 @@ function pct(f: number): number {
   return Math.round(f * 100);
 }
 
-/** Texte d'effet d'un objet : clé i18n + paramètres (valeurs lues dans `balance.ts`, jamais recopiées). `ranged` : le porteur tire déjà (effet de l'Arc). */
+/** Texte d'effet d'un objet : clé i18n + paramètres (valeurs lues dans `balance.ts`, jamais recopiées). `ranged` : le porteur tire déjà (Sandrine, Valentine, Aelith : l'arme n'ajoute que son bonus) ; sinon (héros de mêlée) toute arme le fait tirer de loin ([B34]). */
 export function gearEffect(item: GearItem, ranged = false): { key: string; params?: Record<string, number> } {
   const i = Math.max(0, Math.min(2, item.level - 1));
   switch (item.slot) {
@@ -92,8 +92,12 @@ export function gearEffect(item: GearItem, ranged = false): { key: string; param
     case 'magic':
       return { key: 'gear.effect.magic', params: { n: pct(GEAR_BONUS.magic[i]) } };
     case 'weapon':
-      if (item.level === 1) return { key: 'gear.effect.sword', params: { n: pct(GEAR_BONUS.weapon[0]) } };
-      if (item.level === 2) return { key: 'gear.effect.axe', params: { n: pct(GEAR_BONUS.weapon[1]), m: pct(GEAR_AXE_COOLDOWN_MULT - 1) } };
+      if (item.level === 1) return ranged ? { key: 'gear.effect.sword', params: { n: pct(GEAR_BONUS.weapon[0]) } } : { key: 'gear.effect.sword.melee' };
+      if (item.level === 2) {
+        return ranged
+          ? { key: 'gear.effect.axe', params: { n: pct(GEAR_BONUS.weapon[1]), m: pct(GEAR_AXE_COOLDOWN_MULT - 1) } }
+          : { key: 'gear.effect.axe.melee', params: { m: pct(GEAR_AXE_COOLDOWN_MULT - 1) } };
+      }
       return ranged ? { key: 'gear.effect.bow.ranged', params: { n: pct(GEAR_BOW_RANGED_BONUS) } } : { key: 'gear.effect.bow.melee' };
     default:
       switch (item.accessory) {

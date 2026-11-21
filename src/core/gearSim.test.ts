@@ -514,17 +514,37 @@ describe('effets mesurés en simulation', () => {
     s.step(DT, { 0: { moveX: 0, moveY: 0, attack: true, interact: false, revive: false } });
     return { lost: hp0 - (s.state.room.enemies[0]?.hp ?? 0), cooldown: p.attackCooldownMs, projectiles: s.state.room.projectiles.length, kind: s.state.room.projectiles[0]?.kind ?? null };
   }
-  it('DÉGÂTS INFLIGÉS : épée +20 %, hache +35 % ; cadence : hache 20 % plus lente', () => {
+  it("ARMES (héros de mêlée) : l'épée tire une onde (x0,90), la hache une hache lancée (x1,01, délai x1,2) ; plus de coup de mêlée avec une arme ([B34])", () => {
     const base = oneHit({});
     expect(base.lost).toBeGreaterThan(0);
     expect(base.projectiles).toBe(0);
     const sword = oneHit({ weapon: 1 });
     const axe = oneHit({ weapon: 2 });
-    expect(sword.lost / base.lost).toBeCloseTo(1.2, 5);
-    expect(axe.lost / base.lost).toBeCloseTo(1.35, 5);
-    expect(sword.cooldown).toBeCloseTo(base.cooldown, 5);
+    // cible collée au héros : le projectile part ET touche dans le même pas (non perforant : consommé ; la hache perfore : elle reste en vol)
+    expect(sword.lost / base.lost).toBeCloseTo(1.2 * 0.75, 5);
+    expect(axe.lost / base.lost).toBeCloseTo(1.35 * 0.75, 5);
+    expect(sword.kind).toBe(null); // l'onde a été consommée par son impact
+    expect(axe.kind).toBe('axe'); // la hache perforante continue sa route
+    expect(sword.cooldown / base.cooldown).toBeCloseTo(1.1, 1);
     expect(axe.cooldown / base.cooldown).toBeCloseTo(1.2, 1);
     expect(base.cooldown).toBeGreaterThan(CHARACTERS.david.attack.cooldownMs - 40);
+  });
+  it("ARMES (héros qui tire déjà) : épée +20 %, hache +35 % et cadence 20 % plus lente, projectile inchangé", () => {
+    const dmg = (weapon: number): { damage: number; kind: string; cooldown: number } => {
+      const s = mk(1, room('r1'), { characters: ['aelith'] });
+      s.state.players[0].loadout.weapon = weapon;
+      s.step(DT, {});
+      put(s, 0, 20, 64);
+      s.state.players[0].facing = 'right';
+      s.step(DT, { 0: { moveX: 0, moveY: 0, attack: true, interact: false, revive: false } });
+      return { damage: s.state.room.projectiles[0].damage, kind: s.state.room.projectiles[0].kind, cooldown: s.state.players[0].attackCooldownMs };
+    };
+    const base = dmg(0);
+    expect(dmg(1).damage / base.damage).toBeCloseTo(1.2, 5);
+    expect(dmg(2).damage / base.damage).toBeCloseTo(1.35, 5);
+    expect(dmg(2).cooldown / base.cooldown).toBeCloseTo(1.2, 1);
+    expect(dmg(1).cooldown).toBeCloseTo(base.cooldown, 5);
+    expect([dmg(1).kind, dmg(2).kind, dmg(3).kind]).toEqual(['arrow', 'arrow', 'arrow']);
   });
   it('ARC : un héros au corps à corps tire une flèche (pas de coup de mêlée), ~190 px de portée, 70 % de ses dégâts', () => {
     const bow = oneHit({ weapon: 3 });

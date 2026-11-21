@@ -82,7 +82,8 @@ export type CharacterId =
   | 'grok'
   | 'mira';
 
-export type ProjectileKind = 'arrow' | 'bolt' | 'orb' | 'shard' | 'heal';
+/** Sortes de projectiles. `wave` (onde d'épée) et `axe` (hache lancée) n'existent que pour les héros de mêlée équipés d'une épée / d'une hache (`effectiveAttack`, [B34]). */
+export type ProjectileKind = 'arrow' | 'bolt' | 'orb' | 'shard' | 'heal' | 'wave' | 'axe';
 
 export interface AttackDef {
   kind: 'melee' | 'ranged';

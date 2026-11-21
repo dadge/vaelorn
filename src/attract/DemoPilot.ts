@@ -23,7 +23,8 @@
 import { SIM_STEP_MS, TILE } from '../core/constants';
 import { getCharacter } from '../core/characters';
 import { projectileHitsWall, segmentBlocked, type PixelRect } from '../core/collision';
-import { enemyRadius, meleeTargets } from '../core/combat';
+import { enemyRadius, meleeTargets, playerProjectileWallRadius } from '../core/combat';
+import { effectiveAttack } from '../core/gear';
 import { playerAim, predictAttackAim } from '../core/players';
 import { aim8FromVec, dirFromVec, dist, pointInTileRect } from '../core/geometry';
 import type { RoomGrid } from '../core/grid';
@@ -528,7 +529,7 @@ export class DemoPilot {
   private engageRadius(p: PlayerState): number {
     const room = this.world.room;
     if (this.mode === 'patrol' || room.exit.requires.includes('clear')) return Infinity;
-    const atk = getCharacter(p.characterId).attack;
+    const atk = effectiveAttack(getCharacter(p.characterId), p.loadout);
     return atk.kind === 'melee' ? ENGAGE_MELEE_PX : Math.min(ENGAGE_RANGED_MAX_PX, atk.range * 0.85);
   }
 
@@ -561,7 +562,7 @@ export class DemoPilot {
   }
 
   private engage(p: PlayerState, state: GameState, e: EnemyState, enemies: readonly EnemyState[], now: number): ActionFrame | null {
-    const atk = getCharacter(p.characterId).attack;
+    const atk = effectiveAttack(getCharacter(p.characterId), p.loadout);
     const res = atk.kind === 'melee' ? this.engageMelee(p, state, e, enemies) : this.engageRanged(p, state, e);
     if (!res) this.skipUntil.set(e.id, now + SKIP_ENEMY_MS);
     return res;
@@ -578,7 +579,7 @@ export class DemoPilot {
   }
 
   private engageMelee(p: PlayerState, state: GameState, e: EnemyState, enemies: readonly EnemyState[]): ActionFrame | null {
-    const atk = getCharacter(p.characterId).attack;
+    const atk = effectiveAttack(getCharacter(p.characterId), p.loadout);
     const reach = Math.max(6, atk.range + enemyRadius(e) - 3);
     const d = dist(p.pos, e.pos);
     const delta = { x: e.pos.x - p.pos.x, y: e.pos.y - p.pos.y };
@@ -602,18 +603,21 @@ export class DemoPilot {
   }
 
   /** Un projectile de rayon `radius` peut-il aller de `a` à `b` sans toucher mur, pilier, porte fermée ni bloc (les fosses ne l'arrêtent pas) ? */
-  private shotClear(a: Vec2, b: Vec2, radius: number): boolean {
+  private shotClear(p: PlayerState, a: Vec2, b: Vec2, radius: number): boolean {
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     const n = Math.max(1, Math.ceil(len / 2.5));
+    // Comme le coeur : rayon MUR réduit pour un projectile de joueur (`playerProjectileWallRadius`), réservé au héros de mêlée ARMÉ (comme `botBrain.ts`) ; les tireurs gardent le rayon complet.
+    const ch = getCharacter(p.characterId);
+    const wallR = ch.attack.kind === 'melee' && effectiveAttack(ch, p.loadout).kind !== 'melee' ? playerProjectileWallRadius(radius) : radius;
     for (let i = 1; i <= n; i++) {
       const t = i / n;
-      if (projectileHitsWall({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, radius, this.world.grid, this.solids)) return false;
+      if (projectileHitsWall({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, wallR, this.world.grid, this.solids)) return false;
     }
     return true;
   }
 
   private engageRanged(p: PlayerState, state: GameState, e: EnemyState): ActionFrame | null {
-    const atk = getCharacter(p.characterId).attack;
+    const atk = effectiveAttack(getCharacter(p.characterId), p.loadout);
     const pr = atk.projectile ? atk.projectile.radius : 3;
     const tol = Math.max(2, enemyRadius(e) + pr - 1.5);
     const maxShot = atk.range * 0.85;
@@ -623,7 +627,7 @@ export class DemoPilot {
     const horiz = Math.abs(dy) <= Math.abs(dx);
     const perp = horiz ? dy : dx;
     const along = horiz ? dx : dy;
-    const los = this.shotClear(p.pos, e.pos, pr);
+    const los = this.shotClear(p, p.pos, e.pos, pr);
 
     if (los && Math.abs(perp) <= tol && Math.abs(along) <= maxShot) {
       // aligné, ligne dégagée, à portée : on tire en se tournant sur place

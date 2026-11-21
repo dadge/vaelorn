@@ -13,10 +13,10 @@
 import { DOWNED_THREAT_RADIUS, PLAYER_RADIUS, REVIVE_RANGE, SIM_STEP_MS, TILE } from '../core/constants';
 import { canOccupy, projectileHitsWall, segmentBlocked } from '../core/collision';
 import { getCharacter } from '../core/characters';
-import { enemyRadius, meleeTargets } from '../core/combat';
+import { enemyRadius, meleeTargets, playerProjectileWallRadius } from '../core/combat';
 import { playerAim, predictAttackAim } from '../core/players';
 import { ENEMIES } from '../core/enemies';
-import { pickupDecision } from '../core/gear';
+import { effectiveAttack, pickupDecision } from '../core/gear';
 import { dirFromVec, dist, pointInTileRect, tileCenter } from '../core/geometry';
 import type { ActionFrame, Aim8, Dir, EnemyKind, EnemyState, PlayerState, Vec2 } from '../core/types';
 import type { BackgroundFlags } from './botTypes';
@@ -115,6 +115,11 @@ export class BrainMemory {
   dodgeBlockedUntil = -Infinity;
   /** Le bot est en train de rejoindre ses alliés (hystérésis du regroupement). */
   regrouping = false;
+  /** Tireur : dernière position où le bot s'alignait sur sa cible, et temps (ms) passé sans bouger de plus de 1,5 px (détecte un alignement bloqué par un mur). */
+  alignPos: Vec2 | null = null;
+  alignStuckMs = 0;
+  /** Tireur : jusqu'à cette date (temps de jeu, ms) le bot rejoint sa cible par le CHEMIN (pathfinding) au lieu de s'aligner en ligne droite (alignement bloqué). */
+  alignPathUntil = -Infinity;
 
   /** Oublie tout (changement de salle). */
   reset(): void {
@@ -123,6 +128,9 @@ export class BrainMemory {
     this.dodgeMs = 0;
     this.dodgeBlockedUntil = -Infinity;
     this.regrouping = false;
+    this.alignPos = null;
+    this.alignStuckMs = 0;
+    this.alignPathUntil = -Infinity;
   }
 }
 
@@ -499,6 +507,12 @@ function wallBetween(bot: BotPlayer, a: Vec2, b: Vec2): boolean {
   return segmentBlocked(a, b, bot.run.sim.grid, bot.run.solids);
 }
 
+/** Héros de MÊLÉE qui tire grâce à son arme ([B34]) : le seul cas où les bots ont changé de comportement avec « toute arme fait tirer » (les bots tireurs d'origine restent identiques). */
+function isArmedMelee(p: PlayerState): boolean {
+  const ch = getCharacter(p.characterId);
+  return ch.attack.kind === 'melee' && effectiveAttack(ch, p.loadout).kind !== 'melee';
+}
+
 /**
  * Un projectile de rayon `radius` peut-il aller de `a` à `b` sans toucher un mur, un pilier, une porte fermée ou un bloc ?
  * (les fosses n'arrêtent pas les projectiles). Plus strict que `segmentBlocked` : un tir rasant le coin d'un pilier est perdu.
@@ -508,9 +522,12 @@ export function shotClear(bot: BotPlayer, a: Vec2, b: Vec2, radius: number): boo
   const n = Math.max(1, Math.ceil(len / 2.5));
   const grid = bot.run.sim.grid;
   const solids = bot.run.solids;
+  // Comme le coeur : contre les murs, un projectile de JOUEUR n'a qu'un rayon réduit (`playerProjectileWallRadius`, 2 px max). Réservé au héros de MÊLÉE ARMÉ (onde 6 px, hache 5 px : sans cela
+  // il juge le tir bloqué et reste inerte) : les bots tireurs (Sandrine, Valentine, Aelith), déjà calibrés avec le rayon complet, restent strictement identiques (niveaux terminables).
+  const wallR = isArmedMelee(bot.player) ? playerProjectileWallRadius(radius) : radius;
   for (let i = 1; i <= n; i++) {
     const t = i / n;
-    if (projectileHitsWall({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, radius, grid, solids)) return false;
+    if (projectileHitsWall({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, wallR, grid, solids)) return false;
   }
   return true;
 }
@@ -570,10 +587,10 @@ export function decideCombat(bot: BotPlayer, req: CombatRequest): CombatDecision
     if (dv) return { frame: frameOf({ moveX: dv.x, moveY: dv.y }), targetId: -1 };
   }
 
-  const def = getCharacter(p.characterId);
+  const atkKind = effectiveAttack(getCharacter(p.characterId), p.loadout).kind; // arme équipée : un héros de mêlée armé tire ([B34]) et se bat en tireur
   for (let i = 0; i < Math.min(4, cands.length); i++) {
     const e = cands[i].e;
-    const res = def.attack.kind === 'melee' ? engageMelee(bot, e) : engageRanged(bot, e);
+    const res = atkKind === 'melee' ? engageMelee(bot, e) : engageRanged(bot, e);
     if (res) {
       bot.mem.targetId = e.id;
       return { frame: res, targetId: e.id };
@@ -585,7 +602,7 @@ export function decideCombat(bot: BotPlayer, req: CombatRequest): CombatDecision
 function engageMelee(bot: BotPlayer, e: EnemyState): ActionFrame | null {
   const p = bot.player;
   const run = bot.run;
-  const atk = getCharacter(p.characterId).attack;
+  const atk = effectiveAttack(getCharacter(p.characterId), p.loadout);
   const er = enemyRadius(e);
   const reach = Math.max(6, atk.range + er - 3);
   const d = dist(p.pos, e.pos);
@@ -635,7 +652,7 @@ function rangedNudge(horiz: boolean, s: number): Partial<ActionFrame> {
 
 function engageRanged(bot: BotPlayer, e: EnemyState): ActionFrame | null {
   const p = bot.player;
-  const atk = getCharacter(p.characterId).attack;
+  const atk = effectiveAttack(getCharacter(p.characterId), p.loadout);
   const proj = atk.projectile;
   const pr = proj ? proj.radius : 3;
   const er = enemyRadius(e);
@@ -655,8 +672,22 @@ function engageRanged(bot: BotPlayer, e: EnemyState): ActionFrame | null {
     return frameOf(rangedNudge(horiz, s));
   }
 
-  if (!los) {
-    // Pas de ligne de tir : on s'approche (jusqu'à ~1 tuile) ; dès que la ligne se dégage, la branche de tir ci-dessus reprend.
+  // Alignement bloqué : la manoeuvre d'alignement ci-dessous va en ligne droite (sans chemin) ; si le bot n'a pas bougé de plus de 1,5 px pendant ~0,5 s sans pouvoir tirer
+  // (mur entre lui et le point d'alignement), il rejoint la cible par le chemin pendant 2 s au lieu de rester collé au mur.
+  const mem = bot.mem;
+  const now = bot.run.timeMs;
+  if (mem.alignPos && dist(mem.alignPos, p.pos) < 1.5) mem.alignStuckMs += SIM_STEP_MS;
+  else {
+    mem.alignPos = { x: p.pos.x, y: p.pos.y };
+    mem.alignStuckMs = 0;
+  }
+  if (mem.alignStuckMs >= 500 && isArmedMelee(p)) {
+    mem.alignPathUntil = now + 2000;
+    mem.alignStuckMs = 0;
+  }
+
+  if (!los || now < mem.alignPathUntil) {
+    // Pas de ligne de tir (ou alignement bloqué) : on s'approche (jusqu'à ~1 tuile) ; dès que la ligne se dégage, la branche de tir ci-dessus reprend.
     const r = bot.follower.follow(bot, {
       pos: e.pos,
       tolerance: 1,
@@ -696,8 +727,7 @@ function engageRanged(bot: BotPlayer, e: EnemyState): ActionFrame | null {
 function decideInPlaceCombat(bot: BotPlayer, forced: number | null): CombatDecision | null {
   const p = bot.player;
   const run = bot.run;
-  const def = getCharacter(p.characterId);
-  const atk = def.attack;
+  const atk = effectiveAttack(getCharacter(p.characterId), p.loadout);
   const list = run.aliveEnemies
     .filter((e) => forced === null || e.id === forced)
     .map((e) => ({ e, d: dist(p.pos, e.pos) }))

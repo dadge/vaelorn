@@ -5,6 +5,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  GEAR_AXE_COOLDOWN_MULT,
+  GEAR_AXE_THROW_RADIUS,
+  GEAR_AXE_THROW_RANGE_PX,
+  GEAR_AXE_THROW_SPEED,
   GEAR_BONUS,
   GEAR_BOW_MELEE_DAMAGE_MULT,
   GEAR_BOW_RANGED_BONUS,
@@ -13,11 +17,17 @@ import {
   GEAR_ENEMY_WEIGHTS,
   GEAR_LEVEL_WEIGHTS,
   GEAR_SLOT_WEIGHTS,
+  GEAR_THROW_DAMAGE_MULT,
   GEAR_TTL_MS,
+  GEAR_WAVE_COOLDOWN_MULT,
+  GEAR_WAVE_PIERCE,
+  GEAR_WAVE_RADIUS,
+  GEAR_WAVE_RANGE_PX,
+  GEAR_WAVE_SPEED,
   damageToPlayer,
   playerBaseDamage,
 } from './balance';
-import { CHARACTERS } from './characters';
+import { CHARACTERS, CHARACTER_LIST } from './characters';
 import {
   ACCESSORY_KINDS,
   BASIC_GEAR_SLOTS,
@@ -57,7 +67,7 @@ import {
   type GearRollInput,
 } from './gear';
 import { nextRandom, seedToState, type RngHolder } from './rng';
-import type { EnemyKind, GearItem, PlayerGear, PlayerId, PlayerLoadout } from './types';
+import type { AttackDef, EnemyKind, GearItem, PlayerGear, PlayerId, PlayerLoadout } from './types';
 
 /** PRNG de test (le vrai : mulberry32 sérialisable). */
 function rngOf(seed: number): () => number {
@@ -194,43 +204,119 @@ describe('bonus et plafonds [B18] [B19]', () => {
   });
 });
 
-describe('arme : épée, hache, arc', () => {
+describe('arme : épée, hache, arc (toute arme permet de tirer de loin, [B34])', () => {
   const david = CHARACTERS.david; // mêlée
   const aelith = CHARACTERS.aelith; // tire déjà
   const valentine = CHARACTERS.valentine; // tir de soin
   const w = (lv: number): PlayerGear => ({ ...createGear(), weapon: lv });
-  it('mode d\'arme selon le niveau', () => {
+  const MELEE = CHARACTER_LIST.filter((c) => c.attack.kind === 'melee');
+  const SHOOTERS = CHARACTER_LIST.filter((c) => c.attack.kind === 'ranged');
+  const rangeOf = (a: AttackDef): number => (a.projectile!.speed * a.projectile!.lifeMs) / 1000;
+  it("mode d'arme selon le niveau", () => {
     expect([weaponMode(undefined), weaponMode(w(0)), weaponMode(w(1)), weaponMode(w(2)), weaponMode(w(3))]).toEqual(['none', 'none', 'sword', 'axe', 'bow']);
   });
-  it('épée : +20 % de dégâts, cadence inchangée', () => {
-    expect(attackDamageMultiplier(david, w(1))).toBeCloseTo(1.2);
-    expect(effectiveAttack(david, w(1))).toBe(david.attack);
+  it('répartition des héros : mêlée = david, romain, brokk, grok, mira ; tireurs = sandrine, valentine, aelith', () => {
+    expect(MELEE.map((c) => c.id).sort()).toEqual(['brokk', 'david', 'grok', 'mira', 'romain']);
+    expect(SHOOTERS.map((c) => c.id).sort()).toEqual(['aelith', 'sandrine', 'valentine']);
   });
-  it('hache : +35 % de dégâts, attaque 20 % plus lente (délai x1,2)', () => {
-    expect(attackDamageMultiplier(david, w(2))).toBeCloseTo(1.35);
-    expect(effectiveAttack(david, w(2)).cooldownMs).toBeCloseTo(david.attack.cooldownMs * 1.2);
-    expect(effectiveAttack(david, w(2)).kind).toBe('melee');
+  it('sans arme : aucune modification pour TOUS les héros (même objet, multiplicateur 1)', () => {
+    for (const c of CHARACTER_LIST) {
+      expect(effectiveAttack(c, undefined)).toBe(c.attack);
+      expect(effectiveAttack(c, w(0))).toBe(c.attack);
+      expect(attackDamageMultiplier(c, createGear())).toBe(1);
+    }
+    expect(playerBaseDamage(david) * attackDamageMultiplier(david, createGear())).toBe(playerBaseDamage(david));
   });
-  it('arc : un héros au corps à corps TIRE (flèche, ~190 px de portée, 70 % de ses dégâts), même cadence', () => {
-    const a = effectiveAttack(david, w(3));
-    expect(a.kind).toBe('ranged');
-    expect(a.cooldownMs).toBe(david.attack.cooldownMs);
-    expect(a.range).toBe(GEAR_BOW_RANGE_PX);
-    expect(a.projectile?.kind).toBe('arrow');
-    expect((a.projectile!.speed * a.projectile!.lifeMs) / 1000).toBeCloseTo(GEAR_BOW_RANGE_PX);
-    expect(attackDamageMultiplier(david, w(3))).toBe(GEAR_BOW_MELEE_DAMAGE_MULT);
+  it('épée : un héros de mêlée TIRE une onde (non perforante, 140 px), délai x1,1, dégâts x0,90 ; animation et force conservées', () => {
+    for (const c of MELEE) {
+      const a = effectiveAttack(c, w(1));
+      expect(a.kind).toBe('ranged');
+      expect(a.projectile?.kind).toBe('wave');
+      expect(a.projectile?.pierce).toBe(GEAR_WAVE_PIERCE);
+      expect(a.projectile?.pierce).toBe(false);
+      expect(a.projectile?.speed).toBe(GEAR_WAVE_SPEED);
+      expect(a.projectile?.radius).toBe(GEAR_WAVE_RADIUS);
+      expect(a.range).toBe(GEAR_WAVE_RANGE_PX);
+      expect(rangeOf(a)).toBeCloseTo(GEAR_WAVE_RANGE_PX);
+      expect(a.cooldownMs).toBeCloseTo(c.attack.cooldownMs * GEAR_WAVE_COOLDOWN_MULT);
+      expect(a.animMs).toBe(c.attack.animMs);
+      expect(a.damageMult).toBe(c.attack.damageMult);
+      expect(attackDamageMultiplier(c, w(1))).toBeCloseTo((1 + GEAR_BONUS.weapon[0]) * GEAR_THROW_DAMAGE_MULT);
+      expect(attackDamageMultiplier(c, w(1))).toBeCloseTo(0.9);
+    }
+  });
+  it('hache : un héros de mêlée LANCE une hache (perforante, 120 px, lente), délai x1,2, dégâts x1,01 ; animation et force conservées', () => {
+    for (const c of MELEE) {
+      const a = effectiveAttack(c, w(2));
+      expect(a.kind).toBe('ranged');
+      expect(a.projectile?.kind).toBe('axe');
+      expect(a.projectile?.pierce).toBe(true);
+      expect(a.projectile?.speed).toBe(GEAR_AXE_THROW_SPEED);
+      expect(a.projectile?.radius).toBe(GEAR_AXE_THROW_RADIUS);
+      expect(rangeOf(a)).toBeCloseTo(GEAR_AXE_THROW_RANGE_PX);
+      expect(a.cooldownMs).toBeCloseTo(c.attack.cooldownMs * GEAR_AXE_COOLDOWN_MULT);
+      expect(a.animMs).toBe(c.attack.animMs);
+      expect(attackDamageMultiplier(c, w(2))).toBeCloseTo((1 + GEAR_BONUS.weapon[1]) * GEAR_THROW_DAMAGE_MULT);
+    }
+  });
+  it('arc : un héros de mêlée TIRE une flèche (~190 px, non perforante, 70 % de ses dégâts), même cadence que sa mêlée', () => {
+    for (const c of MELEE) {
+      const a = effectiveAttack(c, w(3));
+      expect(a.kind).toBe('ranged');
+      expect(a.cooldownMs).toBe(c.attack.cooldownMs);
+      expect(a.range).toBe(GEAR_BOW_RANGE_PX);
+      expect(a.projectile?.kind).toBe('arrow');
+      expect(a.projectile?.pierce).toBe(false);
+      expect(rangeOf(a)).toBeCloseTo(GEAR_BOW_RANGE_PX);
+      expect(attackDamageMultiplier(c, w(3))).toBe(GEAR_BOW_MELEE_DAMAGE_MULT);
+    }
     expect(GEAR_BOW_MELEE_DAMAGE_MULT).toBe(0.7);
   });
-  it('arc : un héros qui tire déjà garde son tir et gagne +15 % de dégâts (Valentine : projectile de soin conservé)', () => {
-    expect(effectiveAttack(aelith, w(3))).toBe(aelith.attack);
-    expect(attackDamageMultiplier(aelith, w(3))).toBeCloseTo(1 + GEAR_BOW_RANGED_BONUS);
+  it('tireurs : leur projectile et leur nature ne changent JAMAIS (Valentine : projectile de soin) ; bonus +20 % / +35 % / +15 %, hache : délai x1,2', () => {
+    for (const c of SHOOTERS) {
+      expect(effectiveAttack(c, w(1))).toBe(c.attack);
+      expect(effectiveAttack(c, w(3))).toBe(c.attack);
+      const axe = effectiveAttack(c, w(2));
+      expect(axe.projectile).toBe(c.attack.projectile);
+      expect(axe.kind).toBe('ranged');
+      expect(axe.cooldownMs).toBeCloseTo(c.attack.cooldownMs * GEAR_AXE_COOLDOWN_MULT);
+      expect(attackDamageMultiplier(c, w(1))).toBeCloseTo(1.2);
+      expect(attackDamageMultiplier(c, w(2))).toBeCloseTo(1.35);
+      expect(attackDamageMultiplier(c, w(3))).toBeCloseTo(1 + GEAR_BOW_RANGED_BONUS);
+    }
+    expect(effectiveAttack(valentine, w(1)).projectile?.kind).toBe('heal');
+    expect(effectiveAttack(valentine, w(2)).projectile?.kind).toBe('heal');
     expect(effectiveAttack(valentine, w(3)).projectile?.kind).toBe('heal');
-    expect(attackDamageMultiplier(valentine, w(3))).toBeCloseTo(1.15);
+    expect(effectiveAttack(aelith, w(2)).projectile?.kind).toBe('arrow');
+    expect(effectiveAttack(CHARACTERS.sandrine, w(2)).projectile?.kind).toBe('orb');
   });
-  it('sans arme : aucune modification (même objet, multiplicateur 1)', () => {
-    expect(effectiveAttack(david, undefined)).toBe(david.attack);
-    expect(attackDamageMultiplier(david, createGear())).toBe(1);
-    expect(playerBaseDamage(david) * attackDamageMultiplier(david, w(1))).toBeCloseTo(playerBaseDamage(david) * 1.2);
+  it("équilibre : par tir hache > épée > arc ; par seconde hache et épée > arc ; l'arc a la plus longue portée et la meilleure cadence", () => {
+    for (const c of MELEE) {
+      const dmg = (lv: number): number => attackDamageMultiplier(c, w(lv));
+      const dps = (lv: number): number => dmg(lv) / effectiveAttack(c, w(lv)).cooldownMs;
+      expect(dmg(2)).toBeGreaterThan(dmg(1));
+      expect(dmg(1)).toBeGreaterThan(dmg(3));
+      expect(dps(1)).toBeGreaterThan(dps(3));
+      expect(dps(2)).toBeGreaterThan(dps(3));
+      // un tir est moins fort que le coup de mêlée de la même arme
+      expect(dmg(1)).toBeLessThan(1 + GEAR_BONUS.weapon[0]);
+      expect(dmg(2)).toBeLessThan(1 + GEAR_BONUS.weapon[1]);
+      const cd = (lv: number): number => effectiveAttack(c, w(lv)).cooldownMs;
+      expect(cd(3)).toBeLessThan(cd(1));
+      expect(cd(3)).toBeLessThan(cd(2));
+      const rg = (lv: number): number => effectiveAttack(c, w(lv)).range;
+      expect(rg(3)).toBeGreaterThan(rg(1));
+      expect(rg(3)).toBeGreaterThan(rg(2));
+    }
+  });
+  it('durée de vie du projectile = portée / vitesse (aucune dérive entre `range` et `lifeMs`)', () => {
+    for (const lv of [1, 2, 3]) {
+      const a = effectiveAttack(david, w(lv));
+      expect(rangeOf(a)).toBeCloseTo(a.range, 6);
+    }
+  });
+  it("éclair de rage : se cumule avec l'arme (épée sur un héros de mêlée : 0,9 x 1,5)", () => {
+    expect(attackDamageMultiplier(david, { ...w(1), buffs: [{ kind: 'rage', remainingMs: 1000 }] })).toBeCloseTo(0.9 * 1.5);
   });
 });
 

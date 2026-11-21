@@ -444,3 +444,20 @@ describe('étapes du tutoriel : appels automatiques', () => {
     expect(fr['tutorial.step.crossCall']).toContain('sur {name}');
   });
 });
+
+describe("étapes du tutoriel : l'arme permet de tirer de loin ([B34])", () => {
+  it("l'étape d'ouverture de l'armurerie (gearLeft) le dit en français ET en anglais, sans ajouter d'étape ni de jeton", () => {
+    expect(TUTORIAL_STEPS.length).toBe(46);
+    expect(fr['tutorial.step.gearLeft']).toMatch(/ARME/);
+    expect(fr['tutorial.step.gearLeft']).toMatch(/tire de loin/);
+    expect(en['tutorial.step.gearLeft']).toMatch(/WEAPON/);
+    expect(en['tutorial.step.gearLeft']).toMatch(/shoots from afar/);
+  });
+
+  it("le texte est vrai pour les 8 héros : il réserve le tir à distance aux héros de mêlée et dit que les tireurs gardent leur tir", () => {
+    expect(fr['tutorial.step.gearLeft']).toMatch(/héros de mêlée qui ramasse/);
+    expect(fr['tutorial.step.gearLeft']).toMatch(/héros qui tire déjà garde son tir/);
+    expect(en['tutorial.step.gearLeft']).toMatch(/melee hero who picks up/);
+    expect(en['tutorial.step.gearLeft']).toMatch(/already shoots keeps their shot/);
+  });
+});
