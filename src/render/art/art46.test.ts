@@ -26,7 +26,7 @@ import {
 const NEW_KINDS: EnemyKind[] = ['warden', 'frostqueen', 'pyromancer', 'forgelord', 'wraith', 'voidlord'];
 const MINI: EnemyKind[] = ['warden', 'pyromancer', 'wraith'];
 const BOSS: EnemyKind[] = ['frostqueen', 'forgelord', 'voidlord'];
-const NEW_THEMES: ZoneTheme[] = ['frost', 'ember', 'void'];
+const NEW_THEMES: ZoneTheme[] = ['frost', 'ember', 'void', 'tide', 'dawn', 'brass'];
 const DIRS: Dir[] = ['up', 'down', 'left', 'right'];
 
 const atlas = buildAtlasData();
@@ -179,7 +179,22 @@ describe('thèmes frost / ember / void', () => {
     expect(luminance(THEME_PALETTES.void.floorMid)).toBeLessThan(50);
   });
 
-  it('tuiles : 7 types × 3 thèmes, opaques, avec des variantes différentes et des tuiles qui se distinguent', () => {
+  it('ambiances des niveaux 7-9 : tide = bleu-gris nacré et murs turquoise, dawn = rose et or, brass = laiton chaud', () => {
+    const tideFloor = rgb(THEME_PALETTES.tide.floorMid);
+    expect(tideFloor[2]).toBeGreaterThan(tideFloor[0]);
+    const tideWall = rgb(THEME_PALETTES.tide.wallMid);
+    expect(tideWall[1]).toBeGreaterThan(tideWall[0] + 50);
+    const dawnAccent = rgb(THEME_PALETTES.dawn.accent);
+    expect(dawnAccent[0]).toBeGreaterThan(dawnAccent[2] + 100);
+    const dawnWall = rgb(THEME_PALETTES.dawn.wallMid);
+    expect(dawnWall[0]).toBeGreaterThan(dawnWall[1]);
+    const brassFloor = rgb(THEME_PALETTES.brass.floorMid);
+    expect(brassFloor[0]).toBeGreaterThan(brassFloor[2] + 30);
+    const brassAccent = rgb(THEME_PALETTES.brass.accent);
+    expect(brassAccent[0]).toBeGreaterThan(brassAccent[2] + 100);
+  });
+
+  it('tuiles : 7 types × 6 thèmes (frost, ember, void, tide, dawn, brass), opaques, avec des variantes différentes et des tuiles qui se distinguent', () => {
     for (const t of NEW_THEMES) {
       const kinds = ['floor', 'floor_alt', 'wall', 'wall_top', 'pillar', 'pit', 'void'];
       const frames = kinds.map((k) => px(`tile_${t}_${k}`));

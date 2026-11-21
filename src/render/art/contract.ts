@@ -20,7 +20,7 @@ const ENEMIES: readonly EnemyKind[] = ['slime', 'bat', 'skeleton', 'archer', 'sp
 const BOSSES = ['golem', 'morvane', 'frostqueen', 'forgelord', 'voidlord'] as const;
 /** Demi-boss (niveaux 4-6) : frames 32×32 `miniboss_<kind>_<0|1|hurt>`. */
 const MINIBOSSES = ['warden', 'pyromancer', 'wraith'] as const;
-const THEMES: readonly ZoneTheme[] = ['crypt', 'grove', 'citadel', 'frost', 'ember', 'void'];
+const THEMES: readonly ZoneTheme[] = ['crypt', 'grove', 'citadel', 'frost', 'ember', 'void', 'tide', 'dawn', 'brass'];
 const TILE_KINDS = ['floor', 'floor_alt', 'wall', 'wall_top', 'pillar', 'pit', 'void'] as const;
 const RUNES = ['sun', 'moon', 'star', 'eye', 'flame', 'wave'] as const;
 

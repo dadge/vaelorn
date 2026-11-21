@@ -58,6 +58,7 @@ import type { ButtonName } from '../tutorial/types';
 import { ViewRig } from '../render/camera';
 import { DEPTH_LABELS, FxManager, damageNumberColor, ensureFxTextures } from '../render/fx';
 import { SpecialFx } from '../render/specialFx';
+import { tacticColor } from '../render/tacticIndicator';
 import { heartStoredTextKey, heartUsedFx } from '../render/heartSlotFx';
 import { CRYSTAL_HALO_COLOR, pickupHaloColor, pickupTextColor, pickupTextFor } from '../render/lifeFx';
 import { GEAR_FLOAT_WRAP_PX, buffColor, buffStartedText, gearLevelColor, gearPickedColor, gearPickedText, gearRecoverableText, gearSwappedText } from '../render/gearFx';
@@ -763,6 +764,16 @@ export class GameScene extends Phaser.Scene {
         fx.floatText(pos.x, pos.y - 14, buffStartedText(e.kind, buff?.power, e.durationMs, t), buffColor(e.kind), 1500, 18, 8, GEAR_FLOAT_WRAP_PX);
         break;
       }
+      case 'bossTactic': {
+        // tactiques de boss : sursaut de la couleur de la tactique autour du boss (aucun effet sur l'état) ; code 0 : rien
+        const boss = state.room.enemies.find((q) => q.id === e.enemyId);
+        if (boss && e.kind > 0) fx.ring(boss.pos.x, boss.pos.y, tacticColor(e.kind), 22, 420);
+        break;
+      }
+      case 'itemSeized':
+        // un boss confisque un bonus : petite gerbe sombre à l'endroit où il était
+        fx.burst(e.pos.x, e.pos.y - 4, 8, 0x7a5a9a, 40, 420, 50);
+        break;
       case 'vampireHeal': {
         // +1 PV de l'anneau du vampire : petit texte rouge sombre, discret (il peut tomber souvent)
         const pos = this.playerPos(e.playerId, state);
@@ -907,6 +918,7 @@ export class GameScene extends Phaser.Scene {
       case 'mechanismChanged': {
         const c = this.roomView?.centerOfMechanism(e.mechanismId);
         if (c && e.active) fx.pulse(c.x, c.y, 0xffe27a);
+        else if (c && e.expired === true) fx.pulse(c.x, c.y, 0xff6a5a); // levier à fenêtre qui retombe
         break;
       }
       case 'keyPicked': {

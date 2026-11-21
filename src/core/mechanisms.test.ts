@@ -293,7 +293,7 @@ describe('activation des mécanismes — leviers', () => {
     h.step({ press: [0] });
     const ev = h.wait(1100);
     expect(h.get<LeverState>('L1').active).toBe(false);
-    expect(ev).toContainEqual({ type: 'mechanismChanged', mechanismId: 'L1', active: false });
+    expect(ev).toContainEqual({ type: 'mechanismChanged', mechanismId: 'L1', active: false, expired: true });
     h.step({ press: [1] });
     expect(h.get<LeverState>('L2').active).toBe(true);
     expect(h.get<DoorState>('door').open).toBe(false);

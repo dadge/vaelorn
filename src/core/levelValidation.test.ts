@@ -646,3 +646,50 @@ describe('validateBossStructure', () => {
     expect(validateBossStructure(bossLevel({}, { enemies: [{ kind: 'morvane', tile: [8, 5] }] }), { minMiniBosses: 1 })).toEqual([]);
   });
 });
+
+// ───────────────────────────── Tactiques de boss ─────────────────────────────
+
+describe('validateLevel — tactiques de boss (`EnemySpawnDef.tactics`)', () => {
+  function tacticLevel(over: Partial<RoomDef> = {}, enemy: Partial<RoomDef['enemies'][number]> = {}): LevelDef {
+    const a = makeTestRoom({ id: 'a', mechanisms: [], enemies: [{ kind: 'slime', tile: [4, 4] }], exit: { rect: { x: 10, y: 5, w: 2, h: 2 }, requires: [] } });
+    const m = makeTestRoom({
+      id: 'm',
+      layout: makeTestLayout(16, 12),
+      mechanisms: [],
+      enemies: [{ kind: 'warden', tile: [8, 5], tactics: ['guardDowned', 'campCrystal'], ...enemy }],
+      healCrystals: [
+        { id: 'h1', tile: [2, 9] },
+        { id: 'h2', tile: [14, 2] },
+      ],
+      exit: { rect: { x: 13, y: 8, w: 2, h: 2 }, requires: ['clear'], final: true },
+      ...over,
+    });
+    return makeTestLevel({ rooms: [a, m] });
+  }
+
+  it('conforme : boss de salle pure, tactiques connues sans doublon, cristaux présents', () => {
+    expect(validateLevel(tacticLevel()).filter((e) => /tactics/.test(e))).toEqual([]);
+  });
+
+  it('refuse `tactics` sur un ennemi ordinaire', () => {
+    expectError(validateLevel(tacticLevel({}, { kind: 'slime' })), /tactics : réservé à un boss ou demi-boss/);
+  });
+
+  it('refuse une liste vide, une tactique inconnue ou en double', () => {
+    expectError(validateLevel(tacticLevel({}, { tactics: [] })), /liste non vide/);
+    expectError(validateLevel(tacticLevel({}, { tactics: ['guardDowned', 'bogus' as never] })), /tactique inconnue "bogus"/);
+    expectError(validateLevel(tacticLevel({}, { tactics: ['guardDowned', 'guardDowned'] })), /en double "guardDowned"/);
+  });
+
+  it('refuse un boss tactique qui n\'apparaît pas dès 1 joueur', () => {
+    expectError(validateLevel(tacticLevel({}, { minPlayers: 2 })), /présent dès 1 joueur/);
+  });
+
+  it('campCrystal exige des cristaux ; la salle doit être pure (ni abîme ni mécanisme)', () => {
+    expectError(validateLevel(tacticLevel({ healCrystals: [] })), /campCrystal exige des healCrystals/);
+    const withPit = tacticLevel();
+    setGlyph(withPit.rooms[1], 6, 6, '~');
+    expectError(validateLevel(withPit), /abîme/);
+    expectError(validateLevel(tacticLevel({ mechanisms: [{ id: 'p1', type: 'plate', tile: [6, 4] }] })), /salle de boss pure/);
+  });
+});

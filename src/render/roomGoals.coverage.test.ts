@@ -1,5 +1,5 @@
 /**
- * Couverture : TOUTES les salles des 6 niveaux, pour 1, 2, 3 et 4 joueurs, en français ET en anglais.
+ * Couverture : TOUTES les salles des 9 niveaux, pour 1, 2, 3 et 4 joueurs, en français ET en anglais.
  * Chaque salle doit annoncer un objectif de salle lisible (au moins une ligne non vide), sans clé i18n brute, sans
  * placeholder oublié, sans plantage (jetons d'exigence inconnus compris), et le bloc des objectifs personnels ne doit
  * jamais produire d'en-tête orphelin « x/y ».
@@ -52,9 +52,9 @@ function expectGoals(lines: readonly GoalLine[], where: string): void {
 beforeAll(() => resetI18nStateForTests());
 afterEach(() => setLanguage('en'));
 
-describe('couverture des objectifs de salle : 6 niveaux × toutes les salles × 1-4 joueurs × fr/en', () => {
-  it('les 6 niveaux sont couverts', () => {
-    expect(LEVELS).toHaveLength(6);
+describe('couverture des objectifs de salle : 9 niveaux × toutes les salles × 1-4 joueurs × fr/en', () => {
+  it('les 9 niveaux sont couverts', () => {
+    expect(LEVELS).toHaveLength(9);
     expect(LEVELS.reduce((n, l) => n + l.rooms.length, 0)).toBeGreaterThanOrEqual(30);
   });
 

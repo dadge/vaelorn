@@ -1,5 +1,5 @@
 /**
- * Tuiles 16×16 des 6 thèmes de donjon (crypt, grove, citadel, frost, ember, void) : toutes OPAQUES et raccordables entre elles.
+ * Tuiles 16×16 des 9 thèmes de donjon (crypt, grove, citadel, frost, ember, void, tide, dawn, brass) : toutes OPAQUES et raccordables entre elles.
  *
  *  floor / floor_alt : sol (la variante alt ajoute fissure / terre / rune ; mêmes joints → raccord parfait)
  *  wall              : FACE d'un mur (à utiliser quand la tuile en dessous n'est pas un mur)
@@ -12,7 +12,7 @@ import type { ZoneTheme } from '../../core/types';
 import { THEME_PALETTES, type ThemePalette } from '../palettes';
 import { Bitmap, hash2 } from './bitmap';
 
-export const TILE_THEMES: readonly ZoneTheme[] = ['crypt', 'grove', 'citadel', 'frost', 'ember', 'void'];
+export const TILE_THEMES: readonly ZoneTheme[] = ['crypt', 'grove', 'citadel', 'frost', 'ember', 'void', 'tide', 'dawn', 'brass'];
 export const TILE_KINDS = ['floor', 'floor_alt', 'wall', 'wall_top', 'pillar', 'pit', 'void'] as const;
 
 type Tiles = Record<(typeof TILE_KINDS)[number], Bitmap>;
@@ -509,10 +509,246 @@ function voidTiles(p: ThemePalette): Tiles {
   return { floor: floor(false), floor_alt: floor(true), wall, wall_top: top, pillar, pit, void: solid(p.void) };
 }
 
-/** Frames `tile_<theme>_<kind>` des 6 thèmes. */
+// ───────────────────────────── Abysses nacrées (L7) : nacre, corail, eau profonde ─────────────────────────────
+
+function tideTiles(p: ThemePalette): Tiles {
+  const floor = (alt: boolean): Bitmap => {
+    const b = solid(p.floorMid);
+    // dalles de nacre : joints bas/droit (raccord parfait), reflet haut-gauche, ondulations de sable
+    b.hline(0, 15, 15, p.floorDark);
+    b.vline(15, 0, 15, p.floorDark);
+    b.hline(1, 7, 0, p.floorLight);
+    b.vline(0, 1, 6, p.floorLight);
+    b.line(2, 6, 4, 5, p.floorDark);
+    b.line(4, 5, 6, 6, p.floorDark);
+    b.line(6, 6, 8, 5, p.floorDark);
+    b.line(9, 11, 11, 10, p.floorLight);
+    b.line(11, 10, 13, 11, p.floorLight);
+    speckle(b, alt ? 1211 : 1011, alt ? 9 : 6, [p.floorLight, p.floorDark], p.floorMid);
+    if (alt) {
+      // petite coquille rosée
+      b.polygon([[9, 3], [12, 3], [12.5, 6], [8.5, 6]], p.accent);
+      b.vline(10, 3, 5, p.accentDeep);
+      b.vline(11, 3, 5, p.accentDeep);
+      b.set(9, 3, p.accentHi);
+    }
+    return b;
+  };
+  const wall = solid(p.wallMid);
+  {
+    // mur de corail : branches claires, bulles, socle sombre
+    const b = wall;
+    b.hline(0, 15, 0, p.wallLight);
+    b.vline(3, 1, 10, p.wallDark);
+    b.vline(8, 1, 10, p.wallDark);
+    b.vline(13, 1, 10, p.wallDark);
+    for (const x of [1, 6, 11]) {
+      b.line(x, 10, x + 1, 5, p.wallLight);
+      b.line(x + 1, 5, x, 2, p.wallLight);
+      b.line(x + 1, 6, x + 3, 4, p.wallLight);
+    }
+    for (const [x, y] of [[5, 8], [10, 7], [14, 9], [2, 3]] as const) b.set(x, y, p.accentHi);
+    b.rect(0, 12, 16, 4, p.wallDark);
+    b.hline(0, 15, 12, p.wallTop);
+    b.hline(0, 15, 15, p.wallTop);
+    for (const x of [2, 7, 12]) b.set(x, 13, p.accent);
+  }
+  const top = solid(p.wallTop);
+  top.hline(0, 15, 0, p.wallDark);
+  top.vline(0, 0, 15, p.wallDark);
+  top.line(2, 5, 6, 8, p.wallDark);
+  top.line(6, 8, 5, 13, p.wallDark);
+  top.line(9, 3, 13, 6, p.wallDark);
+  speckle(top, 1077, 7, [p.wallDark], p.wallTop);
+  speckle(top, 1078, 4, [p.wallLight], p.wallTop);
+  top.set(11, 12, p.accent);
+  const pillar = floor(false);
+  {
+    const col = stoneColumn(p);
+    // colonne de nacre couronnée d'une perle rosée
+    col.ellipse(8, 7.3, 3.8, 2.8, p.wallLight);
+    col.ellipse(8, 6.2, 2.4, 2.2, p.accent);
+    col.set(7, 5, p.accentHi);
+    col.set(9, 7, p.accentDeep);
+    stampOutlined(pillar, col, p.outline);
+  }
+  // fosse = eau profonde : rides claires
+  const pit = solid(p.void);
+  pit.hline(0, 15, 0, p.wallLight);
+  pit.hline(0, 15, 1, p.wallDark);
+  pit.hline(0, 15, 2, p.wallTop);
+  for (const [x0, x1, y] of [[1, 5, 6], [8, 13, 8], [2, 7, 11], [9, 14, 13]] as const) pit.hline(x0, x1, y, p.wallTop);
+  for (const [x, y] of [[3, 6], [11, 8], [5, 11], [12, 13]] as const) pit.set(x, y, p.wallLight);
+  pit.set(11, 8, p.accentHi);
+  return { floor: floor(false), floor_alt: floor(true), wall, wall_top: top, pillar, pit, void: solid(p.void) };
+}
+
+// ───────────────────────────── Aube rose et or (L8) : grès rosé, brique mauve, soleil ─────────────────────────────
+
+function dawnTiles(p: ThemePalette): Tiles {
+  const floor = (alt: boolean): Bitmap => {
+    const b = solid(p.floorMid);
+    // dalles de grès : joints bas/droit et un joint médian décalé, reflet doré
+    b.hline(0, 15, 15, p.floorDark);
+    b.vline(15, 0, 15, p.floorDark);
+    b.hline(0, 15, 7, p.floorDark);
+    b.vline(8, 0, 7, p.floorDark);
+    b.vline(4, 8, 15, p.floorDark);
+    b.hline(1, 6, 0, p.floorLight);
+    b.vline(0, 1, 5, p.floorLight);
+    b.hline(9, 13, 8, p.floorLight);
+    speckle(b, alt ? 1311 : 1111, 6, [p.floorLight, p.floorDark], p.floorMid);
+    if (alt) {
+      // petit soleil gravé : disque doré, rayons
+      b.ellipse(11, 11, 2, 2, p.accent);
+      b.set(11, 11, p.accentHi);
+      for (const [x, y] of [[11, 7], [7, 11]] as const) b.set(x, y, p.accentDeep);
+    }
+    return b;
+  };
+  const wall = solid(p.wallMid);
+  {
+    // briques mauves, liseré doré au sommet, socle sombre
+    const b = wall;
+    b.hline(0, 15, 0, p.wallLight);
+    b.hline(0, 15, 1, p.accentDeep);
+    b.hline(0, 15, 5, p.wallDark);
+    b.hline(0, 15, 9, p.wallDark);
+    for (const x of [4, 12]) b.vline(x, 2, 4, p.wallDark);
+    b.vline(8, 6, 8, p.wallDark);
+    for (const x of [2, 10, 14]) b.vline(x, 10, 11, p.wallDark);
+    b.line(1, 3, 3, 3, p.wallLight);
+    b.line(9, 7, 11, 7, p.wallLight);
+    b.rect(0, 12, 16, 4, p.wallDark);
+    b.hline(0, 15, 12, p.wallTop);
+    b.hline(0, 15, 15, p.wallTop);
+    for (const x of [2, 7, 12]) b.set(x, 13, p.accent);
+    b.set(6, 3, p.accent);
+    b.set(13, 7, p.accent);
+  }
+  const top = solid(p.wallTop);
+  top.hline(0, 15, 0, p.wallDark);
+  top.vline(0, 0, 15, p.wallDark);
+  top.line(3, 4, 7, 7, p.wallDark);
+  top.line(9, 9, 13, 12, p.wallDark);
+  speckle(top, 1177, 7, [p.wallDark], p.wallTop);
+  speckle(top, 1178, 3, [p.accentDeep], p.wallTop);
+  top.set(6, 12, p.accent);
+  const pillar = floor(false);
+  {
+    const col = stoneColumn(p);
+    // colonne rosée surmontée d'un soleil d'or
+    col.ellipse(8, 7.3, 3.8, 2.8, p.accentDeep);
+    col.ellipse(8, 7.3, 2.6, 1.8, p.accent);
+    col.set(8, 7, p.accentHi);
+    col.set(7, 7, p.accentHi);
+    for (const [x, y] of [[8, 3], [4, 5], [12, 5]] as const) col.set(x, y, p.accent);
+    stampOutlined(pillar, col, p.outline);
+  }
+  // fosse = ciel crépusculaire : nuages et étoiles
+  const pit = solid(p.void);
+  pit.hline(0, 15, 0, p.wallLight);
+  pit.hline(0, 15, 1, p.wallDark);
+  pit.hline(0, 15, 2, p.wallTop);
+  for (const [x0, x1, y] of [[2, 6, 6], [9, 14, 9], [3, 8, 12]] as const) pit.hline(x0, x1, y, p.wallTop);
+  for (const [x0, x1, y] of [[3, 5, 5], [10, 13, 8]] as const) pit.hline(x0, x1, y, p.wallDark);
+  for (const [x, y] of [[12, 5], [4, 10], [13, 13], [7, 4]] as const) pit.set(x, y, p.accentDeep);
+  pit.set(12, 5, p.accentHi);
+  pit.set(4, 10, p.accent);
+  return { floor: floor(false), floor_alt: floor(true), wall, wall_top: top, pillar, pit, void: solid(p.void) };
+}
+
+// ───────────────────────────── Clocher d'airain (L9) : plaques de laiton, rivets, engrenages ─────────────────────────────
+
+function brassTiles(p: ThemePalette): Tiles {
+  const floor = (alt: boolean): Bitmap => {
+    const b = solid(p.floorMid);
+    // plaques de laiton rivetées : joints bas/droit, rivets aux angles, reflet haut-gauche
+    b.hline(0, 15, 15, p.floorDark);
+    b.vline(15, 0, 15, p.floorDark);
+    b.hline(1, 8, 0, p.floorLight);
+    b.vline(0, 1, 7, p.floorLight);
+    for (const [x, y] of [[2, 2], [12, 2], [2, 12], [12, 12]] as const) {
+      b.set(x, y, p.floorLight);
+      b.set(x + 1, y + 1, p.floorDark);
+    }
+    speckle(b, alt ? 1411 : 1511, 5, [p.floorLight, p.floorDark], p.floorMid);
+    if (alt) {
+      // petit engrenage gravé
+      b.ellipse(8, 8, 3, 3, p.floorDark);
+      b.ellipse(8, 8, 1.2, 1.2, p.floorMid);
+      for (const [x, y] of [[8, 4], [8, 12], [4, 8], [12, 8]] as const) b.set(x, y, p.floorDark);
+      b.set(7, 7, p.floorLight);
+    }
+    return b;
+  };
+  const wall = solid(p.wallMid);
+  {
+    // panneaux d'airain rivetés, tuyau doré, socle sombre
+    const b = wall;
+    b.hline(0, 15, 0, p.wallLight);
+    b.hline(0, 15, 6, p.wallDark);
+    b.vline(7, 0, 5, p.wallDark);
+    b.vline(15, 0, 5, p.wallDark);
+    for (const [x, y] of [[2, 2], [5, 2], [10, 2], [13, 2]] as const) b.set(x, y, p.wallLight);
+    b.hline(0, 15, 8, p.accentDeep);
+    b.hline(0, 15, 9, p.accent);
+    b.hline(0, 15, 10, p.accentDeep);
+    b.hline(1, 5, 9, p.accentHi);
+    b.rect(0, 12, 16, 4, p.wallDark);
+    b.hline(0, 15, 12, p.wallTop);
+    b.hline(0, 15, 15, p.wallTop);
+    for (const x of [3, 8, 13]) b.set(x, 13, p.wallLight);
+  }
+  const top = solid(p.wallTop);
+  top.hline(0, 15, 0, p.wallDark);
+  top.vline(0, 0, 15, p.wallDark);
+  top.line(3, 5, 8, 5, p.wallDark);
+  top.line(8, 5, 8, 11, p.wallDark);
+  top.line(11, 3, 14, 3, p.wallDark);
+  speckle(top, 1477, 6, [p.wallDark], p.wallTop);
+  for (const [x, y] of [[5, 12], [12, 9]] as const) top.set(x, y, p.accentDeep);
+  top.set(12, 9, p.accent);
+  const pillar = floor(false);
+  {
+    const col = stoneColumn(p);
+    // colonne de laiton couronnée d'un engrenage
+    col.ellipse(8, 7.3, 3.8, 2.8, p.accentDeep);
+    col.ellipse(8, 7.3, 2.6, 1.8, p.accent);
+    col.set(8, 7, p.wallTop);
+    for (const [x, y] of [[8, 3], [4, 5], [12, 5], [5, 10], [11, 10]] as const) col.set(x, y, p.accent);
+    stampOutlined(pillar, col, p.outline);
+  }
+  // fosse = puits sombre : dents d'engrenage sur le bord, fond de poulies
+  const pit = solid(p.void);
+  pit.hline(0, 15, 0, p.wallLight);
+  pit.hline(0, 15, 1, p.wallDark);
+  pit.hline(0, 15, 2, p.wallTop);
+  for (const x of [1, 4, 7, 10, 13]) {
+    pit.set(x, 3, p.wallDark);
+    pit.set(x + 1, 3, p.wallDark);
+  }
+  pit.ellipse(8, 10, 3.4, 3.4, p.wallTop);
+  pit.ellipse(8, 10, 1.4, 1.4, p.void);
+  for (const [x, y] of [[8, 6], [8, 14], [4, 10], [12, 10]] as const) pit.set(x, y, p.wallDark);
+  pit.set(8, 10, p.accentDeep);
+  return { floor: floor(false), floor_alt: floor(true), wall, wall_top: top, pillar, pit, void: solid(p.void) };
+}
+
+/** Frames `tile_<theme>_<kind>` des 9 thèmes. */
 export function buildTileFrames(): Record<string, Bitmap> {
   const out: Record<string, Bitmap> = {};
-  const makers: Record<ZoneTheme, (p: ThemePalette) => Tiles> = { crypt: cryptTiles, grove: groveTiles, citadel: citadelTiles, frost: frostTiles, ember: emberTiles, void: voidTiles };
+  const makers: Record<ZoneTheme, (p: ThemePalette) => Tiles> = {
+    crypt: cryptTiles,
+    grove: groveTiles,
+    citadel: citadelTiles,
+    frost: frostTiles,
+    ember: emberTiles,
+    void: voidTiles,
+    tide: tideTiles,
+    dawn: dawnTiles,
+    brass: brassTiles,
+  };
   for (const theme of TILE_THEMES) {
     const tiles = makers[theme](THEME_PALETTES[theme]);
     for (const k of TILE_KINDS) out[`tile_${theme}_${k}`] = tiles[k];

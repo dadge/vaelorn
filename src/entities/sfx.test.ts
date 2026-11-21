@@ -95,3 +95,15 @@ describe("sons : tirs des armes d'un héros de mêlée ([B34])", () => {
     s.destroy();
   });
 });
+
+describe('sons : levier à fenêtre qui retombe (niveaux 7 à 9)', () => {
+  it("la fin d'une fenêtre (mechanismChanged inactif avec `expired`) a son propre son ; un relâchement ordinaire (plaque, pont…) reste muet ; l'activation garde le clac", () => {
+    expect(sfxForEvent({ type: 'mechanismChanged', mechanismId: 'L', active: false, expired: true })).toBe('leverFall');
+    expect(sfxForEvent({ type: 'mechanismChanged', mechanismId: 'P', active: false })).toBeNull();
+    expect(sfxForEvent({ type: 'mechanismChanged', mechanismId: 'L', active: true })).toBe('lever');
+    expect(sfxVolume('leverFall')).toBeLessThanOrEqual(sfxVolume('attack'));
+    const s = new Sfx();
+    expect(() => s.play('leverFall')).not.toThrow();
+    s.destroy();
+  });
+});

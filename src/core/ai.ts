@@ -38,14 +38,17 @@
  *  teleportTotalMs / teleportToX / teleportToY / teleportMoved   voir 'teleport'
  *  engaged          boss / demi-boss : 1 une fois le combat engagé (barre de vie à afficher)
  *  zoneCount/zoneX0..2/zoneY0..2/zoneRadius   seigneur du Néant (special VOIDZONE) : cercles de la zone de danger (bosses.ts)
+ *  tactKind/tactX/tactY/tactBreakMs           boss TACTIQUE seulement (`tactics.ts`) : comportement (0 aucun, 1..6 tactique, 7 déstabilisé), ancre (px), déstabilisation restante (ms)
  *  Clés internes (kbx, kby, stunMs, stunImmuneMs, wanderMs, burstMs, strafeMs, seq, combo…) : ne pas utiliser.
  *
  * Pour les boss et demi-boss, `enemy.phase` vaut 0 avant l'engagement puis 1..N (N = 2 à 4, voir bosses.ts / bossData.ts).
  */
+import { TACT_STUN_BREAK_MS } from './balance';
 import { PLAYER_RADIUS } from './constants';
 import { ENEMIES, isAnyBossKind, isFlyingKind } from './enemies';
 import { angleBetween, clamp, dirFromVec, dist, vecFromAngle } from './geometry';
 import { ENEMY_SPECIALS, updateBoss } from './bosses';
+import { breakTactics } from './tactics';
 import type { EnemyAIContext, EnemyKind, EnemyState, PlayerState, Vec2 } from './types';
 
 export { ENEMY_SPECIALS } from './bosses';
@@ -78,6 +81,10 @@ export const ENEMY_RENDER_DATA_KEYS = [
   'zoneX2',
   'zoneY2',
   'zoneRadius',
+  'tactKind',
+  'tactX',
+  'tactY',
+  'tactBreakMs',
 ] as const;
 
 // ───────────────────────────── Constantes ─────────────────────────────
@@ -320,6 +327,7 @@ export function stunEnemy(enemy: EnemyState, ms: number): boolean {
   const def = ENEMIES[enemy.kind];
   if (def && isAnyBossKind(def.kind)) {
     enemy.attackCooldownMs = Math.max(enemy.attackCooldownMs, Math.min(BOSS_STUN_DELAY_MAX_MS, ms * 0.3));
+    breakTactics(enemy, TACT_STUN_BREAK_MS); // boss tactique : un spécial qui touche coupe ses buts (sans effet pour un boss sans tactiques)
     return false;
   }
   if (enemy.mode === 'teleport') return false;

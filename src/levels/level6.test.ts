@@ -628,18 +628,31 @@ describe('level6 — textes (parts i18n)', () => {
     expect(en['speaker.voidlord']).toBe('The Void Lord');
   });
 
-  it('dernier niveau du jeu : les textes de fin racontent la victoire sur le Néant (plus de « à suivre »)', () => {
+  it("n'est plus le dernier niveau : l'outro ne conclut plus la saga, il reste un fragment manquant (niveaux 7 à 9)", () => {
     const frAll = getDictionary('fr');
     const enAll = getDictionary('en');
-    expect(frAll['story.end.line.1']).toMatch(/Néant/);
-    expect(enAll['story.end.line.1']).toMatch(/Void/);
-    expect(frAll['story.end.tbc']).not.toMatch(/suivre/i);
-    expect(enAll['story.end.tbc']).not.toMatch(/continued/i);
+    const outroFr = level6.outro.map((l) => frAll[l.textKey]).join(' ');
+    const outroEn = level6.outro.map((l) => enAll[l.textKey]).join(' ');
+    expect(outroFr).toMatch(/cloche|fragment manque/);
+    expect(outroFr).not.toMatch(/ne craindra plus|dessert/);
+    expect(outroEn).toMatch(/bell|fragment is still missing/);
+    expect(outroEn).not.toMatch(/fear neither|dessert/);
+    // clés inchangées : 4 répliques, mêmes clés
+    expect(level6.outro.map((l) => l.textKey)).toEqual([1, 2, 3, 4].map((i) => `level.level6.outro.${i}`));
+  });
+
+  it("les textes de fin du jeu (story.end.*) existent en fr et en et ne parlent plus du Seigneur du Néant (conclusion au niveau 9)", () => {
+    const frAll = getDictionary('fr');
+    const enAll = getDictionary('en');
     for (const k of ['story.end.title', 'story.end.line.1', 'story.end.line.2', 'story.end.line.3', 'story.end.line.4', 'story.end.tbc']) {
       expect(frAll[k], `fr ${k}`).toBeTruthy();
       expect(enAll[k], `en ${k}`).toBeTruthy();
-      expect(frAll[k]).not.toMatch(/Morvane n'est plus/);
     }
+    expect(frAll['story.end.line.1']).toMatch(/Carillon/);
+    expect(enAll['story.end.line.1']).toMatch(/Chime/);
+    expect(frAll['story.end.line.1']).not.toMatch(/Seigneur du Néant/);
+    expect(frAll['story.end.tbc']).not.toMatch(/suivre/i);
+    expect(enAll['story.end.tbc']).not.toMatch(/continued/i);
   });
 });
 

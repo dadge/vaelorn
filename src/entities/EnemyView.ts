@@ -10,6 +10,7 @@ import { ATLAS_KEY } from '../render/art';
 import { enemyFrame } from '../render/art/animations';
 import { enemySpriteInfo } from '../render/art/enemyTiers';
 import { bossBarEntries, type BossBarEntry } from '../render/bossBars';
+import { tacticShapes, type TacticShape } from '../render/tacticIndicator';
 import { type EnemyVisual, PosInterp, computeEnemyVisual, createEnemyVisual } from './animation';
 import { DEPTH, ySortDepth, type ViewContext } from './common';
 import { telegraphShapes, voidZones } from './telegraph';
@@ -124,6 +125,9 @@ export class EnemyViews {
   private readonly visual = createEnemyVisual();
   private readonly telegraph: Phaser.GameObjects.Graphics;
   private telegraphDirty = false;
+  /** Indicateur des tactiques de boss (icône, ligne pointillée, anneau d'ancre) : dessiné seulement pour un boss tactique. */
+  private readonly tactics: Phaser.GameObjects.Graphics;
+  private tacticsDirty = false;
   private frameNo = 0;
   private instantNext = true;
   private bossState: EnemyState | null = null;
@@ -132,6 +136,8 @@ export class EnemyViews {
   constructor(private readonly ctx: ViewContext) {
     this.telegraph = ctx.rig.registerWorld(ctx.scene.add.graphics());
     this.telegraph.setDepth(DEPTH.telegraph);
+    this.tactics = ctx.rig.registerWorld(ctx.scene.add.graphics());
+    this.tactics.setDepth(DEPTH.telegraph + 1);
   }
 
   /** Ennemi boss vivant de la salle (le plus prioritaire), ou null. */
@@ -159,6 +165,7 @@ export class EnemyViews {
     this.bossState = null;
     this.barEntries = bossBarEntries(enemies, (k) => ENEMIES[k as keyof typeof ENEMIES]);
     let drew = false;
+    let drewTactics = false;
     const g = this.telegraph;
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
@@ -173,6 +180,13 @@ export class EnemyViews {
       v.seen = this.frameNo;
       v.update(e, timeMs, stepped, alpha, dtMs, this.visual);
       if (v.boss && e.hp > 0 && (!this.bossState || enemySpriteInfo(e.kind).tier === 'boss')) this.bossState = e;
+      if ((e.data.tactKind ?? 0) > 0) {
+        if (!drewTactics) {
+          this.tactics.clear();
+          drewTactics = true;
+        }
+        this.drawTactics(this.tactics, tacticShapes(e.data, v.interp.x, v.interp.y, ENEMIES[e.kind].radius * 2 + 12, timeMs));
+      }
       if (this.visual.windup || voidZones(e).length > 0) {
         if (!drew) {
           g.clear();
@@ -184,6 +198,8 @@ export class EnemyViews {
     this.instantNext = false;
     if (!drew && this.telegraphDirty) g.clear();
     this.telegraphDirty = drew;
+    if (!drewTactics && this.tacticsDirty) this.tactics.clear();
+    this.tacticsDirty = drewTactics;
     // balayage : retrait des vues absentes de l'état
     for (let i = this.list.length - 1; i >= 0; i--) {
       const v = this.list[i];
@@ -195,6 +211,71 @@ export class EnemyViews {
       this.ids[i] = this.ids[last];
       this.list.pop();
       this.ids.pop();
+    }
+  }
+
+  /** Dessine l'indicateur d'un boss tactique (formes pures de `tacticIndicator.ts`) : une forme distincte par tactique, pas seulement une couleur. */
+  private drawTactics(g: Phaser.GameObjects.Graphics, shapes: readonly TacticShape[]): void {
+    for (const s of shapes) {
+      switch (s.kind) {
+        case 'icon': {
+          g.fillStyle(0x14121f, 0.75 * s.alpha);
+          g.fillCircle(s.x, s.y, s.size + 2);
+          g.lineStyle(1.5, s.color, s.alpha);
+          g.fillStyle(s.color, s.alpha);
+          const r = s.size;
+          switch (s.icon) {
+            case 'ring':
+              g.strokeCircle(s.x, s.y, r);
+              break;
+            case 'diamond':
+              g.fillPoints([{ x: s.x, y: s.y - r }, { x: s.x + r, y: s.y }, { x: s.x, y: s.y + r }, { x: s.x - r, y: s.y }], true);
+              break;
+            case 'cross':
+              g.fillRect(s.x - r, s.y - 1.5, r * 2, 3);
+              g.fillRect(s.x - 1.5, s.y - r, 3, r * 2);
+              break;
+            case 'triangle':
+              g.fillPoints([{ x: s.x, y: s.y - r }, { x: s.x + r, y: s.y + r * 0.8 }, { x: s.x - r, y: s.y + r * 0.8 }], true);
+              break;
+            case 'square':
+              g.fillRect(s.x - r * 0.8, s.y - r * 0.8, r * 1.6, r * 1.6);
+              break;
+            case 'chevron':
+              g.lineStyle(2, s.color, s.alpha);
+              g.strokePoints([{ x: s.x - r, y: s.y - r * 0.3 }, { x: s.x, y: s.y + r * 0.7 }, { x: s.x + r, y: s.y - r * 0.3 }], false);
+              break;
+            case 'dazed':
+              g.strokeCircle(s.x, s.y, r);
+              g.lineBetween(s.x - r * 0.6, s.y - r * 0.6, s.x + r * 0.6, s.y + r * 0.6);
+              break;
+          }
+          break;
+        }
+        case 'stars':
+          for (let i = 0; i < 3; i++) {
+            const a = s.phase + (i * Math.PI * 2) / 3;
+            g.fillStyle(s.color, 0.9);
+            g.fillCircle(s.x + Math.cos(a) * s.r, s.y + Math.sin(a) * s.r * 0.4, 1.5);
+          }
+          break;
+        case 'dashed': {
+          const dx = s.x1 - s.x0;
+          const dy = s.y1 - s.y0;
+          const len = Math.hypot(dx, dy);
+          if (len < 6) break;
+          g.lineStyle(1, s.color, s.alpha);
+          for (let t = 0; t < len; t += 8) {
+            const t1 = Math.min(len, t + 4);
+            g.lineBetween(s.x0 + (dx * t) / len, s.y0 + (dy * t) / len, s.x0 + (dx * t1) / len, s.y0 + (dy * t1) / len);
+          }
+          break;
+        }
+        case 'anchor':
+          g.lineStyle(1.5, s.color, s.alpha);
+          g.strokeCircle(s.x, s.y, s.r);
+          break;
+      }
     }
   }
 
@@ -256,6 +337,8 @@ export class EnemyViews {
     this.views.clear();
     this.telegraph.clear();
     this.telegraphDirty = false;
+    this.tactics.clear();
+    this.tacticsDirty = false;
     this.bossState = null;
     this.barEntries = [];
     this.instantNext = true;
@@ -264,5 +347,6 @@ export class EnemyViews {
   destroy(): void {
     this.clear();
     this.telegraph.destroy();
+    this.tactics.destroy();
   }
 }

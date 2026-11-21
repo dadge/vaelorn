@@ -38,7 +38,14 @@
  *  zoneRadius (px). Pendant le télégraphe les zones suivent les joueurs puis se verrouillent ; pendant 'attack' elles
  *  restent dangereuses. `telegraphRadius`/`telegraphDist`/`aimAngle` décrivent la première zone (rendu minimal possible).
  *  Invoqués : `data.summoner` = id du boss invocateur.
+ *
+ * ── Tactiques (boss « malins », OPTIONNELLES) ───────────────────────────────────────────────────────────────
+ *  Si `enemy.data.tact` est posé (donnée de niveau `EnemySpawnDef.tactics`, voir `tactics.ts`), la branche 'chase' demande à `tacticsGoal` un but : poster le boss à une ANCRE
+ *  (près d'un joueur à terre, d'un cristal de soin, sur un bonus) ou lui donner une VICTIME (appelant isolé, porteur de cœur, joueur le plus faible) à la place de sa cible.
+ *  Les modes windup / attack / recover / teleport, les télégraphes et les phases ne changent pas. Sans `tact` : chemin de code et flux aléatoire strictement inchangés.
+ *  Clés `data` de rendu : tactKind (0 aucun, 1..6 tactique, 7 déstabilisé), tactX / tactY (ancre).
  */
+import { TACT_ANCHOR_ATTACK_PX, TACT_SPEED_MULT } from './balance';
 import { PLAYER_RADIUS } from './constants';
 import { ENEMIES, isFlyingKind } from './enemies';
 import { angleBetween, angleDiff, clamp, dirFromVec, dist, vecFromAngle } from './geometry';
@@ -53,6 +60,7 @@ import {
   type BossProjectile,
   type SeqEntry,
 } from './bossData';
+import { tacticVictim, tacticsGoal, tacticsTick, type TacticalGoal } from './tactics';
 import type { EnemyAIContext, EnemyKind, EnemyState, PlayerState, Vec2 } from './types';
 
 export { ENEMY_SPECIALS, GOLEM_SLAM_RADIUS, MAX_BOSS_MINIONS };
@@ -279,7 +287,7 @@ function moveBoss(enemy: EnemyState, ctx: EnemyAIContext, dx: number, dy: number
 function approach(
   enemy: EnemyState,
   ctx: EnemyAIContext,
-  target: PlayerState,
+  target: { pos: Vec2 },
   dt: number,
   speed: number,
   stopDist: number,
@@ -651,7 +659,7 @@ function stepTeleport(enemy: EnemyState, ctx: EnemyAIContext, target: PlayerStat
 // ───────────────────────────── Mouvement « chase » spécifique ─────────────────────────────
 
 /** Lévitation / garde de distance : se rapproche si > far, recule si < near, sinon orbite à 60 % de la vitesse. */
-function hoverMove(enemy: EnemyState, ctx: EnemyAIContext, target: PlayerState, dt: number, profile: BossProfile): void {
+function hoverMove(enemy: EnemyState, ctx: EnemyAIContext, target: { pos: Vec2 }, dt: number, profile: BossProfile): void {
   const d = enemy.data;
   const def = ENEMIES[enemy.kind];
   const hv = profile.hover ?? { near: 70, far: 125 };
@@ -680,6 +688,34 @@ function hoverMove(enemy: EnemyState, ctx: EnemyAIContext, target: PlayerState, 
   if (moved < step * 0.3) d.strafeMs = 0; // bloqué : on change de sens au prochain pas
   // Trop collé au joueur trop longtemps : téléportation ou attaque de panique.
   d.crowdMs = dd < (profile.crowdDist ?? 40) ? gd(d, 'crowdMs') + dt : 0;
+}
+
+/**
+ * Tactiques, boss lévitant (style 'hover') : rejoint l'ancre du but puis la TIENT : en deçà de `hold ± 8` px il orbite lentement (35 % de la vitesse, sens fixé par l'id du boss, aucun tirage) ;
+ * sans orbite (poste sur un bonus) il s'arrête à `hold`. Aucun tirage aléatoire.
+ */
+function anchorHold(enemy: EnemyState, ctx: EnemyAIContext, goal: TacticalGoal, dt: number, profile: BossProfile): void {
+  const def = ENEMIES[enemy.kind];
+  const speed = def.speed * speedMult(enemy, profile) * TACT_SPEED_MULT;
+  const dd = dist(enemy.pos, goal.pos);
+  const ang = angleBetween(enemy.pos, goal.pos);
+  faceAngle(enemy, ang);
+  const step = (speed * dt) / 1000;
+  if (!goal.orbit) {
+    if (dd > goal.hold) {
+      const s = Math.min(step, dd - goal.hold);
+      moveBoss(enemy, ctx, Math.cos(ang) * s, Math.sin(ang) * s);
+    }
+    return;
+  }
+  if (dd > goal.hold + 8) {
+    moveBoss(enemy, ctx, Math.cos(ang) * step, Math.sin(ang) * step);
+  } else if (dd < goal.hold - 8) {
+    moveBoss(enemy, ctx, -Math.cos(ang) * step * 0.5, -Math.sin(ang) * step * 0.5);
+  } else {
+    const a = ang + ((enemy.id & 1) === 1 ? 1 : -1) * (Math.PI / 2);
+    moveBoss(enemy, ctx, Math.cos(a) * step * 0.35, Math.sin(a) * step * 0.35);
+  }
 }
 
 // ───────────────────────────── Point d'entrée ─────────────────────────────
@@ -727,6 +763,8 @@ export function updateBoss(enemy: EnemyState, ctx: EnemyAIContext, target: Playe
   d.engaged = 1;
   const phase = bossPhaseFor(enemy.kind, enemy.hp, enemy.maxHp);
   if (phase > enemy.phase) changePhase(enemy, ctx, phase);
+  const tactical = gd(d, 'tact') > 0;
+  if (tactical) tacticsTick(enemy, ctx, dt);
   const def = ENEMIES[enemy.kind];
   const canTeleport = profile.teleportAfter !== undefined || profile.crowdTeleport === true;
 
@@ -738,7 +776,7 @@ export function updateBoss(enemy: EnemyState, ctx: EnemyAIContext, target: Playe
       const spec = specFor(enemy, special);
       if (spec.trackFrac > 0 && enemy.modeTimerMs > total * (1 - spec.trackFrac)) {
         if (special === S.VOIDZONE) placeZones(enemy, ctx, spec);
-        else d.aimAngle = angleBetween(enemy.pos, target.pos);
+        else d.aimAngle = angleBetween(enemy.pos, (tactical ? tacticVictim(enemy, ctx) : null)?.pos ?? target.pos);
       }
       faceAngle(enemy, gd(d, 'aimAngle'));
       if (enemy.modeTimerMs <= 0) startAttack(enemy, ctx, profile);
@@ -782,37 +820,61 @@ export function updateBoss(enemy: EnemyState, ctx: EnemyAIContext, target: Playe
     enemy.attackCooldownMs = Math.max(enemy.attackCooldownMs, 600);
   }
 
+  // Tactiques (boss « malins ») : but d'ancre (se poster) ou victime (remplace la cible). Sans `tact` : `tgt === target`, rien d'autre ne change.
+  let tgt = target;
+  let goal: TacticalGoal | null = null;
+  if (tactical) {
+    goal = tacticsGoal(enemy, ctx, dt);
+    if (goal && goal.victim) tgt = goal.victim;
+  }
+  const anchored = goal !== null && goal.anchor;
+
   if (profile.style === 'brute') {
-    const dd = dist(enemy.pos, target.pos);
+    const dd = dist(enemy.pos, tgt.pos);
     d.chaseMs = gd(d, 'chaseMs') + dt;
-    approach(enemy, ctx, target, dt, def.speed * speedMult(enemy, profile), def.radius + PLAYER_RADIUS + (profile.stopPad ?? 16));
+    if (goal && anchored) {
+      approach(enemy, ctx, { pos: goal.pos }, dt, def.speed * speedMult(enemy, profile) * TACT_SPEED_MULT, goal.hold);
+    } else {
+      approach(enemy, ctx, tgt, dt, def.speed * speedMult(enemy, profile), def.radius + PLAYER_RADIUS + (profile.stopPad ?? 16));
+    }
     if (enemy.attackCooldownMs <= 0) {
       const pick = pickAttack(enemy, ctx, profile);
-      const trigger = profile.triggerDist ? profile.triggerDist(pick.special) : 90;
-      if (dd <= trigger || gd(d, 'chaseMs') >= (profile.forceMs ?? 2200)) {
+      const baseTrigger = profile.triggerDist ? profile.triggerDist(pick.special) : 90;
+      const trigger = anchored ? Math.min(baseTrigger, TACT_ANCHOR_ATTACK_PX) : baseTrigger;
+      // un boss posté sur une ancre n'attaque que si un joueur est à portée (pas d'attaque forcée de lassitude)
+      if (dd <= trigger || (!anchored && gd(d, 'chaseMs') >= (profile.forceMs ?? 2200))) {
         d.seq = pick.nextSeq;
         d.strike = 0;
-        startWindup(enemy, ctx, target, pick.special, pick.combo);
+        startWindup(enemy, ctx, tgt, pick.special, pick.combo);
       }
     }
     return;
   }
 
   // Style 'hover' : lévite / garde ses distances, attaque dès que le délai est écoulé, se téléporte ou panique si on le colle.
-  hoverMove(enemy, ctx, target, dt, profile);
+  if (goal && anchored) {
+    anchorHold(enemy, ctx, goal, dt, profile);
+    d.crowdMs = 0; // posté sur une ancre : ni téléportation ni attaque de panique induites par la proximité
+  } else {
+    hoverMove(enemy, ctx, tgt, dt, profile);
+  }
   if (profile.crowdTeleport && gd(d, 'crowdMs') > CROWD_TELEPORT_MS && enemy.attackCooldownMs > 0) {
-    startTeleport(enemy, ctx, target, profile);
+    startTeleport(enemy, ctx, tgt, profile);
     return;
   }
   if (profile.panicSpecial !== undefined && gd(d, 'crowdMs') > PANIC_CROWD_MS && enemy.attackCooldownMs <= 0) {
     d.strike = 0;
-    startWindup(enemy, ctx, target, profile.panicSpecial, 0);
+    startWindup(enemy, ctx, tgt, profile.panicSpecial, 0);
     return;
   }
   if (enemy.attackCooldownMs <= 0) {
+    // Tactiques : un boss lévitant en TRAJET vers son ancre n'attaque pas (sinon windup/attack/recover l'immobilisent ~3 s à chaque cycle et il n'arrive jamais ; le brute, lui, marche pendant
+    // sa poursuite). Le trajet est borné (TACT_TRAVEL_MAX_MS) puis le but est relâché : un joueur proche n'est donc jamais exposé plus de quelques secondes. « Arrivé » = là où `anchorHold` cesse
+    // d'avancer : hold + 8 avec orbite, hold + 1 sans. Une fois posté, il attaque normalement.
+    if (goal && anchored && dist(enemy.pos, goal.pos) > goal.hold + (goal.orbit ? 8 : 1)) return;
     const pick = pickAttack(enemy, ctx, profile);
     d.seq = pick.nextSeq;
     d.strike = 0;
-    startWindup(enemy, ctx, target, pick.special, pick.combo);
+    startWindup(enemy, ctx, tgt, pick.special, pick.combo);
   }
 }

@@ -100,6 +100,7 @@ import {
   LOOT_SEED_XOR,
   PICKUP_RADIUS,
   PICKUP_TTL_MS,
+  TACT_STUN_BREAK_MS,
 } from './balance';
 import {
   DOWNED_THREAT_RADIUS,
@@ -205,6 +206,7 @@ import {
   rollLoot,
 } from './loot';
 import { nextRandom, seedToState, type RngHolder } from './rng';
+import { breakTactics, seizeTick, tacticMask, type SeizeObject } from './tactics';
 import { resolveSlot } from './slots';
 import type {
   ActionFrame,
@@ -216,6 +218,7 @@ import type {
   GearDropState,
   GearItem,
   HealCrystalState,
+  TacticWorld,
   IGameSimulation,
   LevelDef,
   PickupKind,
@@ -705,6 +708,8 @@ export class GameSimulation implements IGameSimulation {
     // (i3) équipement au sol : vieillissement, verrous, ramassage
     // (aussi pendant 'roomCleared' : l'objet laissé par le dernier ennemi reste ramassable et vieillit pendant le délai avant la salle suivante)
     if (s.phase === 'playing' || s.phase === 'roomCleared') this.stepGear(dt, events, arb);
+    // (i3b) tactiques de boss : un « rapace » confisque un bonus resté sous lui (APRÈS les ramassages : un objet disputé n'est jamais confisqué ; aucun effet sans boss tactique)
+    if (s.phase === 'playing') this.stepSeize(dt, events);
 
     // (i4) appel automatique : objets au sol qu'un joueur ne prend pas (après les ramassages : un objet pris a disparu). Aussi en 'roomCleared' : l'équipement y reste
     // ramassable (le butin du dernier ennemi) et le signal d'un objet pris pendant ce délai doit être purgé.
@@ -943,6 +948,9 @@ export class GameSimulation implements IGameSimulation {
       stunEnemy: (enemy, ms) => {
         stunEnemy(enemy, ms);
       },
+      disruptEnemy: (enemy) => {
+        breakTactics(enemy, TACT_STUN_BREAK_MS); // tout spécial qui touche un boss tactique coupe ses buts (no-op sans tactiques)
+      },
       knockEnemy: (enemy, from, speed) => {
         knockEnemy(enemy, from, speed);
       },
@@ -1042,6 +1050,8 @@ export class GameSimulation implements IGameSimulation {
       if (alive.length >= MAX_ALIVE_ENEMIES) continue;
       const pos = tileCenter(def.tile[0], def.tile[1]);
       const enemy = createEnemyState(def.kind, pos, this.allocId(), wave);
+      // tactiques de boss : posées APRÈS la création (createEnemyState inchangé), seulement si le niveau les demande pour un boss / demi-boss
+      if (def.tactics !== undefined && def.tactics.length > 0 && isAnyBossKind(def.kind)) enemy.data.tact = tacticMask(def.tactics);
       s.room.enemies.push(enemy);
       alive.push(enemy);
       spawned.push(i);
@@ -1110,7 +1120,61 @@ export class GameSimulation implements IGameSimulation {
       emit: (e: SimEvent) => {
         events.push(e);
       },
+      // monde des tactiques de boss : construit SEULEMENT si un ennemi vivant en a (sinon undefined : aucune allocation, contexte identique à l'ancien)
+      ...(aliveList.some((e) => (e.data.tact ?? 0) > 0) ? { world: this.buildTacticWorld() } : {}),
     };
+  }
+
+  /** Monde des tactiques de boss : cristaux de soin intacts et actifs à ce nombre de joueurs, objets au sol HORS de la zone de sortie. */
+  private buildTacticWorld(): TacticWorld {
+    const s = this.state;
+    const exit = this.room.exit.rect;
+    const crystals: TacticWorld['crystals'] = [];
+    const defs = this.room.healCrystals ?? [];
+    for (const cs of s.room.healCrystals as HealCrystalState[]) {
+      if (cs.used) continue;
+      const idx = defs.findIndex((c) => c.id === cs.id);
+      if (idx < 0) continue;
+      const pos = tileCenter(defs[idx].tile[0], defs[idx].tile[1]);
+      crystals.push({ idx, id: cs.id, pos });
+    }
+    const items: TacticWorld['items'] = [];
+    for (const pk of s.room.pickups as PickupState[]) {
+      if (pointInTileRect(pk.pos, exit)) continue;
+      items.push({ ref: pk.id * 4, kind: 'heart', pos: { x: pk.pos.x, y: pk.pos.y }, value: pk.kind === 'full' ? 3 : 2, eatable: pk.kind === 'half' });
+    }
+    for (const b of s.room.buffDrops as BuffDropState[]) {
+      if (pointInTileRect(b.pos, exit)) continue;
+      items.push({ ref: b.id * 4 + 1, kind: 'buff', pos: { x: b.pos.x, y: b.pos.y }, value: 2, eatable: true });
+    }
+    for (const g of s.room.gearDrops as GearDropState[]) {
+      if (pointInTileRect(g.pos, exit)) continue;
+      items.push({ ref: g.id * 4 + 2, kind: 'gear', pos: { x: g.pos.x, y: g.pos.y }, value: 1, eatable: false });
+    }
+    return { crystals, items };
+  }
+
+  /**
+   * Tactiques de boss, « rapace » (`seizeItems`) : pour chaque boss tactique vivant, `seizeTick` (tactics.ts) suit l'objet confiscable (demi-cœur, bonus temporaire) resté sous lui ; à
+   * l'échéance l'objet est RETIRÉ du sol et `itemSeized` est émis. Ne touche que `room.pickups` / `room.buffDrops` ; `stepAutoCalls` purge seul les références disparues.
+   * Sans boss tactique : aucun effet (ni coût, ni changement d'état).
+   */
+  private stepSeize(dt: number, events: SimEvent[]): void {
+    const s = this.state;
+    for (const e of s.room.enemies) {
+      if (e.dead || e.hp <= 0 || (e.data.tact ?? 0) <= 0) continue;
+      const objs: SeizeObject[] = [];
+      for (const pk of s.room.pickups as PickupState[]) if (pk.kind === 'half') objs.push({ ref: pk.id * 4, kind: 'heart', pos: pk.pos });
+      for (const b of s.room.buffDrops as BuffDropState[]) objs.push({ ref: b.id * 4 + 1, kind: 'buff', pos: b.pos });
+      const ref = seizeTick(e, dt, objs);
+      if (ref === null) continue;
+      const o = objs.find((x) => x.ref === ref);
+      if (!o) continue;
+      const list = (o.kind === 'heart' ? s.room.pickups : s.room.buffDrops) as { id: number }[];
+      const i = list.findIndex((x) => x.id === Math.floor(ref / 4));
+      if (i >= 0) list.splice(i, 1);
+      events.push({ type: 'itemSeized', enemyId: e.id, kind: o.kind, pos: { x: o.pos.x, y: o.pos.y } });
+    }
   }
 
   /** Cherche une position libre pour un disque : la position demandée, puis 8 directions à 1, 2 puis 3 diamètres. */

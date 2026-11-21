@@ -20,7 +20,7 @@
  * Les fonctions MUTENT uniquement ce que leur JSDoc indique (états joueurs/ennemis/projectiles, `ctx.events`, `ctx.killers`).
  */
 import { PLAYER_RADIUS } from './constants';
-import { damageToEnemy, playerBaseDamage, playerSpecialDamage } from './balance';
+import { damageToEnemy, difficultyMultipliers, playerBaseDamage, playerSpecialDamage } from './balance';
 import { getCharacter } from './characters';
 import { attackDamageMultiplier, effectiveAttack, effectiveSpecialCooldownMs, rageMultiplier } from './gear';
 import { moveCircle, projectileHitsWall, segmentBlocked, type PixelRect } from './collision';
@@ -83,6 +83,11 @@ export interface CombatContext {
   onPlayerDowned?(player: PlayerState): void;
   /** Étourdissement par un spécial (ai.ts `stunEnemy` ; boss : simple retard). Absent => pas d'étourdissement. */
   stunEnemy?(enemy: EnemyState, ms: number): void;
+  /**
+   * Un spécial de héros vient de TOUCHER un ennemi qui survit (tous les spéciaux, avec ou sans `stunMs`) : contre-jeu des boss tactiques (`tactics.ts` `breakTactics` : tous les buts coupés
+   * `TACT_STUN_BREAK_MS`). Sans effet sur un ennemi sans tactiques. Absent => aucun effet.
+   */
+  disruptEnemy?(enemy: EnemyState): void;
   /** Recul fort par un spécial (ai.ts `knockEnemy`, vitesse initiale px/s). Absent => pas de recul supplémentaire. */
   knockEnemy?(enemy: EnemyState, from: Vec2, speed: number): void;
 }
@@ -256,6 +261,11 @@ export function damageEnemy(
     }
   }
   enemy.hp = Math.max(0, enemy.hp - applied);
+  if ((enemy.data.tact ?? 0) > 0) {
+    // boss tactique : la déstabilisation par les dégâts se mesure en dégâts NORMALISÉS (équivalents difficulté « normal »), jamais selon la difficulté de l'attaquant (tactics.ts `tactAdj`)
+    const m = difficultyMultipliers(attacker ? attacker.difficulty : 2).enemyHpMult;
+    if (m !== 1) enemy.data.tactAdj = (Number.isFinite(enemy.data.tactAdj) ? enemy.data.tactAdj : 0) + applied * (m - 1);
+  }
   const at = impact ?? enemy.pos;
   ctx.events.push({
     type: 'enemyHit',
@@ -413,6 +423,14 @@ function stepOneProjectile(ctx: CombatContext, p: ProjectileState, dtMs: number)
   return p.lifeMs > 0;
 }
 
+/**
+ * Une flèche de l'ÉVENTAIL d'Aelith (spécial) ? Les seules flèches de joueur perforantes : l'attaque d'Aelith et l'arc d'un héros de mêlée sont des flèches NON perforantes. Détection par forme
+ * plutôt que par un champ d'état supplémentaire : l'état sérialisé des projectiles reste identique à l'octet pour tous les niveaux.
+ */
+function isFanArrow(p: ProjectileState): boolean {
+  return p.owner.type === 'player' && p.kind === 'arrow' && p.pierce;
+}
+
 /** Impacts d'un projectile de joueur ; retourne true si le projectile est consommé. */
 function hitFromPlayerProjectile(ctx: CombatContext, p: ProjectileState, attacker: PlayerState): boolean {
   for (const e of ctx.room.enemies) {
@@ -420,6 +438,7 @@ function hitFromPlayerProjectile(ctx: CombatContext, p: ProjectileState, attacke
     if (!circleOverlap(p.pos, p.radius, e.pos, enemyRadius(e))) continue;
     p.hitIds.push(e.id);
     damageEnemy(ctx, e, p.damage, attacker, p.pos, p.pos);
+    if (isFanArrow(p) && !e.dead && e.hp > 0) ctx.disruptEnemy?.(e); // éventail d'Aelith : un spécial qui touche
     if (!p.pierce) return true;
   }
   if (p.kind === 'heal') {
@@ -475,6 +494,7 @@ function specialHit(
   damageEnemy(ctx, e, raw, player, from);
   if (e.dead || e.hp <= 0) return;
   if (def.stunMs && def.stunMs > 0) ctx.stunEnemy?.(e, def.stunMs);
+  ctx.disruptEnemy?.(e);
   if (def.kind === 'smash') ctx.knockEnemy?.(e, from, SMASH_KNOCKBACK_SPEED);
 }
 

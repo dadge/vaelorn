@@ -589,7 +589,9 @@ function updateLeverTimers(args: MechanismUpdateArgs, states: Map<string, Mechan
     st.remainingMs -= args.dtMs;
     if (st.remainingMs <= 0) {
       st.remainingMs = 0;
-      setActive(st, false, events);
+      // fin de fenêtre : `expired` (son et flash du levier qui retombe, les niveaux 7 à 9 reposent sur ces fenêtres)
+      st.active = false;
+      events.push({ type: 'mechanismChanged', mechanismId: st.id, active: false, expired: true });
     }
   }
 }
@@ -1010,7 +1012,7 @@ export function lightBridgeBearer(def: LightBridgeDef, players: readonly PlayerS
   return best;
 }
 
-/** Éclairage des tuiles du pont (halo du porteur ou occupation par un joueur vivant), `active` = halo sur au moins une tuile. */
+/** Éclairage des tuiles du pont (halo du porteur ou occupation par un joueur, vivant ou à terre), `active` = halo sur au moins une tuile. */
 function updateLightBridges(args: MechanismUpdateArgs, states: Map<string, MechanismState>, events: SimEvent[]): void {
   for (const def of args.room.mechanisms) {
     if (def.type !== 'lightBridge') continue;
@@ -1019,6 +1021,7 @@ function updateLightBridges(args: MechanismUpdateArgs, states: Map<string, Mecha
     const bearer = lightBridgeBearer(def, args.players);
     st.bearerId = bearer ? bearer.id : null;
     const reach = def.radiusTiles * TILE;
+    const anyAlive = args.players.some((p) => p.status === 'alive');
     let byBearer = false;
     const lit: boolean[] = def.tiles.map((t) => {
       const lanternLit = bearer !== null && dist(tileCenterPx(t), bearer.pos) <= reach;
@@ -1026,8 +1029,10 @@ function updateLightBridges(args: MechanismUpdateArgs, states: Map<string, Mecha
         byBearer = true;
         return true;
       }
+      // occupation : un joueur VIVANT sur la tuile la maintient allumée ; un joueur À TERRE aussi tant qu'au moins un allié est vivant (sinon : défaite d'équipe, tout est éteint). Un joueur
+      // à terre ne doit pas être éjecté au-dessus du vide quand la lumière du porteur s'éloigne (`ejectPlayersFromSolids` l'extrairait de la tuile éteinte vers l'abîme) ; son sauveteur peut aussi l'atteindre.
       return args.players.some((p) => {
-        if (p.status !== 'alive') return false;
+        if (p.status !== 'alive' && !anyAlive) return false;
         const pt = tileOfPlayer(p);
         return pt[0] === t[0] && pt[1] === t[1];
       });

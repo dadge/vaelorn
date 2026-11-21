@@ -117,7 +117,7 @@ describe('audit des braseros non allumés au départ : libellé « allumé »', 
       set.add(fr[b.def.litLabelKey as string]);
       byRoom.set(b.room.id, set);
     }
-    expect(byRoom.size).toBe(4);
+    expect(byRoom.size).toBe(5); // 4 salles des niveaux 4 à 6 + `pearlcave` (niveau 7)
     for (const set of byRoom.values()) expect(set.size).toBe(4);
   });
 });

@@ -24,11 +24,11 @@ describe('niveau-tutoriel : données', () => {
     }
   });
 
-  it("n'est PAS dans la campagne : LEVELS inchangé (6 niveaux), introuvable par id et par indice", () => {
-    expect(LEVELS.length).toBe(6);
+  it("n'est PAS dans la campagne : LEVELS inchangé (9 niveaux), introuvable par id et par indice", () => {
+    expect(LEVELS.length).toBe(9);
     expect(getLevel(TUTORIAL_LEVEL_ID)).toBeUndefined();
     expect(LEVELS.some((l) => l.id === TUTORIAL_LEVEL_ID)).toBe(false);
-    expect(getLevelByIndex(6)).toBeUndefined();
+    expect(getLevelByIndex(9)).toBeUndefined();
   });
 
   it("n'apparaît pas dans le contexte de sauvegarde de la campagne, et ne sauvegarde jamais", () => {

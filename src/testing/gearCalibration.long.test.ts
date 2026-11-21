@@ -7,7 +7,7 @@
  * Usage (PowerShell) :
  *   $env:GEAR_CALIB='1'; $env:GEAR_CALIB_LEVELS='1,3,4'; $env:GEAR_CALIB_PLAYERS='1,4'; $env:GEAR_CALIB_SEEDS='7,11,13,17,19'
  *   $env:GEAR_CALIB_OUT='C:\temp\gear.jsonl'; npx vitest run src/testing/gearCalibration.long.test.ts
- * Variables : GEAR_CALIB (obligatoire), GEAR_CALIB_LEVELS (défaut 1..6), GEAR_CALIB_PLAYERS (défaut 1,4), GEAR_CALIB_SEEDS (défaut 7,11,13,17,19),
+ * Variables : GEAR_CALIB (obligatoire), GEAR_CALIB_LEVELS (défaut 1..9), GEAR_CALIB_PLAYERS (défaut 1,4), GEAR_CALIB_SEEDS (défaut 7,11,13,17,19),
  * GEAR_CALIB_OUT (fichier .jsonl, ajouté en fin ; défaut : console seulement), GEAR_CALIB_RADIUS (rayon de repérage des bots pour l'équipement, px, défaut 140),
  * GEAR_CALIB_TUNE (exploration : JSON qui REMPLACE à chaud des tableaux / objets de `balance.ts`, ex. '{"GEAR_SLOT_WEIGHTS":{"weapon":0},"GEAR_LEVEL_WEIGHTS":[60,30,10]}' ;
  * les constantes numériques simples ne sont pas modifiables : les éditer dans `balance.ts`),
@@ -24,7 +24,7 @@ import { aggregateGear, CALIB_LEVELS, measureGearRun, type GearAggregate, type G
 const env = process.env;
 const ON = !!env.GEAR_CALIB;
 const list = (v: string | undefined, def: string): number[] => (v ?? def).split(',').map((s) => Number(s.trim())).filter((x) => Number.isFinite(x));
-const LEVELS = list(env.GEAR_CALIB_LEVELS, '1,2,3,4,5,6');
+const LEVELS = list(env.GEAR_CALIB_LEVELS, '1,2,3,4,5,6,7,8,9');
 const PLAYERS = list(env.GEAR_CALIB_PLAYERS, '1,4');
 const SEEDS = list(env.GEAR_CALIB_SEEDS, '7,11,13,17,19');
 const OUT = env.GEAR_CALIB_OUT;

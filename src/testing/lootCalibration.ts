@@ -18,6 +18,9 @@ import { level3 } from '../levels/level3';
 import { level4 } from '../levels/level4';
 import { level5 } from '../levels/level5';
 import { level6 } from '../levels/level6';
+import { level7 } from '../levels/level7';
+import { level8 } from '../levels/level8';
+import { level9 } from '../levels/level9';
 import { GEAR_BUDGET_PER_PLAYER } from '../core/balance';
 import { rollBuffBudget } from '../core/gear';
 import { mostWoundedFraction } from '../core/loot';
@@ -31,6 +34,9 @@ import { level3Scripts, newLevel3Run } from './level3.solution';
 import { level4Scripts, newLevel4Run } from './level4.solution';
 import { level5Scripts, newLevel5Run } from './level5.solution';
 import { level6Scripts, newLevel6Run } from './level6.solution';
+import { level7Scripts, newLevel7Run } from './level7.solution';
+import { level8Scripts, newLevel8Run } from './level8.solution';
+import { level9Scripts, newLevel9Run } from './level9.solution';
 
 /** Un niveau mesurable : fabrique de partie de bots + scripts + budgets (identiques à ceux des tests de niveau existants). */
 export interface CalibLevel {
@@ -42,7 +48,7 @@ export interface CalibLevel {
   run: LevelRunOptions;
 }
 
-/** Les 6 niveaux, avec les budgets des `solveLevelN` existants. */
+/** Les 9 niveaux, avec les budgets des `solveLevelN` existants. */
 export const CALIB_LEVELS: readonly CalibLevel[] = [
   {
     no: 1,
@@ -87,6 +93,27 @@ export const CALIB_LEVELS: readonly CalibLevel[] = [
     level: level6,
     make: (n, seed, startRoomIndex) => newLevel6Run(n, { seed, startRoomIndex }),
     scripts: level6Scripts,
+    run: { maxTotalMs: 20 * 60_000, maxRoomMs: 240000, maxWipesPerRoom: 4 },
+  },
+  {
+    no: 7,
+    level: level7,
+    make: (n, seed, startRoomIndex) => newLevel7Run(n, { seed, startRoomIndex }),
+    scripts: level7Scripts,
+    run: { maxTotalMs: 20 * 60_000, maxRoomMs: 240000, maxWipesPerRoom: 4 },
+  },
+  {
+    no: 8,
+    level: level8,
+    make: (n, seed, startRoomIndex) => newLevel8Run(n, { seed, startRoomIndex }),
+    scripts: level8Scripts,
+    run: { maxTotalMs: 20 * 60_000, maxRoomMs: 240000, maxWipesPerRoom: 4 },
+  },
+  {
+    no: 9,
+    level: level9,
+    make: (n, seed, startRoomIndex) => newLevel9Run(n, { seed, startRoomIndex }),
+    scripts: level9Scripts,
     run: { maxTotalMs: 20 * 60_000, maxRoomMs: 240000, maxWipesPerRoom: 4 },
   },
 ];

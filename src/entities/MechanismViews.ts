@@ -133,6 +133,10 @@ class PlateView implements MechView {
 
 // ───────────────────────────── Levier ─────────────────────────────
 
+/** Taille (px) de la barre de fenêtre d'un levier. */
+const LEVER_BAR_W = 28;
+const LEVER_BAR_H = 4;
+
 class LeverView implements MechView {
   readonly id: string;
   readonly center: Vec2;
@@ -166,8 +170,9 @@ class LeverView implements MechView {
       this.marker = null;
       this.ring = null;
     }
-    this.barBg = ctx.scene.add.rectangle(this.center.x, this.center.y - 11, 18, 4, 0x14121f, 0.9);
-    this.barFill = ctx.scene.add.rectangle(this.center.x - 8, this.center.y - 11, 16, 2, this.color, 1);
+    // barre de fenêtre : 30×6 px (les niveaux 7 à 9 reposent sur ces fenêtres), rouge et clignotante sur le dernier quart
+    this.barBg = ctx.scene.add.rectangle(this.center.x, this.center.y - 12, LEVER_BAR_W + 2, LEVER_BAR_H + 2, 0x14121f, 0.95);
+    this.barFill = ctx.scene.add.rectangle(this.center.x - LEVER_BAR_W / 2, this.center.y - 12, LEVER_BAR_W, LEVER_BAR_H, this.color, 1);
     this.barFill.setOrigin(0, 0.5);
     for (const o of [this.barBg, this.barFill]) {
       o.setVisible(false);
@@ -197,7 +202,9 @@ class LeverView implements MechView {
     this.barFill.setVisible(showBar);
     if (showBar) {
       const r = Math.max(0, Math.min(1, s.remainingMs / this.windowMs));
-      this.barFill.setSize(Math.max(1, 16 * r), 2);
+      this.barFill.setSize(Math.max(1, LEVER_BAR_W * r), LEVER_BAR_H);
+      const urgent = r <= 0.25;
+      this.barFill.setFillStyle(urgent ? 0xff5a5a : this.color, urgent && Math.floor(timeMs / 150) % 2 === 0 ? 0.55 : 1);
     }
   }
 

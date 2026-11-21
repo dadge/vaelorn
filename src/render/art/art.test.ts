@@ -36,7 +36,7 @@ import {
 const HEROES: CharacterId[] = ['david', 'sandrine', 'romain', 'valentine', 'aelith', 'brokk', 'grok', 'mira'];
 const DIRS: Dir[] = ['down', 'up', 'left', 'right'];
 const ENEMIES: EnemyKind[] = ['slime', 'bat', 'skeleton', 'archer', 'spider', 'wisp', 'knight'];
-const THEMES: ZoneTheme[] = ['crypt', 'grove', 'citadel', 'frost', 'ember', 'void'];
+const THEMES: ZoneTheme[] = ['crypt', 'grove', 'citadel', 'frost', 'ember', 'void', 'tide', 'dawn', 'brass'];
 
 const atlas = buildAtlasData();
 

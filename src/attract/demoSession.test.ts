@@ -41,7 +41,7 @@ describe('buildDemoSession', () => {
     }
   });
 
-  it('tire des niveaux, des héros et des salles variés (les 6 niveaux et les 8 héros apparaissent)', () => {
+  it('tire des niveaux, des héros et des salles variés (les 9 niveaux et les 8 héros apparaissent)', () => {
     const levels = new Set<number>();
     const heroes = new Set<string>();
     const rooms = new Set<number>();

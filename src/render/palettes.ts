@@ -137,6 +137,51 @@ export const THEME_PALETTES: Readonly<Record<ZoneTheme, ThemePalette>> = {
     accentHi: 0xffffff,
     accentDeep: 0x6a3cd0,
   },
+  // L7 : abysses nacrées — sol de nacre bleu-gris, murs de corail turquoise, eau profonde, lanternes de verre rosées
+  tide: {
+    outline: 0x0a1822,
+    void: 0x0b1d2a,
+    floorMid: 0x8fb0c4,
+    floorDark: 0x6d8fa6,
+    floorLight: 0xd8e6ee,
+    wallMid: 0x1f6f7a,
+    wallDark: 0x134650,
+    wallLight: 0x3fb7a8,
+    wallTop: 0x123a4d,
+    accent: 0xe8a1a0,
+    accentHi: 0xf2e9d8,
+    accentDeep: 0xc2605e,
+  },
+  // L8 : aube rose et or — sol de grès rosé, murs de brique mauve, étendards dorés, ciel crépusculaire
+  dawn: {
+    outline: 0x1e0f22,
+    void: 0x2a1830,
+    floorMid: 0xd9a48f,
+    floorDark: 0xb67f72,
+    floorLight: 0xf4d9c6,
+    wallMid: 0x8c4a6a,
+    wallDark: 0x5c2e4a,
+    wallLight: 0xb5607a,
+    wallTop: 0x3a1c3a,
+    accent: 0xf2c25a,
+    accentHi: 0xfff0c0,
+    accentDeep: 0xd9774f,
+  },
+  // L9 : clocher d'airain — plaques de laiton, murs rivetés ocre, engrenages, puits sombre
+  brass: {
+    outline: 0x120c04,
+    void: 0x1a1208,
+    floorMid: 0xb8a47a,
+    floorDark: 0x8e7c58,
+    floorLight: 0xd8c9a0,
+    wallMid: 0x6b4e1e,
+    wallDark: 0x46320f,
+    wallLight: 0xb08a3c,
+    wallTop: 0x2e2210,
+    accent: 0xe0b040,
+    accentHi: 0xf0e6c8,
+    accentDeep: 0xc0792a,
+  },
 };
 
 // ───────────────────────────── Héros ─────────────────────────────

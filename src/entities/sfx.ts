@@ -21,6 +21,7 @@ export type SfxName =
   | 'door'
   | 'key'
   | 'lever'
+  | 'leverFall'
   | 'rune'
   | 'runeFail'
   | 'objective'
@@ -68,7 +69,11 @@ export type SfxName =
   | 'gearRecover'
   | 'gearSwap'
   | 'buffStart'
-  | 'vampireHeal';
+  | 'vampireHeal'
+  // tactiques de boss
+  | 'tactic'
+  | 'tacticBreak'
+  | 'seize';
 
 interface SfxSpec {
   /** Fréquence de départ / d'arrivée (Hz). */
@@ -95,6 +100,8 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   door: { f0: 90, f1: 60, durMs: 360, type: 'sawtooth', vol: 0.06 },
   key: { f0: 880, f1: 1320, durMs: 140, type: 'sine', vol: 0.06 },
   lever: { f0: 160, f1: 110, durMs: 120, type: 'square', vol: 0.05 },
+  // levier à fenêtre qui RETOMBE (fin de la fenêtre) : deux notes descendantes aiguës, bien distinctes du clac d'activation
+  leverFall: { f0: 420, f1: 260, durMs: 110, type: 'triangle', vol: 0.05, then: { f0: 260, f1: 150, delayMs: 100 } },
   rune: { f0: 520, f1: 780, durMs: 150, type: 'sine', vol: 0.06 },
   runeFail: { f0: 160, f1: 100, durMs: 260, type: 'square', vol: 0.06 },
   objective: { f0: 660, f1: 990, durMs: 160, type: 'sine', vol: 0.07, then: { f0: 990, f1: 1480, delayMs: 140 } },
@@ -152,6 +159,10 @@ const SPECS: Readonly<Record<SfxName, SfxSpec>> = {
   gearSwap: { f0: 600, f1: 420, durMs: 70, type: 'square', vol: 0.05, then: { f0: 420, f1: 700, delayMs: 80 } },
   buffStart: { f0: 500, f1: 700, durMs: 80, type: 'triangle', vol: 0.06, then: { f0: 700, f1: 1050, delayMs: 70 } },
   vampireHeal: { f0: 260, f1: 180, durMs: 120, type: 'sine', vol: 0.05 },
+  // tactiques de boss (placeholders) : « il a un plan » (deux notes graves montantes), « déstabilisé » (chute courte), « confisqué » (deux notes descendantes)
+  tactic: { f0: 180, f1: 260, durMs: 160, type: 'triangle', vol: 0.05, then: { f0: 260, f1: 390, delayMs: 120 } },
+  tacticBreak: { f0: 380, f1: 140, durMs: 200, type: 'triangle', vol: 0.05 },
+  seize: { f0: 520, f1: 300, durMs: 120, type: 'square', vol: 0.045, then: { f0: 300, f1: 160, delayMs: 100 } },
 };
 
 /** Volume (0..1) d'un son : lecture seule, pour garantir par test que les sons d'appel automatique restent plus discrets que l'appel manuel. */
@@ -203,7 +214,7 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
     case 'keyPicked':
       return 'key';
     case 'mechanismChanged':
-      return e.active ? 'lever' : null;
+      return e.active ? 'lever' : e.expired === true ? 'leverFall' : null;
     case 'runeProgress':
       return e.ok ? 'rune' : 'runeFail';
     case 'objectiveCompleted':
@@ -271,6 +282,10 @@ export function sfxForEvent(e: SimEvent): SfxName | null {
       return 'buffStart';
     case 'vampireHeal':
       return 'vampireHeal';
+    case 'bossTactic':
+      return e.kind >= 1 && e.kind <= 6 ? 'tactic' : e.kind === 7 ? 'tacticBreak' : null;
+    case 'itemSeized':
+      return 'seize';
     default:
       return null;
   }

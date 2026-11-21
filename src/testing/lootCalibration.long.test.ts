@@ -7,7 +7,7 @@
  * Usage (PowerShell) :
  *   $env:LOOT_CALIB='1'; $env:LOOT_CALIB_LEVELS='3,4'; $env:LOOT_CALIB_PLAYERS='1,4'; $env:LOOT_CALIB_SEEDS='7,11,13,17,19'
  *   $env:LOOT_CALIB_OUT='C:\temp\calib.jsonl'; npx vitest run src/testing/lootCalibration.long.test.ts
- * Variables : LOOT_CALIB (obligatoire), LOOT_CALIB_LEVELS (défaut 1..6), LOOT_CALIB_PLAYERS (défaut 1,4), LOOT_CALIB_SEEDS (défaut 7,11,13,17,19),
+ * Variables : LOOT_CALIB (obligatoire), LOOT_CALIB_LEVELS (défaut 1..9), LOOT_CALIB_PLAYERS (défaut 1,4), LOOT_CALIB_SEEDS (défaut 7,11,13,17,19),
  * LOOT_CALIB_OUT (fichier .jsonl, ajouté en fin ; défaut : console seulement), LOOT_CALIB_EAT_RADIUS (rayon de repérage des bots, px, défaut 160),
  * LOOT_CALIB_EAT_BELOW (seuil de PV de la brique de ramassage, défaut 0,7), LOOT_CALIB_EAT=0 (bots « passifs » : ils ne ramassent que par contact fortuit).
  * Un test par (niveau, joueurs, graine) : vitest reprend la main entre deux parties (sinon « Timeout calling onTaskUpdate »).
@@ -21,7 +21,7 @@ import { aggregate, CALIB_LEVELS, measureRun, type CalibResult } from './lootCal
 const env = process.env;
 const ON = !!env.LOOT_CALIB;
 const list = (v: string | undefined, def: string): number[] => (v ?? def).split(',').map((s) => Number(s.trim())).filter((x) => Number.isFinite(x));
-const LEVELS = list(env.LOOT_CALIB_LEVELS, '1,2,3,4,5,6');
+const LEVELS = list(env.LOOT_CALIB_LEVELS, '1,2,3,4,5,6,7,8,9');
 const PLAYERS = list(env.LOOT_CALIB_PLAYERS, '1,4');
 const SEEDS = list(env.LOOT_CALIB_SEEDS, '7,11,13,17,19');
 const OUT = env.LOOT_CALIB_OUT;

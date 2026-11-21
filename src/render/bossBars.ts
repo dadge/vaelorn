@@ -19,6 +19,8 @@ export interface BossBarEntry {
   /** Proportion de PV 0..1. */
   ratio: number;
   phase: number;
+  /** Boss TACTIQUE seulement (`core/tactics.ts`) : code d'affichage de son comportement actuel (1..6 tactique, 7 déstabilisé) ; ABSENT quand il n'a aucun but (légende sous la barre). */
+  tactKind?: number;
 }
 
 /** Définition lue dans une table (type inconnu → undefined). */
@@ -54,7 +56,10 @@ export function bossBarEntries(enemies: readonly EnemyState[], lookup: EnemyDefL
     const def = lookup(e.kind);
     const tier = bossBarTier(e.kind, def);
     if (!tier) continue;
-    out.push({ enemyId: e.id, kind: e.kind, nameKey: def?.nameKey ?? `enemy.${e.kind}`, tier, ratio: hpRatio(e), phase: e.phase });
+    const entry: BossBarEntry = { enemyId: e.id, kind: e.kind, nameKey: def?.nameKey ?? `enemy.${e.kind}`, tier, ratio: hpRatio(e), phase: e.phase };
+    const tk = Math.floor(e.data.tactKind ?? 0);
+    if (tk > 0) entry.tactKind = tk;
+    out.push(entry);
   }
   out.sort((a, b) => (a.tier === b.tier ? a.enemyId - b.enemyId : a.tier === 'boss' ? -1 : 1));
   return out.slice(0, Math.max(0, max));

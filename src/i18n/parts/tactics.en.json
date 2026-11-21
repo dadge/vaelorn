@@ -1,0 +1,9 @@
+{
+  "tactic.label.campCrystal": "It guards a healing crystal",
+  "tactic.label.dazed": "Staggered!",
+  "tactic.label.guardDowned": "It guards a fallen ally: hit it!",
+  "tactic.label.heedCalls": "It rushes toward whoever calls out",
+  "tactic.label.huntWeak": "It hunts the weakest",
+  "tactic.label.interceptCarrier": "It chases the heart carrier",
+  "tactic.label.seizeItems": "It stands on a pickup"
+}

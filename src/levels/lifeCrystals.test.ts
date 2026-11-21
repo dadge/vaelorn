@@ -1,5 +1,5 @@
 /**
- * Cristaux de soin des salles de boss / demi-boss (niveaux 1 à 6) : présence dans TOUTES ces salles (et seulement elles), structure 2 + 1
+ * Cristaux de soin des salles de boss / demi-boss (niveaux 1 à 9) : présence dans TOUTES ces salles (et seulement elles), structure 2 + 1
  * (le 3e à partir de 3 joueurs), validité (`validateLevel`), et règles de validation (case praticable, accessible, loin des arrivées et du
  * départ des boss, ids uniques, pas de recouvrement). Plus un test d'intégration : le soin fonctionne dans chaque salle réelle.
  */
@@ -20,7 +20,7 @@ for (const level of LEVELS) {
 }
 
 describe('cristaux de soin : couverture des salles de boss / demi-boss', () => {
-  it('les 11 salles de boss ou de demi-boss des niveaux 1 à 6 sont recensées (le niveau 1 n\'en a pas)', () => {
+  it('les 20 salles de boss ou de demi-boss des niveaux 1 à 9 sont recensées (le niveau 1 n\'en a pas)', () => {
     expect(bossRooms.map((b) => `${b.level.id}:${b.room.id}`)).toEqual([
       'level2:arene',
       'level3:throne',
@@ -33,6 +33,15 @@ describe('cristaux de soin : couverture des salles de boss / demi-boss', () => {
       'level6:wraithhall',
       'level6:hearth',
       'level6:throne',
+      'level7:dyke',
+      'level7:stormdeck',
+      'level7:glassheart',
+      'level8:veilleurs',
+      'level8:vigie',
+      'level8:conseil',
+      'level9:bellguard',
+      'level9:ropehall',
+      'level9:belfry',
     ]);
     expect(LEVELS[0].rooms.some((r) => r.enemies.some((e) => isAnyBossKind(e.kind)))).toBe(false);
   });

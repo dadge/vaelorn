@@ -142,17 +142,23 @@ function startRoomFor(levelIndex: number, seed: number): number {
 const SEEDS = [11, 23];
 const results: DemoRunResult[] = [];
 
-describe('DemoPilot : 30 s simulées sur les 6 niveaux × tous les héros × plusieurs graines', () => {
-  it('balayage complet : aucune exception, déplacement réel, combats, pas de blocage prolongé', () => {
-    for (let li = 0; li < LEVELS.length; li++) {
+describe('DemoPilot : 30 s simulées sur les 9 niveaux × tous les héros × plusieurs graines', () => {
+  // Un `it` par niveau (et non un seul balayage de ~75 s) : un test synchrone très long bloque le worker de vitest, qui ne peut plus
+  // répondre au processus principal (« Timeout calling onTaskUpdate », erreur non gérée qui fait échouer toute la suite).
+  for (let li = 0; li < LEVELS.length; li++) {
+    it(`balayage du niveau ${li + 1} : aucune exception, tous les héros, toutes les graines`, () => {
+      const before = results.length;
       for (const hero of CHARACTER_IDS) {
         for (const seed of SEEDS) {
           const startRoom = startRoomFor(li, seed);
-          const r = runDemo(LEVELS[li], hero, seed, seed + 1, startRoom);
-          results.push(r);
+          results.push(runDemo(LEVELS[li], hero, seed, seed + 1, startRoom));
         }
       }
-    }
+      expect(results.length - before).toBe(CHARACTER_IDS.length * SEEDS.length);
+    }, 120_000);
+  }
+
+  it('le balayage couvre les 9 niveaux × tous les héros × toutes les graines', () => {
     expect(results.length).toBe(LEVELS.length * CHARACTER_IDS.length * SEEDS.length);
   });
 

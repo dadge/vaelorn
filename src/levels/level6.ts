@@ -1,5 +1,5 @@
 /**
- * Niveau 6 — « Les Abysses du Néant » (thème `void`, 9 salles, ≈ 9 minutes simulées par les bots à 2-4 joueurs, 10 annoncées). DERNIER niveau du jeu.
+ * Niveau 6 — « Les Abysses du Néant » (thème `void`, 9 salles, ≈ 9 minutes simulées par les bots à 2-4 joueurs, 10 annoncées). Sixième des neuf niveaux : son outro ouvre la suite (niveaux 7 à 9), le DERNIER niveau du jeu est le niveau 9.
  *
  * Mécanisme INÉDIT : le PONT DE LUMIÈRE (`lightBridge`). Des abîmes ('~' dans la grille) séparent des plates-formes ; les ponts qui les
  * franchissent (tuiles '.' d'une largeur) ne sont SOLIDES que lorsqu'ils ne sont pas éclairés : seul le porteur de la lanterne

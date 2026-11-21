@@ -9,6 +9,7 @@ import type { GamePhase, LevelDef, RoomDef } from '../core/types';
 import { t } from '../i18n/i18n';
 import { HUD_DEPTH, fadeAlpha, hudRect, hudText, setTextIfChanged, type ScreenBounds } from '../render/hud';
 import { MAX_BOSS_BARS, bossBarColor, bossBarFrameColor, type BossBarEntry } from '../render/bossBars';
+import { tacticColor, tacticLabelKey } from '../render/tacticIndicator';
 import type { ViewContext } from './common';
 
 type Text = Phaser.GameObjects.Text;
@@ -150,7 +151,10 @@ class BossBarSlot {
   private readonly bg: Rect;
   private readonly fill: Rect;
   private readonly name: Text;
+  /** Légende des tactiques de boss, sous la barre (vide sans tactique en cours). */
+  private readonly legend: Text;
   private nameKey = '';
+  private legendKey: string | null = null;
   private tier = '';
   private shown = false;
 
@@ -165,6 +169,8 @@ class BossBarSlot {
     this.fill.setOrigin(0, 0.5).setVisible(false);
     this.name = hudText(ctx, cx, by - 14, '', { size: 16, originX: 0.5, originY: 1, color: 0xffd0d0, depth: HUD_DEPTH.banner + 2 });
     this.name.setVisible(false);
+    this.legend = hudText(ctx, cx, by + 13, '', { size: 12, originX: 0.5, originY: 0, color: 0xffffff, depth: HUD_DEPTH.banner + 2 });
+    this.legend.setVisible(false);
   }
 
   hide(): void {
@@ -173,6 +179,8 @@ class BossBarSlot {
     this.bg.setVisible(false);
     this.fill.setVisible(false);
     this.name.setVisible(false);
+    this.legend.setVisible(false);
+    this.legendKey = null;
   }
 
   show(e: BossBarEntry): void {
@@ -193,16 +201,25 @@ class BossBarSlot {
     }
     this.fill.setSize(Math.max(1, w * e.ratio), e.tier === 'boss' ? 12 : 9);
     this.fill.setFillStyle(bossBarColor(e.tier, e.phase), 1);
+    // légende des tactiques de boss : « il veille ceux qui tombent… », « déstabilisé » ; masquée sans tactique en cours
+    const lk = e.tactKind !== undefined ? tacticLabelKey(e.tactKind) : null;
+    if (lk !== this.legendKey) {
+      this.legendKey = lk;
+      if (lk) this.legend.setText(t(lk)).setColor(`#${tacticColor(e.tactKind ?? 0).toString(16).padStart(6, '0')}`);
+    }
+    this.legend.setVisible(lk !== null);
   }
 
   retranslate(): void {
     if (this.nameKey) this.name.setText(t(this.nameKey));
+    if (this.legendKey) this.legend.setText(t(this.legendKey));
   }
 
   destroy(): void {
     this.bg.destroy();
     this.fill.destroy();
     this.name.destroy();
+    this.legend.destroy();
   }
 }
 

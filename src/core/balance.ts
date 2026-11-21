@@ -42,6 +42,12 @@
  *  [B32] GEAR_RECOVER_GRACE_MS ..... RELEVÉ = ÉQUIPEMENT RÉCUPÉRABLE : durée de vie minimale (8 s) rendue, à l'instant du relevage, aux objets que le joueur a perdus à sa chute
  *  [B33] AIM_GRACE_MS, AIM_HYSTERESIS_DEG ... FRAPPE EN DIAGONALE : grâce (120 ms) de la visée diagonale au relâchement d'une touche, hystérésis (5°) du snap 8 directions d'un stick analogique
  *  [B34] GEAR_THROW_DAMAGE_MULT, GEAR_WAVE_*, GEAR_AXE_THROW_* ... TOUTE ARME FAIT TIRER un héros de mêlée : dégâts du tir ×0,75 ; épée = onde 140 px / 240 px/s ; hache = hache lancée perforante 120 px / 170 px/s ; arc = flèche ([B20])
+ *  [B35] TACT_* ................... TACTIQUES DE BOSS (« boss malins », `tactics.ts`, activées par donnée de niveau `EnemySpawnDef.tactics`) : échauffement, délai de réaction, verrou de but, portée, vitesse, anti-blocage, isolement
+ *  [B36] TACT_BREAK_* .............. DÉSTABILISATION (contre-jeu universel) : perte de PV sur 2 s (14 % demi-boss / 7 % boss × échelle par joueurs vivants) ou spécial de héros ⇒ toutes les tactiques coupées (6 s / 5 s)
+ *  [B37] GUARD_* ................... « veilleur » : se poste près d'un joueur à terre (anneau 44 px), durée et relâche par nombre de joueurs vivants, abandon après 30 s de chute
+ *  [B38] CRYSTAL_* / CAMP_* ........ « gardien de cristal » : se poste près d'UN cristal de soin utile, durée et relâche par nombre de joueurs vivants
+ *  [B39] CALL_* / CARRIER_* / HUNT_* ... « oreille » (converge sur un appelant isolé), « intercepteur » (porteur de cœur isolé), « prédateur » (le plus faible, isolé)
+ *  [B40] SEIZE_* ................... « rapace » : se poste sur un bonus au sol et confisque demi-cœurs / bonus temporaires (jamais cœur entier, équipement ni cristal), plafonds par salle
  *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
@@ -501,3 +507,85 @@ export function damageToPlayer(
     rawDamage * difficultyMultipliers(victimDifficulty).enemyDamageMult * (1 - damageReductionFor(character)) * (1 - gear);
   return Math.max(MIN_DAMAGE, Math.round(scaled));
 }
+
+// ───────────────────────── [B35] à [B40] Tactiques de boss ─────────────────────────
+//
+// Toutes les durées sont en ms ; les tableaux indexés par le NOMBRE DE JOUEURS VIVANTS sont `[_, 1 vivant, 2, 3, 4]` (JAMAIS par difficulté).
+// Tout ceci n'a d'effet que sur un (demi-)boss dont le niveau pose `EnemySpawnDef.tactics`. Valeurs « à valider à la main » (TODO.md).
+
+/** [B35] Échauffement (ms) après le premier engagement : aucune tactique. */
+export const TACT_WARMUP_MS = 4000;
+/** [B35] Délai (ms) entre la chute d'un joueur et le début de la veille. */
+export const TACT_REACT_MS = 1200;
+/** [B35] Verrou (ms) d'un but avant réévaluation (hystérésis anti-oscillation). */
+export const TACT_MIN_LOCK_MS = 1500;
+/** [B35] Portée (px) : un but plus loin que ça du boss est ignoré (garder les faibles loin du boss est un contre-jeu). */
+export const TACT_REACH_PX = 480;
+/**
+ * [B35] Facteur de vitesse d'un boss qui rejoint un but (« sprint tactique » : les boss marchent à 36-46 px/s, trop lents pour arriver à temps dans une salle de 1 300 px ;
+ * pendant ce trajet, l'attaque forcée des brutes est suspendue, le boss n'attaque que si un joueur se trouve à portée). À valider à la main.
+ */
+export const TACT_SPEED_MULT = 1.25;
+/** [B35] Trajet maximal (ms) vers une ancre (le budget d'un but ne compte que le temps POSTÉ ou, pour une victime, la poursuite) : au-delà, but abandonné (relâche = la moitié). */
+export const TACT_TRAVEL_MAX_MS = 10000;
+/** [B35] Boss brute posté sur une ancre : il n'attaque que si un joueur est à cette distance (px) ou moins (au lieu de sa portée de déclenchement habituelle, jusqu'à 400 px pour la charge). */
+export const TACT_ANCHOR_ATTACK_PX = 70;
+/** [B35] Tolérance (px) d'arrivée sur une ancre : un boss à `hold + ce pad` ou moins est « posté » (budget du but décompté ; un boss lévitant n'attaque qu'une fois posté). */
+export const TACT_ANCHOR_ARRIVE_PAD_PX = 14;
+/** [B35] Boss bloqué (déplacement < 25 % du pas) plus longtemps que ça : but abandonné (relâche = la moitié). */
+export const TACT_STUCK_MS = 1500;
+/** [B35] Un joueur est ISOLÉ si aucun allié vivant n'est à moins de ce rayon (px). */
+export const ISOLATION_PX = 140;
+
+/** [B36] Fenêtre (ms) de mesure de la perte de PV du boss. */
+export const TACT_BREAK_WINDOW_MS = 2000;
+/** [B36] Seuil de déstabilisation (fraction des PV max) d'un demi-boss. */
+export const TACT_BREAK_FRAC_MINI = 0.14;
+/** [B36] Seuil de déstabilisation (fraction des PV max) d'un boss de fin. */
+export const TACT_BREAK_FRAC_BOSS = 0.07;
+/** [B36] Échelle du seuil selon les joueurs vivants `[_, 1, 2, 3, 4]` (peu de joueurs : seuil plus bas). */
+export const TACT_BREAK_SCALE: readonly number[] = [1, 0.6, 0.8, 1, 1];
+/** [B36] Durée (ms) de la déstabilisation par les dégâts. */
+export const TACT_BREAK_COOL_MS = 6000;
+/** [B36] Durée (ms) de la déstabilisation par un spécial de héros (plus que le relevage : 3 s). */
+export const TACT_STUN_BREAK_MS = 5000;
+
+/** [B37] Anneau (px) de la veille : le boss se tient à cette distance du joueur à terre (au-delà de `DOWNED_THREAT_RADIUS` : pas de ralentissement du relevage). */
+export const GUARD_RING_PX = 44;
+/** [B37] Durée de la veille `[_, 1, 2, 3, 4 vivants]`. */
+export const GUARD_MS: readonly number[] = [0, 2500, 3500, 4500, 5000];
+/** [B37] Relâche obligatoire après une veille `[_, 1, 2, 3, 4 vivants]`. */
+export const GUARD_RELIEF_MS: readonly number[] = [0, 9000, 8000, 7000, 6000];
+/** [B37] Au-delà de cette durée de chute continue, le boss ne veille plus ce joueur. */
+export const GUARD_GIVEUP_MS = 30000;
+
+/** [B38] Un joueur vivant à ce quota de PV (fraction) ou moins « a besoin » d'un cristal. */
+export const CRYSTAL_NEED_FRAC = 0.5;
+/** [B38] Distance de garde (px) = rayon du boss + ce supplément. */
+export const CRYSTAL_HOLD_PAD_PX = 20;
+/** [B38] Durée du campement `[_, 1, 2, 3, 4 vivants]`. */
+export const CAMP_MS: readonly number[] = [0, 3000, 4000, 5000, 6000];
+/** [B38] Relâche après un campement `[_, 1, 2, 3, 4 vivants]`. */
+export const CAMP_RELIEF_MS: readonly number[] = [0, 9000, 8000, 7000, 7000];
+
+/** [B39] « Oreille » : durée / relâche (ms). */
+export const CALL_HOLD_MS = 4000;
+export const CALL_RELIEF_MS = 6000;
+/** [B39] « Intercepteur » : durée / relâche (ms). */
+export const CARRIER_HOLD_MS = 4000;
+export const CARRIER_RELIEF_MS = 7000;
+/** [B39] « Prédateur » : durée / relâche (ms), seuil de PV (fraction) sous lequel un joueur isolé devient la proie, bonus (fraction) de cible pour Valentine (0 = désactivé, choix de design). */
+export const HUNT_HOLD_MS = 5000;
+export const HUNT_RELIEF_MS = 5000;
+export const HUNT_MAX_HP_FRAC = 0.6;
+export const HUNT_HEALER_BONUS = 0;
+
+/** [B40] « Rapace » : durée (ms) du poste sur un bonus, relâche, durée (ms) sous le boss avant confiscation, délai entre deux confiscations, plafonds par tentative de salle. */
+export const SEIZE_POST_MS = 6000;
+export const SEIZE_RELIEF_MS = 8000;
+export const SEIZE_DWELL_MS = 2500;
+export const SEIZE_COOL_MS = 6000;
+export const SEIZE_MAX_MINI = 2;
+export const SEIZE_MAX_BOSS = 3;
+/** [B40] Distance de confiscation = rayon du boss + ce supplément (px). */
+export const SEIZE_RADIUS_PAD_PX = 6;

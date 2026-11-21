@@ -38,6 +38,8 @@
  *   fosse, pilier), distincte d'un spawn joueur, d'un ennemi, d'une porte, d'un bloc, d'un brasero, d'une statue, d'une herse et d'un pont de lumière ;
  *   « pas trivial » : à >= `HEAL_CRYSTAL_MIN_SPAWN_TILES` tuiles de tout point d'arrivée des joueurs ; « hors zones de danger de départ » : à >=
  *   `HEAL_CRYSTAL_MIN_BOSS_TILES` tuiles de tout boss / demi-boss ; ACCESSIBLE depuis les spawns à chaque nombre de joueurs n >= minPlayers.
+ *  Tactiques de boss (`EnemySpawnDef.tactics`) : liste non vide d'identifiants connus sans doublon, réservée à un boss / demi-boss présent dès 1 joueur (pas de
+ *   `minPlayers`), dans une salle de boss PURE (aucun mécanisme, aucun abîme) ; `campCrystal` exige des `healCrystals`.
  *  i18n : si `opts.dictionaries` est fourni, toutes les clés requises (voir `collectRequiredI18nKeys`) doivent exister
  *  et être non vides dans CHAQUE dictionnaire.
  *
@@ -66,6 +68,7 @@
 import { HEAL_CRYSTAL_MIN_BOSS_TILES, HEAL_CRYSTAL_MIN_SPAWN_TILES } from './balance';
 import { LIGHT_FULL_TILES } from './constants';
 import { isAnyBossKind, isBossKind, isMiniBossKind } from './enemies';
+import { TACTIC_IDS } from './tactics';
 import type {
   DecorDef,
   Dir,
@@ -652,6 +655,27 @@ function validateRoomStatic(room: RoomDef, level: LevelDef, err: (m: string) => 
       }
     });
   }
+
+  // tactiques de boss (`EnemySpawnDef.tactics`) : boss / demi-boss présent à tout n, salle pure (ni abîme ni mécanisme), cristaux pour campCrystal
+  (room.enemies ?? []).forEach((e, i) => {
+    if (e.tactics === undefined) return;
+    const T = `${P} : ennemi[${i}] (${e.kind}) : tactics`;
+    if (!Array.isArray(e.tactics) || e.tactics.length === 0) {
+      err(`${T} doit être une liste non vide`);
+      return;
+    }
+    if (!isAnyBossKind(e.kind)) err(`${T} : réservé à un boss ou demi-boss`);
+    if ((e.minPlayers ?? 1) > 1) err(`${T} : le boss tactique doit être présent dès 1 joueur (pas de minPlayers)`);
+    const seen = new Set<string>();
+    for (const t of e.tactics) {
+      if (!(TACTIC_IDS as readonly string[]).includes(t)) err(`${T} : tactique inconnue "${String(t)}"`);
+      else if (seen.has(t)) err(`${T} : tactique en double "${t}"`);
+      seen.add(t);
+    }
+    if (seen.has('campCrystal') && (room.healCrystals ?? []).length === 0) err(`${T} : campCrystal exige des healCrystals dans la salle`);
+    if ((room.layout ?? []).some((row) => typeof row === 'string' && row.includes('~'))) err(`${T} : une salle à boss tactique ne doit pas avoir d'abîme ('~')`);
+    if ((room.mechanisms ?? []).length > 0) err(`${T} : une salle à boss tactique doit être une salle de boss pure (aucun mécanisme)`);
+  });
 
   // mécanisme coopératif
   const hasCoop = (room.mechanisms ?? []).some((m) => COOP_TYPES.has(m.type) && (m.minPlayers ?? 1) <= 1);

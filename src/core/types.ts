@@ -478,7 +478,7 @@ export interface PlayerState {
 
 // ───────────────────────────── Données de niveau ─────────────────────────────
 
-export type ZoneTheme = 'crypt' | 'grove' | 'citadel' | 'frost' | 'ember' | 'void';
+export type ZoneTheme = 'crypt' | 'grove' | 'citadel' | 'frost' | 'ember' | 'void' | 'tide' | 'dawn' | 'brass';
 
 /**
  * Glyphes de la grille (RoomDef.layout) :
@@ -684,7 +684,19 @@ export interface EnemySpawnDef {
   when?: Requirement;
   /** N'apparaît que si nbJoueurs >= minPlayers (le nombre d'ennemis suit les JOUEURS, jamais la difficulté). */
   minPlayers?: number;
+  /**
+   * TACTIQUES DE BOSS (« boss malins », `tactics.ts`) : réservé à un boss ou demi-boss présent à tout nombre de joueurs (validé). Recopié à l'apparition dans `enemy.data.tact` (masque de bits) ;
+   * absent = comportement historique EXACT (aucune clé de donnée, aucun tirage aléatoire en plus). Les sbires invoqués n'en héritent jamais.
+   */
+  tactics?: readonly BossTacticId[];
 }
+
+/**
+ * Tactiques d'un boss « malin », par ordre de priorité décroissante : 'guardDowned' (veille un joueur à terre), 'campCrystal' (garde un cristal de soin utile),
+ * 'heedCalls' (converge sur un appelant isolé), 'interceptCarrier' (poursuit un porteur de cœur isolé), 'seizeItems' (se poste sur un bonus et le confisque),
+ * 'huntWeak' (poursuit le plus faible, isolé). Voir `tactics.ts` et `balance.ts` [B35]-[B40].
+ */
+export type BossTacticId = 'guardDowned' | 'campCrystal' | 'heedCalls' | 'interceptCarrier' | 'seizeItems' | 'huntWeak';
 
 export interface ZoneDef {
   id: string;
@@ -1077,7 +1089,11 @@ export type SimEvent =
   | { type: 'playerAttack'; playerId: PlayerId; dir: Dir; aim?: DiagDir }
   | { type: 'projectileFired'; projectileId: number; kind: ProjectileKind; pos: Vec2 }
   | { type: 'bossPhase'; enemyId: number; kind: EnemyKind; phase: number }
-  | { type: 'mechanismChanged'; mechanismId: string; active: boolean }
+  /** Tactiques de boss : le comportement tactique d'un (demi-)boss change (`kind` 0 = aucun, 1..6 = tactique, 7 = déstabilisé) ; sert au son et au sursaut visuel, aucun effet sur l'état. */
+  | { type: 'bossTactic'; enemyId: number; kind: number }
+  /** Tactiques de boss : un (demi-)boss confisque un bonus au sol (demi-cœur ou bonus temporaire resté sous lui) ; jamais un cœur entier, un équipement ni un cristal. */
+  | { type: 'itemSeized'; enemyId: number; kind: 'heart' | 'buff'; pos: Vec2 }
+  | { type: 'mechanismChanged'; mechanismId: string; active: boolean; expired?: boolean }
   | { type: 'keyPicked'; playerId: PlayerId; keyId: string }
   | { type: 'doorOpened'; doorId: string }
   | { type: 'runeProgress'; mechanismId: string; progress: number; ok: boolean }
@@ -1234,4 +1250,35 @@ export interface EnemyAIContext {
   roomBounds: { width: number; height: number };
   /** Émet un événement (ex. changement de phase de boss). */
   emit(e: SimEvent): void;
+  /**
+   * Monde vu par les TACTIQUES DE BOSS (`tactics.ts`) : cristaux de soin intacts et objets au sol. OPTIONNEL : construit par la simulation seulement si un ennemi vivant a des tactiques
+   * (sinon `undefined`, aucune allocation) ; un contexte de test sans ce champ est valide.
+   */
+  world?: TacticWorld;
+}
+
+/** Un cristal de soin intact et actif à ce nombre de joueurs, vu par les tactiques de boss. */
+export interface TacticCrystal {
+  /** Indice dans `RoomDef.healCrystals`. */
+  idx: number;
+  id: string;
+  pos: Vec2;
+}
+
+/**
+ * Un objet au sol vu par les tactiques de boss. `ref` = identifiant stable (id × 4 + code : 0 cœur, 1 bonus temporaire, 2 équipement) car les compteurs d'objets sont distincts.
+ * `value` : cœur entier 3, demi-cœur 2, bonus temporaire 2, équipement 1. `eatable` : peut être CONFISQUÉ (demi-cœur, bonus temporaire) ; les autres ne servent qu'à s'y poster.
+ */
+export interface TacticItem {
+  ref: number;
+  kind: 'heart' | 'buff' | 'gear';
+  pos: Vec2;
+  value: number;
+  eatable: boolean;
+}
+
+/** Monde optionnel du contexte d'IA pour les tactiques de boss (voir `EnemyAIContext.world`). */
+export interface TacticWorld {
+  crystals: TacticCrystal[];
+  items: TacticItem[];
 }

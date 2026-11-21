@@ -28,7 +28,7 @@ de frames** (voir le tableau ci-dessous) : aucun autre code n'a à changer.
 | `gear.ts` | Équipement (**provisoire**) : `gear_<emplacement>_<1..3>` (16×16, objet au sol) et `gear_icon_<emplacement>_<1..3>` (8×8, icône du HUD) pour boots / protection / artifact / magic / weapon, plus les 10 accessoires (`gear_accessory_<sorte>_<niveau>`, icônes `gear_icon_accessory_*`) et les 3 bonus temporaires (`gear_buff_*`, `gear_icon_buff_*`) ; un seul dessin 6×6 par objet, agrandi ×2 (sol) ou posé tel quel (HUD), contour sombre, sans cadre |
 | `light.ts` | Torches / salles sombres : `brazier_*`, `ui_torch_*`, `fx_ember_0..2` (voir « Lumière et obscurité ») |
 | `../darkness.ts` | `DarknessLayer` : voile d'obscurité (RenderTexture) + pinceaux lumineux générés par code (hors atlas) |
-| `../palettes.ts` | Toutes les couleurs (thèmes `crypt`/`grove`/`citadel`/`frost`/`ember`/`void`, héros, ennemis, demi-boss, boss, mécanismes, `PUZZLE_COLORS`, FX, UI) ; `ALL_PALETTE_COLORS` = liste blanche testée |
+| `../palettes.ts` | Toutes les couleurs (thèmes `crypt`/`grove`/`citadel`/`frost`/`ember`/`void`/`tide`/`dawn`/`brass`, héros, ennemis, demi-boss, boss, mécanismes, `PUZZLE_COLORS`, FX, UI) ; `ALL_PALETTE_COLORS` = liste blanche testée |
 
 ## Conventions d'usage (pour le rendu)
 
@@ -108,6 +108,9 @@ Taille = taille d'UNE frame. Les motifs utilisent `*` comme joker.
 | `tile_frost_*` | 16×16 | Cavernes de glace (L4) : dalles givrées, mur de blocs de glace à stalactites, dessus de mur, pilier de glace, crevasse, vide | Tileset 16×16 de 7 tuiles raccordables, bleus/blancs + éclats cyan |
 | `tile_ember_*` | 16×16 | Forge volcanique (L5) : dalles de basalte à fissures de lave, mur de colonnes, pilier à braise, lac de lave (fosse), vide | Tileset 16×16 de 7 tuiles raccordables, noirs/rouges + lave orange |
 | `tile_void_*` | 16×16 | Abysse astral (L6) : sol cristallin étoilé, mur de cristal sombre, pilier de cristal, vide étoilé (fosse), vide | Tileset 16×16 de 7 tuiles raccordables, violets/noirs + étoiles |
+| `tile_tide_*` | 16×16 | Abysses nacrées (L7) : dalles de nacre à ondulations, mur de corail turquoise, dessus de mur, pilier à perle, eau profonde (fosse), vide | Tileset 16×16 de 7 tuiles raccordables, bleu-gris nacré + turquoise + corail rosé |
+| `tile_dawn_*` | 16×16 | Aube rose et or (L8) : dalles de grès rosé (soleil gravé), mur de brique mauve à liseré doré, pilier à soleil, ciel crépusculaire (fosse), vide | Tileset 16×16 de 7 tuiles raccordables, rose/mauve + or |
+| `tile_brass_*` | 16×16 | Clocher d'airain (L9) : plaques de laiton rivetées (engrenage gravé), mur d'airain à tuyau doré, pilier à engrenage, puits sombre (fosse), vide | Tileset 16×16 de 7 tuiles raccordables, laiton/ocre + or |
 
 ### Mécanismes
 
@@ -222,6 +225,6 @@ mécanismes, décors, FX et UI). L'encodeur PNG est minimal (zlib de Node) ; le 
 
 ## Tests
 
-`npx vitest run src/render/art` (art.test.ts, art46.test.ts : gabarits `ENEMY_SPRITES` couvrant tous les `EnemyKind`, frames 32×32 / 48×48, thèmes frost/ember/void, mécanismes 4-6) vérifie : contrat des noms et tailles, absence de doublon, bornes et marges de l'atlas,
+`npx vitest run src/render/art` (art.test.ts, art46.test.ts : gabarits `ENEMY_SPRITES` couvrant tous les `EnemyKind`, frames 32×32 / 48×48, thèmes frost/ember/void/tide/dawn/brass, mécanismes 4-6) vérifie : contrat des noms et tailles, absence de doublon, bornes et marges de l'atlas,
 alpha ∈ {0, 255}, aucun pixel hors palette, 12 couleurs max par thème, héros tous distincts (pixels + silhouettes), 4 directions différentes,
 `left` = miroir de `right`, frames de marche différentes, déterminisme (deux builds → mêmes octets), helpers d'`animations.ts`, couverture du manifeste.
