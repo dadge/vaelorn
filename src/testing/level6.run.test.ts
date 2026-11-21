@@ -90,9 +90,12 @@ describe('niveau 6 : terminable de bout en bout (bots, simulation réelle)', () 
       expect(result.failure, result.failure ?? '').toBeNull();
       expect(result.completed).toBe(true);
       expect(run.state.phase).toBe('levelComplete');
-      // Durée cible : 5 à 10 minutes simulées (solo : 5 à 12).
+      // Durée cible : 5 à 10 minutes simulées (solo : 5 à 12,5). Solo : 711 s (11,9 min) avant la FRAPPE EN DIAGONALE, 739 s (12,3 min) après : mêmes 3 défaites, surtout la salle « hearth » (+22 s).
+      // Cause ISOLÉE par mesure : avec la visée désactivée dans la simulation (bot inchangé) on retrouve exactement 711,2 s ; avec la visée active mais la prédiction du bot (`predictAttackAim`)
+      // remplacée par l'ancien calcul 4 directions, on obtient les mêmes 739,4 s : le ralentissement vient du JEU (le bot de mêlée suit des chemins diagonaux, et un coup en diagonale
+      // n'a plus l'arc du cardinal voisin), pas d'un défaut de prédiction du bot ni d'un durcissement voulu du niveau. Plafond serré (12,5 min = 750 s) pour que tout autre ajustement de balance se voie.
       expect(result.timeMs, 'durée simulée trop courte').toBeGreaterThanOrEqual(5 * 60 * 1000);
-      expect(result.timeMs, 'durée simulée trop longue').toBeLessThanOrEqual((n === 1 ? 12 : 10) * 60 * 1000);
+      expect(result.timeMs, 'durée simulée trop longue').toBeLessThanOrEqual((n === 1 ? 12.5 : 10) * 60 * 1000);
       // Aucune action de script échouée, toutes les salles validées, tous les objectifs accomplis.
       expect(run.failures).toEqual([]);
       expect(run.state.clearedRooms).toEqual(level6.rooms.map((r) => r.id));

@@ -7,7 +7,7 @@
  *  - toutes les fonctions retournent de NOUVEAUX objets (aucune mutation des arguments).
  */
 import { TILE } from './constants';
-import type { Dir, TileRect, TileXY, Vec2 } from './types';
+import type { Aim8, DiagDir, Dir, TileRect, TileXY, Vec2 } from './types';
 
 /** Distance au carré entre deux points (évite la racine pour les comparaisons). */
 export function distSq(a: Vec2, b: Vec2): number {
@@ -43,8 +43,11 @@ export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-/** Vecteur unitaire d'une direction cardinale (up = (0,-1), down = (0,1), left = (-1,0), right = (1,0)). */
-export function dirVec(dir: Dir): Vec2 {
+/**
+ * Vecteur UNITAIRE d'une direction de visée : cardinale (up = (0,-1), down = (0,1), left = (-1,0), right = (1,0)) ou diagonale
+ * (±√½ sur chaque axe : même longueur 1, donc même vitesse de projectile / même portée qu'en cardinal).
+ */
+export function dirVec(dir: Aim8): Vec2 {
   switch (dir) {
     case 'up':
       return { x: 0, y: -1 };
@@ -54,7 +57,67 @@ export function dirVec(dir: Dir): Vec2 {
       return { x: -1, y: 0 };
     case 'right':
       return { x: 1, y: 0 };
+    case 'upLeft':
+      return { x: -Math.SQRT1_2, y: -Math.SQRT1_2 };
+    case 'upRight':
+      return { x: Math.SQRT1_2, y: -Math.SQRT1_2 };
+    case 'downLeft':
+      return { x: -Math.SQRT1_2, y: Math.SQRT1_2 };
+    case 'downRight':
+      return { x: Math.SQRT1_2, y: Math.SQRT1_2 };
   }
+}
+
+/** Les 8 directions de visée, par pas de 45° dans le sens horaire à l'écran en partant de la droite (index = angle / 45°). */
+const AIM8_ORDER: readonly Aim8[] = ['right', 'downRight', 'down', 'downLeft', 'left', 'upLeft', 'up', 'upRight'];
+
+/** La visée est-elle une diagonale ? */
+export function isDiagonal(a: Aim8): a is DiagDir {
+  return a === 'upLeft' || a === 'upRight' || a === 'downLeft' || a === 'downRight';
+}
+
+/** Les deux composantes cardinales d'une diagonale : [horizontale, verticale] (ex. 'upLeft' → ['left', 'up']). */
+export function diagComponents(d: DiagDir): [Dir, Dir] {
+  switch (d) {
+    case 'upLeft':
+      return ['left', 'up'];
+    case 'upRight':
+      return ['right', 'up'];
+    case 'downLeft':
+      return ['left', 'down'];
+    case 'downRight':
+      return ['right', 'down'];
+  }
+}
+
+/**
+ * Direction cardinale (sprite 4 directions) d'une visée : la visée elle-même si cardinale, sinon sa composante HORIZONTALE (le héros
+ * est dessiné de profil en diagonale). Pour retrouver la composante réellement tenue, préférer `facing`.
+ */
+export function cardinalOfAim(a: Aim8): Dir {
+  return isDiagonal(a) ? diagComponents(a)[0] : a;
+}
+
+/**
+ * Snap d'un vecteur (déplacement) en 8 directions : secteurs de 45° centrés sur les cardinales et les diagonales (frontières à 22,5° ;
+ * un clavier à 2 touches donne la diagonale exacte, un stick analogique le secteur le plus proche).
+ * - vecteur (quasi) nul → `fallback` ;
+ * - `hysteresisDeg` > 0 : si l'angle du vecteur reste à moins de 22,5° + `hysteresisDeg` du centre du secteur `fallback`, ce secteur est conservé
+ *   (le stick qui frôle une frontière ne fait pas trembler la visée).
+ * @param v vecteur (repère écran, y vers le bas)
+ * @param fallback visée à retourner si `v` est nul, et secteur courant pour l'hystérésis
+ * @param hysteresisDeg marge d'hystérésis en degrés (défaut 0)
+ */
+export function aim8FromVec(v: Vec2, fallback: Aim8, hysteresisDeg = 0): Aim8 {
+  if (Math.abs(v.x) < 1e-9 && Math.abs(v.y) < 1e-9) return fallback;
+  const step = Math.PI / 4;
+  const ang = Math.atan2(v.y, v.x);
+  if (hysteresisDeg > 0) {
+    const fi = AIM8_ORDER.indexOf(fallback);
+    if (fi >= 0 && angleDiff(ang, fi * step) <= ((22.5 + hysteresisDeg) * Math.PI) / 180) return fallback;
+  }
+  const idx = ((Math.round(ang / step) % 8) + 8) % 8;
+  return AIM8_ORDER[idx];
 }
 
 /**

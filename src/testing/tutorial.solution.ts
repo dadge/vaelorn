@@ -204,6 +204,11 @@ export class TutorialRun {
     switch (id) {
       case 'move':
         return { ...idleFrame(), moveX: 1 };
+      case 'diagonal': {
+        // se déplace en diagonale (2 touches : ±√½ sur chaque axe) et frappe : le coup part avec une visée diagonale
+        const d = Math.SQRT1_2;
+        return { ...idleFrame(), moveX: d, moveY: d, attack: true };
+      }
       case 'sign':
         return this.walk(pos, px(9, 5)).f;
       case 'attack':

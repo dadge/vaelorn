@@ -25,9 +25,9 @@ function walkConditions(c: Condition | undefined, out: Condition[] = []): Condit
 }
 
 describe('étapes du tutoriel : données', () => {
-  it('45 étapes aux ids uniques, regroupées par salle dans l ordre du niveau', () => {
-    expect(TUTORIAL_STEPS.length).toBe(45);
-    expect(new Set(TUTORIAL_STEPS.map((s) => s.id)).size).toBe(45);
+  it('46 étapes aux ids uniques, regroupées par salle dans l ordre du niveau', () => {
+    expect(TUTORIAL_STEPS.length).toBe(46);
+    expect(new Set(TUTORIAL_STEPS.map((s) => s.id)).size).toBe(46);
     const roomOrder = tutorialLevel.rooms.map((r) => r.id);
     let last = -1;
     for (const s of TUTORIAL_STEPS) {
@@ -55,7 +55,7 @@ describe('étapes du tutoriel : données', () => {
 
   it('couvre toutes les mécaniques demandées (relevage, appel, panneaux, objectifs de salle et personnel)', () => {
     const ids = TUTORIAL_STEPS.map((s) => s.id);
-    for (const must of ['move', 'sign', 'roomGoals', 'personalGoal', 'attack', 'special', 'specialRecharge', 'hearts', 'lever', 'plates', 'block', 'keyPick', 'keyDoor', 'refuel', 'lightBrazier', 'revive', 'reviveGear', 'heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'gearLeft', 'gearSwap', 'crossCall', 'crossWho', 'autoCallRecap1', 'autoCallRecap2', 'callReceive', 'callSend', 'wipe', 'finalGoals']) {
+    for (const must of ['move', 'sign', 'roomGoals', 'personalGoal', 'attack', 'diagonal', 'special', 'specialRecharge', 'hearts', 'lever', 'plates', 'block', 'keyPick', 'keyDoor', 'refuel', 'lightBrazier', 'revive', 'reviveGear', 'heartStore', 'heartSelf', 'heartAlly', 'heartFull', 'gearLeft', 'gearSwap', 'crossCall', 'crossWho', 'autoCallRecap1', 'autoCallRecap2', 'callReceive', 'callSend', 'wipe', 'finalGoals']) {
       expect(ids, must).toContain(must);
     }
     const highlights = new Set(TUTORIAL_STEPS.flatMap((s) => s.highlights ?? []));

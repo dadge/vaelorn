@@ -438,7 +438,7 @@ describe('BotRun : auto-combat', () => {
     });
     run.queue(0, wait(30000));
     run.setBackground(0, { combat: false });
-    run.stepFor(12000);
+    run.stepFor(25000); // Sandrine a 90 PV (force 8 / résistance 4) : il faut plus de temps au chevalier
     expect(run.stats.players[0].hpLost).toBeGreaterThan(0);
     expect(run.stats.players[0].downs).toBeGreaterThanOrEqual(1);
     expect(run.stats.wipes).toBeGreaterThanOrEqual(1);

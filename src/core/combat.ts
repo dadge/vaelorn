@@ -23,12 +23,12 @@ import { damageToEnemy, playerBaseDamage, playerSpecialDamage } from './balance'
 import { getCharacter } from './characters';
 import { attackDamageMultiplier, effectiveAttack, effectiveSpecialCooldownMs, rageMultiplier } from './gear';
 import { moveCircle, projectileHitsWall, segmentBlocked, type PixelRect } from './collision';
-import { angleBetween, circleOverlap, dirVec, isInArc, vecFromAngle } from './geometry';
+import { angleBetween, circleOverlap, dirVec, isDiagonal, isInArc, vecFromAngle } from './geometry';
 import { ENEMIES } from './enemies';
-import { applyDamageToPlayer, isRescuing } from './players';
+import { applyDamageToPlayer, isRescuing, playerAim } from './players';
 import type { RoomGrid } from './grid';
 import type {
-  Dir,
+  Aim8,
   EnemyState,
   PlayerId,
   PlayerState,
@@ -101,8 +101,8 @@ export function enemyRadius(e: Pick<EnemyState, 'kind'>): number {
   return ENEMIES[e.kind]?.radius ?? 6;
 }
 
-/** Angle (radians, repère écran, 0 = droite) d'une direction cardinale. */
-export function dirAngle(dir: Dir): number {
+/** Angle (radians, repère écran, 0 = droite) d'une direction de visée (cardinale ou diagonale : ±45° / ±135°). */
+export function dirAngle(dir: Aim8): number {
   const v = dirVec(dir);
   return Math.atan2(v.y, v.x);
 }
@@ -113,7 +113,7 @@ export function canPlayerAttack(p: PlayerState): boolean {
 }
 
 /**
- * Ennemis touchés par l'attaque de MÊLÉE de `player` dans sa direction `dir` (défaut : `player.facing`).
+ * Ennemis touchés par l'attaque de MÊLÉE de `player` dans sa direction `dir` (défaut : sa visée effective `aim ?? facing`, voir `playerAim`).
  * Pure (ne mute rien). Un ennemi est touché si :
  *  - il est vivant (`!dead`, `hp > 0`) ;
  *  - il est dans l'arc (`isInArc` : portée `attack.range` depuis le centre du joueur, ouverture `attack.arcDeg`, rayon de l'ennemi pris en compte) ;
@@ -123,14 +123,14 @@ export function canPlayerAttack(p: PlayerState): boolean {
  * @param enemies candidats
  * @param grid grille statique (ligne de vue)
  * @param solids portes fermées et blocs (ligne de vue)
- * @param dir direction de l'attaque (défaut : facing)
+ * @param dir direction de l'attaque, cardinale ou diagonale (défaut : visée effective)
  */
 export function meleeTargets(
   player: PlayerState,
   enemies: readonly EnemyState[],
   grid: RoomGrid,
   solids: readonly PixelRect[],
-  dir: Dir = player.facing,
+  dir: Aim8 = playerAim(player),
 ): EnemyState[] {
   const atk = getCharacter(player.characterId).attack;
   if (atk.kind !== 'melee') return [];
@@ -165,14 +165,14 @@ export function healPlayer(target: PlayerState, amount: number): number {
  * @param id identifiant du projectile
  * @param grid grille statique (départ dans un mur ⇒ null)
  * @param solids portes fermées / blocs
- * @param dir direction du tir (défaut : facing)
+ * @param dir direction du tir, cardinale ou diagonale (défaut : visée effective ; `dirVec` est unitaire : même vitesse et même départ qu'en cardinal)
  */
 export function buildPlayerProjectile(
   player: PlayerState,
   id: number,
   grid: RoomGrid,
   solids: readonly PixelRect[],
-  dir: Dir = player.facing,
+  dir: Aim8 = playerAim(player),
 ): ProjectileState | null {
   const character = getCharacter(player.characterId);
   const atk = effectiveAttack(character, player.loadout); // l'Arc fait tirer un héros au corps à corps
@@ -316,8 +316,18 @@ export function damagePlayersInCircle(ctx: CombatContext, center: Vec2, radius: 
 // ───────────────────────────── Attaques de joueurs ─────────────────────────────
 
 /**
- * Déclenche l'attaque de `player` (si `canPlayerAttack`) : pose cooldown, animation et direction d'attaque (= facing),
- * émet `playerAttack`, puis
+ * Retient la direction de l'attaque pour le rendu : `attackDir` = `facing` (sprite 4 directions), `attackAim` = la diagonale visée, ou SUPPRIMÉ si la frappe est cardinale
+ * (le champ n'existe pas dans l'état d'un joueur qui n'attaque qu'en cardinal). MUTE `player`.
+ */
+function setAttackDir(player: PlayerState): void {
+  player.attackDir = player.facing;
+  if (player.aim !== undefined) player.attackAim = player.aim;
+  else delete player.attackAim;
+}
+
+/**
+ * Déclenche l'attaque de `player` (si `canPlayerAttack`) : pose cooldown, animation et direction d'attaque (`attackDir` = facing ; `attackAim` = diagonale éventuelle),
+ * émet `playerAttack` (`dir` cardinal, `aim` seulement en diagonale), puis
  *  - mêlée : frappe immédiatement tous les ennemis de l'arc (`meleeTargets`) ;
  *  - distance : ajoute un projectile à `ctx.room.projectiles` (émet `projectileFired`), dans la limite de `MAX_PROJECTILES`.
  * Le cooldown est consommé même si rien n'est touché ou si le tir part dans un mur.
@@ -331,16 +341,17 @@ export function performPlayerAttack(ctx: CombatContext, player: PlayerState): bo
   const atk = effectiveAttack(character, player.loadout); // hache : cadence plus lente ; arc : tir à distance
   player.attackCooldownMs = atk.cooldownMs;
   player.attackAnimMs = atk.animMs;
-  player.attackDir = player.facing;
-  ctx.events.push({ type: 'playerAttack', playerId: player.id, dir: player.facing });
+  const aim = playerAim(player);
+  setAttackDir(player);
+  ctx.events.push(isDiagonal(aim) ? { type: 'playerAttack', playerId: player.id, dir: player.facing, aim } : { type: 'playerAttack', playerId: player.id, dir: player.facing });
 
   if (atk.kind === 'melee') {
     const raw = playerBaseDamage(character) * attackDamageMultiplier(character, player.loadout);
-    for (const e of meleeTargets(player, ctx.room.enemies, ctx.grid, ctx.solids, player.facing)) {
+    for (const e of meleeTargets(player, ctx.room.enemies, ctx.grid, ctx.solids, aim)) {
       damageEnemy(ctx, e, raw, player, player.pos);
     }
   } else if (ctx.room.projectiles.length < MAX_PROJECTILES) {
-    const p = buildPlayerProjectile(player, ctx.nextId(), ctx.grid, ctx.solids, player.facing);
+    const p = buildPlayerProjectile(player, ctx.nextId(), ctx.grid, ctx.solids, aim);
     if (p) {
       ctx.room.projectiles.push(p);
       ctx.events.push({ type: 'projectileFired', projectileId: p.id, kind: p.kind, pos: { x: p.pos.x, y: p.pos.y } });
@@ -490,7 +501,7 @@ function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
 
 /** Centre de la nova ardente : `range` px devant le héros, ramené vers lui si ce point est dans un mur ou derrière un mur. */
 function novaCenter(ctx: CombatContext, player: PlayerState, def: SpecialDef): Vec2 {
-  const v = dirVec(player.facing);
+  const v = dirVec(playerAim(player));
   for (let d = def.range; d > 0; d -= 8) {
     const c = { x: player.pos.x + v.x * d, y: player.pos.y + v.y * d };
     if (!projectileHitsWall(c, 0, ctx.grid, ctx.solids) && !segmentBlocked(player.pos, c, ctx.grid, ctx.solids)) return c;
@@ -502,7 +513,7 @@ function novaCenter(ctx: CombatContext, player: PlayerState, def: SpecialDef): V
 function fireArrowFan(ctx: CombatContext, player: PlayerState, def: SpecialDef, raw: number): number {
   const count = Math.max(1, Math.floor(def.count ?? 9));
   const spread = ((def.spreadDeg ?? 40) * Math.PI) / 180;
-  const base = dirAngle(player.facing);
+  const base = dirAngle(playerAim(player));
   const lifeMs = (def.range / ARROW_FAN_SPEED) * 1000;
   let made = 0;
   for (let i = 0; i < count; i++) {
@@ -571,7 +582,8 @@ export function stepSpecialEffects(ctx: CombatContext, player: PlayerState, anim
 /**
  * Déclenche l'attaque spéciale de `player` si `canPlayerSpecial` (et dégâts activés) : pose la recharge
  * (`specialCooldownMs = def.cooldownMs`) et l'animation (`specialAnimMs = def.animMs`), émet `specialUsed`
- * (pos : origine de l'effet = position du héros, ou centre de la nova ardente ; dir : `facing`) puis applique l'effet :
+ * (pos : origine de l'effet = position du héros, ou centre de la nova ardente ; dir : `facing` ; aim : diagonale, seulement si le héros vise en diagonale) puis applique l'effet.
+ * Les spéciaux directionnels (nova, ruée, volée, fracas) suivent la visée effective `aim ?? facing` ; le tourbillon, le séisme, la lumière et la danse sont radiaux :
  *  - whirlwind : tous les ennemis dans `radius` autour du héros ;
  *  - fireNova : explosion centrée `range` px devant (ramenée si mur), rayon `radius` ;
  *  - dash : ruée de `range` px (collisions respectées), invulnérable `invulnMs`, blesse les ennemis traversés ;
@@ -592,7 +604,8 @@ export function performPlayerSpecial(ctx: CombatContext, player: PlayerState): b
   const origin = { x: player.pos.x, y: player.pos.y };
   player.specialCooldownMs = effectiveSpecialCooldownMs(def.cooldownMs, player.loadout); // Artefact : recharge réduite
   player.specialAnimMs = def.animMs;
-  player.attackDir = player.facing;
+  const aim = playerAim(player);
+  setAttackDir(player);
   let eventPos: Vec2 = origin;
 
   switch (def.kind) {
@@ -607,7 +620,7 @@ export function performPlayerSpecial(ctx: CombatContext, player: PlayerState): b
       break;
     }
     case 'dash': {
-      const v = dirVec(player.facing);
+      const v = dirVec(aim);
       const end = moveCircle(origin, { x: v.x * def.range, y: v.y * def.range }, PLAYER_RADIUS, ctx.grid, ctx.solids);
       if (Number.isFinite(end.x) && Number.isFinite(end.y)) player.pos = end;
       const to = player.pos;
@@ -631,7 +644,7 @@ export function performPlayerSpecial(ctx: CombatContext, player: PlayerState): b
       fireArrowFan(ctx, player, def, raw);
       break;
     case 'smash': {
-      const angle = dirAngle(player.facing);
+      const angle = dirAngle(aim);
       for (const e of liveEnemies(ctx)) {
         if (!isInArc(origin, angle, e.pos, def.range, def.arcDeg ?? 150, enemyRadius(e))) continue;
         if (segmentBlocked(origin, e.pos, ctx.grid, ctx.solids)) continue;
@@ -650,6 +663,7 @@ export function performPlayerSpecial(ctx: CombatContext, player: PlayerState): b
     kind: def.kind,
     pos: { x: eventPos.x, y: eventPos.y },
     dir: player.facing,
+    ...(isDiagonal(aim) ? { aim } : {}),
   });
   return true;
 }

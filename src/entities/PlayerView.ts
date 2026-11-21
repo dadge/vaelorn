@@ -5,11 +5,12 @@
  */
 import type Phaser from 'phaser';
 import { PLAYER_COLORS } from '../core/constants';
+import { dirVec } from '../core/geometry';
 import { CHARACTERS } from '../core/characters';
 import { effectiveAttack } from '../core/gear';
 import type { Dir, PlayerState, SpecialKind } from '../core/types';
 import { ATLAS_KEY } from '../render/art';
-import { heroFrame, lanternFrame, slashFrame } from '../render/art/animations';
+import { heroFrame, lanternFrame, slashFrame, slashPose } from '../render/art/animations';
 import { DEPTH_FX, FX_GLOW_KEY, type FxManager } from '../render/fx';
 import { HERO_HIT_FLASH_MS, PosInterp, dirVector, heroFrameFor, invulnVisible, reviveFxFrame, slashAlpha } from './animation';
 import { DEPTH, ySortDepth, type ViewContext } from './common';
@@ -178,14 +179,16 @@ export class PlayerView {
     // arc d'épée (mêlée) : l'attaque EFFECTIVE compte (avec l'Arc, un héros de mêlée tire des flèches : pas d'arc d'épée)
     if (p.attackAnimMs > 0 && !down && effectiveAttack(CHARACTERS[p.characterId], p.loadout).kind === 'melee') {
       const a = slashAlpha(p.attackAnimMs, this.slashMs);
-      const sf = slashFrame(p.attackDir);
-      if (sf !== this.lastSlash) {
-        this.slash.setFrame(sf);
-        this.lastSlash = sf;
+      // frappe en diagonale : l'arc de la composante horizontale, pivoté de ±45° ; sans diagonale, l'arc cardinal inchangé
+      const pose = slashPose(p.attackDir, p.attackAim);
+      if (pose.frame !== this.lastSlash) {
+        this.slash.setFrame(pose.frame);
+        this.lastSlash = pose.frame;
       }
-      const v = dirVector(p.attackDir);
+      this.slash.setRotation(pose.rotation);
+      const v = p.attackAim ? dirVec(p.attackAim) : dirVector(p.attackDir);
       this.slash.setPosition(x + v.x * 12, y + v.y * 12 + HERO_DRAW_OFFSET_Y);
-      this.slash.setDepth(ySortDepth(y + 5) + (p.attackDir === 'up' ? -0.5 : 0.5));
+      this.slash.setDepth(ySortDepth(y + 5) + (v.y < 0 ? -0.5 : 0.5));
       this.slash.setAlpha(a);
       this.slash.setVisible(a > 0);
     } else {

@@ -60,6 +60,7 @@ describe('TutorialDirector : étapes', () => {
     d.skipStep(); // sign
     d.skipStep(); // roomGoals
     d.skipStep(); // attack
+    d.skipStep(); // diagonal
     d.skipStep(); // personalGoal
     d.skipStep(); // hearts
     d.skipStep(); // special
@@ -82,7 +83,7 @@ describe('TutorialDirector : étapes', () => {
     expect(d.step.id).toBe('move');
     expect(d.snapshot().done).toContain('welcome');
     const exit = new TutorialDirector(tutorialLevel);
-    for (let i = 0; i < 10; i++) exit.skipStep();
+    for (let i = 0; i < 11; i++) exit.skipStep();
     expect(exit.step.id).toBe('exit.yard');
     expect(exit.skipKind()).toBe('room');
     expect(exit.skipStep()).toBe('room');

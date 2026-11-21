@@ -2,7 +2,8 @@
  * Helpers PURS de noms de frames (aucune dépendance à Phaser) : traduisent un état de jeu en nom de frame
  * de l'atlas. Les scènes/entités ne composent jamais un nom à la main : elles passent par ici.
  */
-import type { CharacterId, Dir, EnemyKind, TileGlyph, ZoneTheme } from '../../core/types';
+import { diagComponents, dirVec } from '../../core/geometry';
+import type { CharacterId, DiagDir, Dir, EnemyKind, TileGlyph, ZoneTheme } from '../../core/types';
 import { hash2 } from './bitmap';
 import { RUNE_NAMES } from './contract';
 import { enemySpriteInfo } from './enemyTiers';
@@ -91,6 +92,27 @@ export function uiKeyFrame(slot: number): string {
 /** Arc d'épée d'une attaque de mêlée : `fx_slash_<dir>` (24×24). */
 export function slashFrame(dir: Dir): string {
   return `fx_slash_${dir}`;
+}
+
+/** Pose d'un arc d'épée : frame d'atlas + rotation (radians, sens horaire à l'écran) à lui appliquer autour de son centre. */
+export interface SlashPose {
+  frame: string;
+  rotation: number;
+}
+
+/**
+ * Pose de l'arc d'épée pour une frappe de direction cardinale `dir` (le `facing`) et, en diagonale, `aim` : l'atlas n'a que 4 arcs, on prend celui de la composante HORIZONTALE de la diagonale
+ * et on le pivote de ±45° (rotation = angle de la diagonale − angle de la cardinale). Sans diagonale : l'arc cardinal, rotation 0 (rendu inchangé).
+ */
+export function slashPose(dir: Dir, aim?: DiagDir): SlashPose {
+  if (!aim) return { frame: slashFrame(dir), rotation: 0 };
+  const [horizontal] = diagComponents(aim);
+  const a = dirVec(aim);
+  const h = dirVec(horizontal);
+  let rotation = Math.atan2(a.y, a.x) - Math.atan2(h.y, h.x);
+  if (rotation > Math.PI) rotation -= Math.PI * 2;
+  else if (rotation <= -Math.PI) rotation += Math.PI * 2;
+  return { frame: slashFrame(horizontal), rotation };
 }
 
 /** Projectile : `fx_<kind>` (8×8, orienté vers la droite → pivoter selon la vitesse). */

@@ -26,6 +26,12 @@ export interface TileRect {
 
 export type Dir = 'up' | 'down' | 'left' | 'right';
 
+/** Diagonale de visée du héros (frappe en diagonale). Ne sert QU'À la visée : `Dir` reste à 4 directions (sprites, statues, niveaux, ennemis). */
+export type DiagDir = 'upLeft' | 'upRight' | 'downLeft' | 'downRight';
+
+/** Visée en 8 directions : les 4 cardinales + les 4 diagonales. */
+export type Aim8 = Dir | DiagDir;
+
 export type PlayerId = 0 | 1 | 2 | 3;
 export type Difficulty = 1 | 2 | 3;
 
@@ -391,8 +397,24 @@ export interface PlayerState {
   attackCooldownMs: number;
   /** Temps restant d'animation d'attaque (ms), pour le rendu. */
   attackAnimMs: number;
-  /** Direction de la dernière attaque (pour le rendu de l'arc). */
+  /** Direction (cardinale, sprite 4 directions) de la dernière attaque (pour le rendu de l'arc). */
   attackDir: Dir;
+  /**
+   * Diagonale de la dernière attaque, posée SEULEMENT si elle a été portée en diagonale (champ supprimé sinon : l'état d'un joueur qui n'attaque
+   * qu'en cardinal reste identique). `attackDir` en est alors la composante cardinale (= `facing` du moment).
+   */
+  attackAim?: DiagDir;
+  /**
+   * Visée DIAGONALE courante (frappe en diagonale) : posée tant que le joueur se déplace en diagonale (touches 2 à 2, stick au pad / mobile),
+   * conservée à l'arrêt (comme `facing`) et pendant une courte grâce (`AIM_GRACE_MS`) au relâchement d'une touche ; supprimée (undefined) dès que
+   * le joueur part dans une autre direction. Absente de l'état d'un joueur qui ne bouge qu'en cardinal. Direction d'attaque effective = `aim ?? facing`.
+   */
+  aim?: DiagDir;
+  /**
+   * Grâce restante (ms) de `aim` (présent seulement avec `aim`) : remise à `AIM_GRACE_MS` à chaque pas de déplacement diagonal, décroît ensuite d'un pas par pas ;
+   * à 0, un mouvement cardinal (même composante de la diagonale) supprime `aim`. Le joueur immobile garde sa visée.
+   */
+  aimGraceMs?: number;
   /** Id du joueur que CE joueur est en train de relever, sinon null. */
   revivingId: PlayerId | null;
   /** Progression du relevage SUR ce joueur (ms effectives accumulées), 0 si pas relevé. */
@@ -1051,7 +1073,7 @@ export type SimEvent =
   | { type: 'enemyHit'; enemyId: number; damage: number; pos: Vec2; byPlayer: PlayerId | null }
   | { type: 'enemyDied'; enemyId: number; kind: EnemyKind; pos: Vec2; byPlayer: PlayerId | null }
   | { type: 'enemySpawned'; enemyId: number; kind: EnemyKind; pos: Vec2 }
-  | { type: 'playerAttack'; playerId: PlayerId; dir: Dir }
+  | { type: 'playerAttack'; playerId: PlayerId; dir: Dir; aim?: DiagDir }
   | { type: 'projectileFired'; projectileId: number; kind: ProjectileKind; pos: Vec2 }
   | { type: 'bossPhase'; enemyId: number; kind: EnemyKind; phase: number }
   | { type: 'mechanismChanged'; mechanismId: string; active: boolean }
@@ -1061,7 +1083,7 @@ export type SimEvent =
   | { type: 'objectiveCompleted'; objectiveId: string; playerId: PlayerId }
   | { type: 'roomCleared'; roomId: string }
   | { type: 'levelCompleted'; levelId: string }
-  | { type: 'specialUsed'; playerId: PlayerId; kind: SpecialKind; pos: Vec2; dir: Dir }
+  | { type: 'specialUsed'; playerId: PlayerId; kind: SpecialKind; pos: Vec2; dir: Dir; aim?: DiagDir }
   | { type: 'specialReady'; playerId: PlayerId }
   | { type: 'brazierLit'; brazierId: string; playerId: PlayerId }
   | { type: 'torchRefueled'; playerId: PlayerId; brazierId: string }

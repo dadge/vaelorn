@@ -14,14 +14,14 @@
  * passer `reviveHeld = true` pour un joueur dont le bouton d'action est tenu ET qui a un allié à terre à portée
  * (ou simplement `frame.revive` ; `updateRevive` vérifie lui-même la portée).
  */
-import { CALL_DURATION_MS, CALL_FREEZE_MS, TORCH_LOW_FRACTION, TORCH_MAX_MS } from './constants';
+import { CALL_DURATION_MS, CALL_FREEZE_MS, SIM_STEP_MS, TORCH_LOW_FRACTION, TORCH_MAX_MS } from './constants';
 import { PLAYER_INVULN_MS, REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW } from './constants';
-import { damageToPlayer, maxHpFor, REVIVE_INVULN_MS } from './balance';
+import { AIM_GRACE_MS, AIM_HYSTERESIS_DEG, damageToPlayer, maxHpFor, REVIVE_INVULN_MS } from './balance';
 import { callCooldownFor, crossSoftRepeatFor, crossSoftWindowMs } from './callTraits';
 import { getCharacter } from './characters';
 import { createLoadout, damageReduction, isStarActive, lanternReduction, reviveTimeReduction, stepBuffs } from './gear';
-import { distSq } from './geometry';
-import type { PlayerId, PlayerSetup, PlayerState, SimEvent, Vec2 } from './types';
+import { aim8FromVec, diagComponents, dirFromVec, distSq, isDiagonal } from './geometry';
+import type { Aim8, Dir, PlayerId, PlayerSetup, PlayerState, SimEvent, Vec2 } from './types';
 
 /**
  * Crée l'état initial d'un joueur : PV pleins (selon résistance, indépendants de la difficulté), vivant,
@@ -333,6 +333,49 @@ export function stepPlayerTimers(p: PlayerState, dtMs: number): void {
   p.callCooldownMs = stepCallTimer(p.callCooldownMs, dtMs);
   stepAutoCallTimers(p, dtMs);
   if (p.loadout) stepBuffs(p.loadout, dtMs); // bonus temporaires (potion, rage, étoile, cor)
+  if (p.aim !== undefined && p.aimGraceMs !== undefined) p.aimGraceMs = Math.max(0, p.aimGraceMs - dtMs); // grâce de la visée diagonale
+}
+
+// ───────────────────────────── Visée en 8 directions (frappe en diagonale) ─────────────────────────────
+
+/** Visée effective d'un joueur : sa diagonale si elle est posée, sinon son `facing` (4 directions). C'est la direction de la mêlée, des projectiles et des spéciaux directionnels. */
+export function playerAim(p: Pick<PlayerState, 'facing' | 'aim'>): Aim8 {
+  return p.aim ?? p.facing;
+}
+
+/**
+ * Met à jour la visée DIAGONALE (`aim`, `aimGraceMs`) d'un joueur qui se déplace avec le vecteur `v` (non nul ; à appeler AVANT la mise à jour du `facing`).
+ *  - `v` snappé en 8 secteurs (`aim8FromVec`, hystérésis `AIM_HYSTERESIS_DEG` autour de la diagonale tant que sa grâce court, sinon autour du facing) ;
+ *  - secteur diagonal → `aim` = cette diagonale, grâce remise à `AIM_GRACE_MS` ;
+ *  - secteur cardinal qui est l'une des DEUX composantes de la diagonale courante pendant la grâce → diagonale conservée (relâchement non simultané de deux touches) ;
+ *  - tout autre cas (autre direction, grâce écoulée) → `aim` et `aimGraceMs` SUPPRIMÉS (champs absents, pas `undefined` : l'état JSON d'un joueur cardinal reste identique à l'ancien).
+ * Un joueur immobile ne passe pas par ici : il garde sa visée. MUTE `p`.
+ */
+export function applyMoveAim(p: Pick<PlayerState, 'facing' | 'aim' | 'aimGraceMs'>, v: Vec2): void {
+  // Hystérésis centrée sur la diagonale tant que sa grâce court ; une diagonale « gardée à l'arrêt » (grâce écoulée) ne biaise pas le prochain coup de stick : on repart du facing.
+  const center: Aim8 = p.aim !== undefined && (p.aimGraceMs ?? 0) > 0 ? p.aim : p.facing;
+  const s = aim8FromVec(v, center, AIM_HYSTERESIS_DEG);
+  if (isDiagonal(s)) {
+    p.aim = s;
+    p.aimGraceMs = AIM_GRACE_MS;
+    return;
+  }
+  if (p.aim !== undefined && (p.aimGraceMs ?? 0) > 0 && diagComponents(p.aim).includes(s)) return;
+  delete p.aim;
+  delete p.aimGraceMs;
+}
+
+/**
+ * Direction d'attaque qu'AURAIT `p` au prochain pas s'il se déplaçait avec `v` (pure : ne mute rien) : celle des bots / de la démo pour savoir si leur coup portera.
+ * Reproduit l'ordre de la simulation (grâce décrémentée d'un pas, `applyMoveAim`, puis `facing` = axe dominant). `v` nul : la visée actuelle.
+ */
+export function predictAttackAim(p: Pick<PlayerState, 'facing' | 'aim' | 'aimGraceMs'>, v: Vec2): Aim8 {
+  if (Math.abs(v.x) < 1e-6 && Math.abs(v.y) < 1e-6) return playerAim(p);
+  const q: Pick<PlayerState, 'facing' | 'aim' | 'aimGraceMs'> = { facing: p.facing, aim: p.aim, aimGraceMs: p.aimGraceMs };
+  if (q.aim !== undefined && q.aimGraceMs !== undefined) q.aimGraceMs = Math.max(0, q.aimGraceMs - SIM_STEP_MS);
+  applyMoveAim(q, v);
+  const facing: Dir = dirFromVec(v, p.facing);
+  return q.aim ?? facing;
 }
 
 // ───────────────────────────── Appel ─────────────────────────────

@@ -16,7 +16,7 @@ describe('balance : PV et réduction', () => {
     expect(maxHpFor({ resistance: 1 })).toBe(60);
     expect(maxHpFor({ resistance: 10 })).toBe(150);
     expect(maxHpFor(getCharacter('david'))).toBe(140);
-    expect(maxHpFor(getCharacter('sandrine'))).toBe(70);
+    expect(maxHpFor(getCharacter('sandrine'))).toBe(90);
   });
 
   it('damageReductionFor = 2 % × résistance, plafonné à 20 %', () => {

@@ -17,7 +17,8 @@
  *      que son délai de récupération est écoulé et que la phase est 'playing' ; l'appui d'appel prime sur attaque/spécial/interaction
  *      de ce même pas (l'immobilisation commence tout de suite ; ces appuis sont perdus, pas rejoués) ; seuls les NOUVEAUX
  *      déclenchements sont bloqués : un spécial déjà lancé continue (coups différés de la Danse des lames en (d)) ;
- *  (c) mouvements des joueurs : vitesse × min(1, norme du stick), facing, collisions (grille + portes fermées + blocs) ;
+ *  (c) mouvements des joueurs : vitesse × min(1, norme du stick), facing (4 directions, sprite) et VISÉE DIAGONALE `aim` (frappe en diagonale : posée tant que le joueur bouge en diagonale, conservée
+ *      `AIM_GRACE_MS` au relâchement d'une touche, voir `applyMoveAim`), collisions (grille + portes fermées + blocs) ;
  *      les joueurs à terre ou immobilisés par leur appel sont immobiles (et ne poussent pas de bloc) ; ceux à terre ne bloquent personne ;
  *  (d) attaques des joueurs (mêlée instantanée / projectiles) ; puis ATTAQUES SPÉCIALES : coups différés des spéciaux en cours
  *      (Danse des lames), puis déclenchement des spéciaux sur front montant de `ActionFrame.special` (joueur vivant, ne relevant
@@ -148,7 +149,7 @@ import {
   swapCandidate,
   ensureLoadout,
 } from './gear';
-import { dirFromVec, distSq, pointInTileRect, tileCenter } from './geometry';
+import { dirFromVec, distSq, isDiagonal, pointInTileRect, tileCenter } from './geometry';
 import { RoomGrid } from './grid';
 import { canAcceptHeart, canStoreHeart, heartCollectorFor, heartUseAmount, isHeartKind, mergeHeart, normalizeHeartField, planHeartUse } from './heartSlot';
 import { lightSources, type LightSource } from './light';
@@ -180,6 +181,7 @@ import {
   resetPlayersForRoom,
   reviveAllDowned,
   stepPlayerTimers,
+  applyMoveAim,
   isCallFrozen,
   resetAutoCall,
   cancelAutoCall,
@@ -448,6 +450,14 @@ export class GameSimulation implements IGameSimulation {
       if (typeof p.callMs !== 'number' || !Number.isFinite(p.callMs)) p.callMs = 0;
       if (typeof p.callCooldownMs !== 'number' || !Number.isFinite(p.callCooldownMs)) p.callCooldownMs = 0;
       if (p.prev && typeof p.prev.call !== 'boolean') p.prev.call = false;
+      // Visée diagonale (frappe en diagonale) : champs optionnels, absents d'un ancien snapshot ; un snapshot édité / corrompu ne doit pas planter `dirVec` → valeur invalide = champ supprimé.
+      if (p.aim !== undefined && !isDiagonal(p.aim)) {
+        delete p.aim;
+        delete p.aimGraceMs;
+      }
+      if (p.aim === undefined) delete p.aimGraceMs;
+      else if (typeof p.aimGraceMs !== 'number' || !Number.isFinite(p.aimGraceMs) || p.aimGraceMs < 0) p.aimGraceMs = 0;
+      if (p.attackAim !== undefined && !isDiagonal(p.attackAim)) delete p.attackAim;
     }
     return new GameSimulation(parsed, level);
   }
@@ -886,6 +896,7 @@ export class GameSimulation implements IGameSimulation {
       const amplitude = Math.min(1, norm);
       const speed = getCharacter(p.characterId).speed * (1 + speedBonus(p.loadout)) * amplitude;
       const k = (speed * dt) / 1000 / norm;
+      applyMoveAim(p, { x: f.moveX, y: f.moveY }); // visée diagonale (avant le facing : l'hystérésis part du facing précédent)
       p.facing = dirFromVec({ x: f.moveX, y: f.moveY }, p.facing);
       const before = p.pos;
       const next = moveCircle(before, { x: f.moveX * k, y: f.moveY * k }, PLAYER_RADIUS, this.roomGrid, solids);

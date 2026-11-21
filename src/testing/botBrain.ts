@@ -14,10 +14,11 @@ import { DOWNED_THREAT_RADIUS, PLAYER_RADIUS, REVIVE_RANGE, SIM_STEP_MS, TILE } 
 import { canOccupy, projectileHitsWall, segmentBlocked } from '../core/collision';
 import { getCharacter } from '../core/characters';
 import { enemyRadius, meleeTargets } from '../core/combat';
+import { playerAim, predictAttackAim } from '../core/players';
 import { ENEMIES } from '../core/enemies';
 import { pickupDecision } from '../core/gear';
 import { dirFromVec, dist, pointInTileRect, tileCenter } from '../core/geometry';
-import type { ActionFrame, Dir, EnemyKind, EnemyState, PlayerState, Vec2 } from '../core/types';
+import type { ActionFrame, Aim8, Dir, EnemyKind, EnemyState, PlayerState, Vec2 } from '../core/types';
 import type { BackgroundFlags } from './botTypes';
 import type { BotPlayer } from './botKit';
 import {
@@ -514,8 +515,8 @@ export function shotClear(bot: BotPlayer, a: Vec2, b: Vec2, radius: number): boo
   return true;
 }
 
-/** Attaque de mêlée possible depuis la position/orientation actuelles sur au moins un ennemi de `list` dans la direction `dir` ? */
-function canMeleeHit(bot: BotPlayer, list: readonly EnemyState[], dir: Dir): boolean {
+/** Attaque de mêlée possible depuis la position/orientation actuelles sur au moins un ennemi de `list` dans la direction `dir` (8 directions : voir `predictAttackAim` pour celle d'un pas qui bouge) ? */
+function canMeleeHit(bot: BotPlayer, list: readonly EnemyState[], dir: Aim8): boolean {
   return meleeTargets(bot.player, list, bot.run.sim.grid, bot.run.solids, dir).length > 0;
 }
 
@@ -592,9 +593,9 @@ function engageMelee(bot: BotPlayer, e: EnemyState): ActionFrame | null {
 
   if (d <= reach && !wallBetween(bot, p.pos, e.pos)) {
     bot.follower.idle();
-    if (canMeleeHit(bot, [e], p.facing)) return frameOf({ attack: true });
+    if (canMeleeHit(bot, [e], playerAim(p))) return frameOf({ attack: true });
     const v = unit(delta);
-    const dirN = dirFromVec(v, p.facing);
+    const dirN = predictAttackAim(p, v);
     if (canMeleeHit(bot, [e], dirN)) return frameOf({ moveX: v.x * NUDGE, moveY: v.y * NUDGE, attack: true });
     // Dans la portée mais l'arc ne touche pas : on se rapproche un peu.
   }
@@ -617,10 +618,19 @@ function engageMelee(bot: BotPlayer, e: EnemyState): ActionFrame | null {
       return null;
     }
     const v = unit(delta);
-    return frameOf({ moveX: v.x * NUDGE, moveY: v.y * NUDGE, attack: canMeleeHit(bot, [e], dirFromVec(v, p.facing)) });
+    return frameOf({ moveX: v.x * NUDGE, moveY: v.y * NUDGE, attack: canMeleeHit(bot, [e], predictAttackAim(p, v)) });
   }
-  const dir = dirFromVec(r.vec, p.facing);
+  const dir = predictAttackAim(p, r.vec);
   return frameOf({ moveX: r.vec.x, moveY: r.vec.y, attack: canMeleeHit(bot, run.aliveEnemies, dir) });
+}
+
+/**
+ * Entrée minuscule qui tourne le tireur sur son axe de tir (`horiz` : tir horizontal, `s` : sens ±1) et tire. NOTE (frappe en diagonale) : si le bot vient de se déplacer en diagonale,
+ * la visée diagonale tenue par la grâce (`AIM_GRACE_MS`, 120 ms) peut faire partir CE tir en diagonale ; le bot ne l'attend pas (mesuré : attendre fait perdre des tirs au bot d'archère
+ * du boss final sans gain), un seul tir est concerné par changement de direction (la recharge de l'attaque dépasse la grâce).
+ */
+function rangedNudge(horiz: boolean, s: number): Partial<ActionFrame> {
+  return horiz ? { moveX: s * NUDGE, attack: true } : { moveY: s * NUDGE, attack: true };
 }
 
 function engageRanged(bot: BotPlayer, e: EnemyState): ActionFrame | null {
@@ -642,9 +652,7 @@ function engageRanged(bot: BotPlayer, e: EnemyState): ActionFrame | null {
   if (los && Math.abs(perp) <= tol && Math.abs(along) <= maxShot) {
     bot.follower.idle();
     const s = along >= 0 ? 1 : -1;
-    return frameOf(
-      horiz ? { moveX: s * NUDGE, attack: true } : { moveY: s * NUDGE, attack: true },
-    );
+    return frameOf(rangedNudge(horiz, s));
   }
 
   if (!los) {
@@ -699,9 +707,9 @@ function decideInPlaceCombat(bot: BotPlayer, forced: number | null): CombatDecis
     if (atk.kind === 'melee' ? wallBetween(bot, p.pos, e.pos) : !shotClear(bot, p.pos, e.pos, atk.projectile ? atk.projectile.radius : 3)) continue;
     if (atk.kind === 'melee') {
       if (d > atk.range + er - 1) continue;
-      if (canMeleeHit(bot, [e], p.facing)) return { frame: frameOf({ attack: true }), targetId: e.id };
+      if (canMeleeHit(bot, [e], playerAim(p))) return { frame: frameOf({ attack: true }), targetId: e.id };
       const v = unit({ x: e.pos.x - p.pos.x, y: e.pos.y - p.pos.y });
-      if (canMeleeHit(bot, [e], dirFromVec(v, p.facing))) {
+      if (canMeleeHit(bot, [e], predictAttackAim(p, v))) {
         return { frame: frameOf({ moveX: v.x * NUDGE, moveY: v.y * NUDGE, attack: true }), targetId: e.id };
       }
     } else {
@@ -711,10 +719,10 @@ function decideInPlaceCombat(bot: BotPlayer, forced: number | null): CombatDecis
       const dy = e.pos.y - p.pos.y;
       const maxShot = atk.range * 0.85;
       if (Math.abs(dy) <= tol && Math.abs(dx) <= maxShot) {
-        return { frame: frameOf({ moveX: (dx >= 0 ? 1 : -1) * NUDGE, attack: true }), targetId: e.id };
+        return { frame: frameOf(rangedNudge(true, dx >= 0 ? 1 : -1)), targetId: e.id };
       }
       if (Math.abs(dx) <= tol && Math.abs(dy) <= maxShot) {
-        return { frame: frameOf({ moveY: (dy >= 0 ? 1 : -1) * NUDGE, attack: true }), targetId: e.id };
+        return { frame: frameOf(rangedNudge(false, dy >= 0 ? 1 : -1)), targetId: e.id };
       }
     }
   }

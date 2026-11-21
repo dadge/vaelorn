@@ -82,6 +82,7 @@
   "tutorial.step.sign": "Approche-toi du panneau et reste devant : les panneaux donnent l'objectif de la salle et des indices.",
   "tutorial.step.roomGoals": "En haut à droite : le bloc « Objectifs de la salle » (« Objectif » quand il n'y a qu'une ligne). Il liste ce qu'il faut faire pour ouvrir la sortie : ennemis à vaincre, portes à ouvrir, objectifs personnels accomplis (x/y).",
   "tutorial.step.attack": "Une limace ! Attaque-la avec {attack} (maintiens pour enchaîner les coups).",
+  "tutorial.step.diagonal": "Tu peux aussi frapper en diagonale : déplace-toi en biais avec {move}, en appuyant sur deux directions à la fois ou en inclinant le stick entre deux, puis attaque avec {attack}. Le coup part dans la diagonale, au corps à corps comme à distance. Relâcher une touche juste avant de frapper ne la perd pas.",
   "tutorial.step.personalGoal": "En haut à gauche : « Ton objectif », propre à ton héros. Ici : vaincre 2 ennemis, le compteur monte à chaque coup fatal que TU portes. Continue le combat.",
   "tutorial.step.hearts": "Tes cœurs sont ta vie. À zéro tu tombes à terre : ce n'est pas la mort, un allié peut te relever. Les ennemis laissent parfois un cœur ou un demi-cœur : il se range dans ton emplacement cœur (sous tes cœurs, à gauche) et tu l'utilises TOI-MÊME, quand tu le décides. Rien ne te soigne tout seul.",
   "tutorial.step.special": "Lance ton attaque spéciale ({specialName}) avec {special} : bien plus puissante qu'une attaque normale.",

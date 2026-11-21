@@ -49,7 +49,7 @@ export const CHARACTERS: Readonly<Record<CharacterId, CharacterDef>> = {
     attack: { kind: 'melee', cooldownMs: 450, range: 24, arcDeg: 100, animMs: 180, damageMult: 0.8 },
     special: { kind: 'whirlwind', nameKey: sKey('david', 'name'), descKey: sKey('david', 'desc'), cooldownMs: 14000, damageMult: 3.5, radius: 46, range: 46, animMs: 280 },
   },
-  // Magicienne : le plus fort, très fragile, orbe perforant à distance.
+  // Magicienne : très offensive mais plutôt fragile (force 8, résistance 4), orbe perforant à distance.
   sandrine: {
     id: 'sandrine',
     nameKey: key('sandrine', 'name'),
@@ -57,8 +57,8 @@ export const CHARACTERS: Readonly<Record<CharacterId, CharacterDef>> = {
     descKey: key('sandrine', 'desc'),
     family: true,
     color: 0xb04ad4,
-    strength: 10,
-    resistance: 2,
+    strength: 8,
+    resistance: 4,
     speed: 72,
     reviveTimeMult: 1,
     attack: {

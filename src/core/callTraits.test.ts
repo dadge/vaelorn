@@ -725,15 +725,19 @@ describe('non-régression : le trait n\'a aucun effet sur le jeu (flux aléatoir
    * sont identiques octet pour octet (états ET événements, appels manuels et automatiques compris). Un changement volontaire de règle du jeu les invalide : les recalculer alors.
    */
   const GOLDEN: Record<string, string> = {
-    '1': 'c0c7aa2a6a7728a1',
-    '7': '89a1e9c1c4920749',
-    '4242': '184ae159532de30f', // recalculée à l'ajout de la FUSION des cœurs (demi + cœur = entier) : seule cette règle change cette partie (vérifié : empreinte identique avec la fusion désactivée)
+    '1': 'ff0f5647c2a5eb4b',
+    '7': 'adbce77fed2a5960',
+    '4242': 'c6d8e2fe6a3870a6',
   };
+  // Les trois empreintes ont été recalculées à l'ajout de la FRAPPE EN DIAGONALE : le script de ce test fait tourner chaque héros en cercle (cos/sin), il se déplace donc en diagonale et
+  // l'état gagne les champs `aim`/`aimGraceMs`/`attackAim` et des frappes différentes. Vérifié : avec la visée diagonale désactivée (aucun `aim`), les anciennes empreintes
+  // (c0c7aa2a6a7728a1, 89a1e9c1c4920749, 184ae159532de30f) sont retrouvées — seule cette règle change ces parties.
 
   /** Compteurs du scénario d'empreinte (preuve qu'il exerce bien les appels manuels, automatiques et la croix). */
   const seen = { manual: 0, auto: 0, cross: 0 };
 
-  function digest(seed: number): string {
+  /** `cardinal` : déplacements ramenés à l'axe dominant (jamais de diagonale) : la partie ne doit alors rien devoir à la frappe en diagonale. */
+  function digest(seed: number, cardinal = false): string {
     seen.manual = seen.auto = seen.cross = 0;
     const chars: CharacterId[] = ['david', 'valentine', 'mira', 'brokk'];
     const s = makeSim(4, { seed, chars });
@@ -747,7 +751,11 @@ describe('non-régression : le trait n\'a aucun effet sur le jeu (flux aléatoir
       const out: Record<number, ActionFrame> = {};
       for (let k = 0; k < 4; k++) {
         const a = (i / (35 + 9 * k) + k) % (2 * Math.PI);
-        out[k] = frame({ moveX: Math.cos(a), moveY: Math.sin(a), attack: (i + 7 * k) % 22 < 9, call: (i + 90 * k) % 330 < 5, heart: (i + 13 * k) % 500 < 3 });
+        const c = Math.cos(a);
+        const sn = Math.sin(a);
+        const mx = cardinal ? (Math.abs(c) >= Math.abs(sn) ? Math.sign(c) : 0) : c;
+        const my = cardinal ? (Math.abs(c) >= Math.abs(sn) ? 0 : Math.sign(sn)) : sn;
+        out[k] = frame({ moveX: mx, moveY: my, attack: (i + 7 * k) % 22 < 9, call: (i + 90 * k) % 330 < 5, heart: (i + 13 * k) % 500 < 3 });
       }
       return out;
     };
@@ -761,6 +769,24 @@ describe('non-régression : le trait n\'a aucun effet sur le jeu (flux aléatoir
     }
     h.update(s.serialize());
     return h.hex();
+  }
+
+  /**
+   * Variante CARDINALE (jamais de diagonale) du même scénario : empreintes calculées avec le code d'AVANT la frappe en diagonale (commit HEAD de cette évolution) ; elles verrouillent
+   * l'invariance octet pour octet (états, événements, appels) d'une partie qui ne bouge qu'en cardinal : aucun champ `aim` / `aimGraceMs` / `attackAim`, aucun autre changement.
+   */
+  const GOLDEN_CARDINAL: Record<string, string> = {
+    '1': '913d014d9d2604bb',
+    '7': '6034e2e4ee067ee7',
+    '4242': 'f95186c1e1826738',
+  };
+
+  for (const seed of [1, 7, 4242]) {
+    it(`graine ${seed} : variante cardinale (sans diagonale) identique à la partie d'avant la frappe en diagonale (empreinte)`, () => {
+      const d = digest(seed, true);
+      if (process.env.PRINT_GOLDEN) console.info(`GOLDEN_CARDINAL ${seed} ${d}`);
+      expect(d).toBe(GOLDEN_CARDINAL[String(seed)]);
+    });
   }
 
   for (const seed of [1, 7, 4242]) {

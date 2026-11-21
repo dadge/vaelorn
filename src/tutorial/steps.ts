@@ -1,10 +1,10 @@
 /**
- * Les 45 étapes du tutoriel (DONNÉES). Chaque étape `do` est validée par une ACTION du joueur ; une étape `tip` se ferme seule.
+ * Les 46 étapes du tutoriel (DONNÉES). Chaque étape `do` est validée par une ACTION du joueur ; une étape `tip` se ferme seule.
  * Les textes sont des clés i18n `tutorial.step.<id>` (src/i18n/parts/tutorial.*.json) avec jetons de boutons résolus par appareil
  * (`deviceHints.ts`). Les conditions de réussite sont fondées sur l'ÉTAT quand c'est possible (pas seulement sur un événement) :
  * un joueur qui a déjà accompli l'action avant que l'étape ne s'affiche n'est jamais bloqué.
  *
- * Couverture : déplacement, panneaux, bloc « Objectifs de la salle » (haut à droite), « Ton objectif » (haut à gauche), attaque,
+ * Couverture : déplacement, panneaux, bloc « Objectifs de la salle » (haut à droite), « Ton objectif » (haut à gauche), attaque, FRAPPE EN DIAGONALE,
  * cœurs, spécial et recharge, ennemis restants, levier, plaques, porte, objectif d'équipe, bloc poussable, clé et porte de couleur,
  * torche et braseros (salle sombre), RELEVAGE (et équipement récupérable par le joueur relevé), EMPLACEMENT CŒUR (ranger, se soigner avec B, soigner un coéquipier blessé, emplacement entier = appel automatique),
  * APPELS AUTOMATIQUES (cœur qu'on ne peut pas ranger, objet moins puissant laissé, échange d'accessoire, croix rouge = demande de soins, page récapitulative de toutes les règles), APPEL (recevoir puis lancer),
@@ -50,6 +50,16 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
     minMs: 800,
     done: { k: 'any', of: [{ k: 'event', type: 'enemyDied', by: 0 }, { k: 'enemiesGone' }] },
     buttons: ['attack'],
+    markers: [{ nearestEnemy: true }],
+  }),
+  // Frappe en diagonale : validée par un coup porté avec une visée diagonale (événement `playerAttack` portant `aim`, voir `has`), même dans le vide ; ne bloque jamais (plus d'ennemi : validée aussi).
+  step({
+    id: 'diagonal',
+    room: 't_yard',
+    kind: 'do',
+    minMs: 800,
+    done: { k: 'any', of: [{ k: 'event', type: 'playerAttack', by: 0, has: ['aim'] }, { k: 'enemiesGone' }] },
+    buttons: ['move', 'attack'],
     markers: [{ nearestEnemy: true }],
   }),
   step({

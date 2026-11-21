@@ -62,6 +62,14 @@ export const LOGGED_EVENT_TYPES: ReadonlySet<SimEvent['type']> = new Set<SimEven
   'gearSwapped',
 ]);
 
+/**
+ * L'événement doit-il être conservé dans le journal d'étape ? Les types de `LOGGED_EVENT_TYPES`, plus les coups portés EN DIAGONALE (`playerAttack` avec `aim`) : rares, alors que tous les
+ * coups (un toutes les ~450 ms) noieraient le journal borné (`MAX_LOGGED_EVENTS`).
+ */
+export function isLoggedEvent(e: SimEvent): boolean {
+  return LOGGED_EVENT_TYPES.has(e.type) || (e.type === 'playerAttack' && e.aim !== undefined);
+}
+
 /** Taille maximale du journal d'événements d'une étape. */
 export const MAX_LOGGED_EVENTS = 48;
 
@@ -100,6 +108,10 @@ export function countEvents(events: readonly LoggedEvent[], c: Extract<Condition
   for (const e of events) {
     if (e.type !== c.type) continue;
     if (c.by !== undefined && eventActor(e) !== c.by) continue;
+    if (c.has) {
+      const rec = e as unknown as Record<string, unknown>;
+      if (c.has.some((k) => rec[k] === undefined)) continue;
+    }
     if (c.match) {
       const rec = e as unknown as Record<string, unknown>;
       let ok = true;

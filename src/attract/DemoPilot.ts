@@ -24,10 +24,11 @@ import { SIM_STEP_MS, TILE } from '../core/constants';
 import { getCharacter } from '../core/characters';
 import { projectileHitsWall, segmentBlocked, type PixelRect } from '../core/collision';
 import { enemyRadius, meleeTargets } from '../core/combat';
-import { dirFromVec, dist, pointInTileRect } from '../core/geometry';
+import { playerAim, predictAttackAim } from '../core/players';
+import { aim8FromVec, dirFromVec, dist, pointInTileRect } from '../core/geometry';
 import type { RoomGrid } from '../core/grid';
 import { createRng, nextRandom, type RngHolder } from '../core/rng';
-import type { ActionFrame, EnemyState, GameState, PlayerId, PlayerState, RoomDef, SpecialDef, TileXY, Vec2 } from '../core/types';
+import type { ActionFrame, Aim8, EnemyState, GameState, PlayerId, PlayerState, RoomDef, SpecialDef, TileXY, Vec2 } from '../core/types';
 import {
   buildNavMap,
   findPath,
@@ -566,7 +567,13 @@ export class DemoPilot {
     return res;
   }
 
-  private canMeleeHit(p: PlayerState, list: readonly EnemyState[], dir: PlayerState['facing']): boolean {
+  /** Le spécial directionnel de `p` partirait-il vers `delta` ? Sans visée diagonale : l'axe dominant égale le facing (comme avant) ; avec : le secteur de 45° de `delta` égale la diagonale. */
+  private aimsAt(p: PlayerState, delta: Vec2): boolean {
+    if (p.aim === undefined) return dirFromVec(delta, p.facing) === p.facing;
+    return aim8FromVec(delta, p.aim) === p.aim;
+  }
+
+  private canMeleeHit(p: PlayerState, list: readonly EnemyState[], dir: Aim8): boolean {
     return meleeTargets(p, list, this.world.grid, this.solids, dir).length > 0;
   }
 
@@ -578,9 +585,9 @@ export class DemoPilot {
     const wall = segmentBlocked(p.pos, e.pos, this.world.grid, this.solids);
 
     if (d <= reach && !wall) {
-      if (this.canMeleeHit(p, [e], p.facing)) return frame({ attack: true });
+      if (this.canMeleeHit(p, [e], playerAim(p))) return frame({ attack: true });
       const v = unit(delta);
-      if (this.canMeleeHit(p, [e], dirFromVec(v, p.facing))) return frame({ moveX: v.x * NUDGE, moveY: v.y * NUDGE, attack: true });
+      if (this.canMeleeHit(p, [e], predictAttackAim(p, v))) return frame({ moveX: v.x * NUDGE, moveY: v.y * NUDGE, attack: true });
       // dans la portée mais l'arc ne touche pas : on se rapproche un peu
     }
     const r = this.follow(p, state, e.pos, Math.max(8, reach * 0.9), CHASE_REPLAN_MS);
@@ -588,9 +595,9 @@ export class DemoPilot {
     if (r.status === 'arrived') {
       if (wall) return null; // arrivé mais un mur nous sépare
       const v = unit(delta);
-      return frame({ moveX: v.x * NUDGE, moveY: v.y * NUDGE, attack: this.canMeleeHit(p, [e], dirFromVec(v, p.facing)) });
+      return frame({ moveX: v.x * NUDGE, moveY: v.y * NUDGE, attack: this.canMeleeHit(p, [e], predictAttackAim(p, v)) });
     }
-    const dir = dirFromVec(r.vec, p.facing);
+    const dir = predictAttackAim(p, r.vec);
     return frame({ moveX: r.vec.x, moveY: r.vec.y, attack: this.canMeleeHit(p, enemies, dir) });
   }
 
@@ -665,7 +672,7 @@ export class DemoPilot {
         if (d > reachPx + enemyRadius(e)) continue;
         if (def.kind === 'dash' && d < 20) continue; // déjà au contact : la ruée ne servirait à rien
         if (segmentBlocked(p.pos, e.pos, this.world.grid, this.solids)) continue;
-        if (directional && dirFromVec({ x: e.pos.x - p.pos.x, y: e.pos.y - p.pos.y }, p.facing) !== p.facing) continue;
+        if (directional && !this.aimsAt(p, { x: e.pos.x - p.pos.x, y: e.pos.y - p.pos.y })) continue;
         want = true;
         break;
       }

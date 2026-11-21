@@ -82,6 +82,7 @@
   "tutorial.step.sign": "Walk up to the sign and stay in front of it: signs tell you the room goal and give hints.",
   "tutorial.step.roomGoals": "Top right: the \"Room goals\" block (\"Room goal\" when there is only one line). It lists what you must do to open the exit: enemies to defeat, doors to open, personal goals completed (x/y).",
   "tutorial.step.attack": "A slime! Attack it with {attack} (hold to chain hits).",
+  "tutorial.step.diagonal": "You can strike diagonally too: move at an angle with {move}, pressing two directions at once or tilting the stick between two, then attack with {attack}. The blow goes along the diagonal, melee or ranged. Letting go of one key just before you strike does not lose it.",
   "tutorial.step.personalGoal": "Top left: \"Your goal\", specific to your hero. Here: defeat 2 enemies, the counter goes up with each finishing blow YOU deal. Keep fighting.",
   "tutorial.step.hearts": "Your hearts are your life. At zero you fall down: this is not death, an ally can revive you. Enemies sometimes drop a heart or half a heart: it goes into your heart slot (below your hearts, on the left) and YOU use it, whenever you decide. Nothing heals you on its own.",
   "tutorial.step.special": "Cast your special attack ({specialName}) with {special}: far stronger than a normal attack.",

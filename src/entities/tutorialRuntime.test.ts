@@ -71,7 +71,7 @@ describe('TutorialRuntime', () => {
   it('skip : une étape ordinaire est sautée ; une étape de sortie propose la salle suivante', () => {
     const { rt } = make(0);
     expect(rt.skip()).toEqual({ kind: 'step', nextRoomIndex: 1 });
-    for (let i = 0; i < 9; i++) rt.skip();
+    for (let i = 0; i < 10; i++) rt.skip();
     expect(rt.view().stepId).toBe('exit.yard');
     expect(rt.skip()).toEqual({ kind: 'room', nextRoomIndex: 1 });
   });

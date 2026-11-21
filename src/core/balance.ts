@@ -40,6 +40,7 @@
  *  [B30] CROSS_CALL_* .............. CROIX ROUGE (demande de soins, appel automatique) : seuil 30 % des PV max, réarmement à 60 %, répétition toutes les 10 s
  *  [B31] *_CHATTY .................. Romain « parle beaucoup » (trait d'appel, `callTraits.ts`) : appel manuel et appel automatique d'objet SANS attente (0 ms ; un signal d'objet reste lisible 1 s avant d'être remplacé), croix rouge répétée toutes les 3 s
  *  [B32] GEAR_RECOVER_GRACE_MS ..... RELEVÉ = ÉQUIPEMENT RÉCUPÉRABLE : durée de vie minimale (8 s) rendue, à l'instant du relevage, aux objets que le joueur a perdus à sa chute
+ *  [B33] AIM_GRACE_MS, AIM_HYSTERESIS_DEG ... FRAPPE EN DIAGONALE : grâce (120 ms) de la visée diagonale au relâchement d'une touche, hystérésis (5°) du snap 8 directions d'un stick analogique
  *
  * Les constantes de relevage (REVIVE_DURATION_MS, REVIVE_RANGE, REVIVE_THREAT_SLOW, DOWNED_THREAT_RADIUS) et
  * PLAYER_INVULN_MS vivent dans `constants.ts`.
@@ -346,6 +347,24 @@ export const CROSS_CALL_REPEAT_MS_CHATTY = 3_000;
  * (voir TODO.md : peut-être inutile).
  */
 export const GEAR_RECOVER_GRACE_MS = 8_000;
+
+// ───────────────────────── [B33] Frappe en diagonale ─────────────────────────
+
+/**
+ * [B33] FRAPPE EN DIAGONALE : durée de grâce (ms) de la visée diagonale. Un joueur au clavier relâche rarement deux touches au même pas : la dernière image de déplacement
+ * est cardinale (une des deux composantes) et la diagonale serait perdue juste avant la frappe. Tant que cette grâce (comptée depuis le dernier pas de déplacement DIAGONAL) n'est
+ * pas écoulée, un mouvement qui est l'une des deux composantes de la diagonale la conserve ; au-delà, un cardinal tenu rend la visée au `facing`. La grâce ne concerne QUE ce passage d'une diagonale à l'une de ses composantes en mouvement : à l'arrêt complet, la visée est gardée sans limite (comme le `facing`), jusqu'au prochain mouvement qui n'est pas diagonal. 120 ms ≈ 7 pas : couvre
+ * l'écart de relâchement de deux doigts (typiquement 30-80 ms) sans rendre « collante » une diagonale que le joueur a quittée volontairement (un cardinal tenu plus de 120 ms = intention
+ * de viser en cardinal). À valider à la main (voir TODO.md).
+ */
+export const AIM_GRACE_MS = 120;
+
+/**
+ * [B33] FRAPPE EN DIAGONALE : hystérésis (degrés) du snap en secteurs de 45° d'un vecteur de déplacement ANALOGIQUE (stick du pad, stick virtuel mobile). Le secteur courant (visée ou facing)
+ * est élargi de cette marge de chaque côté, pour que le stick ne fasse pas trembler la visée entre cardinale et diagonale près d'une frontière (22,5° du cardinal). Sans effet au clavier / à la croix
+ * (directions exactes). 5° : assez pour absorber le bruit d'un stick (~2-3°), peu perceptible sur l'ouverture de visée (frontière effective 27,5° dans un sens, 17,5° dans l'autre). À valider à la main.
+ */
+export const AIM_HYSTERESIS_DEG = 5;
 
 /**
  * [B29] EMPLACEMENT CŒUR : rayon de contact (px, centre à centre) dans lequel un joueur qui appuie sur B soigne un coéquipier VIVANT et BLESSÉ avec le cœur rangé : la portée du relevage

@@ -796,6 +796,7 @@ export class GameScene extends Phaser.Scene {
           kind: e.kind,
           pos: e.pos,
           dir: e.dir,
+          aim: e.aim,
           casterPos: caster?.pos,
           heroFrame: caster ? heroFrame(caster.characterId, e.dir, 0, 'attack') : undefined,
           playerColor: PLAYER_COLORS[e.playerId] ?? 0xffffff,

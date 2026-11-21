@@ -80,8 +80,10 @@ describe('characters', () => {
     expect(by('sandrine').attack.projectile?.pierce).toBe(true);
     expect(by('valentine').attack.projectile?.kind).toBe('heal');
     expect(by('aelith').attack.projectile?.kind).toBe('arrow');
-    expect(by('sandrine').strength).toBe(Math.max(...CHARACTER_LIST.map((c) => c.strength)));
-    expect(by('sandrine').resistance).toBeLessThanOrEqual(2);
+    // Sandrine : très offensive (force 8) mais plutôt fragile (résistance 4) ; Grok est désormais le plus fort
+    expect(by('grok').strength).toBe(Math.max(...CHARACTER_LIST.map((c) => c.strength)));
+    expect(by('sandrine').strength).toBeGreaterThanOrEqual(8);
+    expect(by('sandrine').resistance).toBeLessThanOrEqual(4);
     expect(by('brokk').resistance).toBe(Math.max(...CHARACTER_LIST.map((c) => c.resistance)));
     // Romain est le plus rapide de tous (Mira juste derrière)
     expect(by('romain').speed).toBe(Math.max(...CHARACTER_LIST.map((c) => c.speed)));

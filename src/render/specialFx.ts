@@ -13,7 +13,9 @@
 import type Phaser from 'phaser';
 import { CosmeticRng, DEPTH_FX, FX_PIXEL_KEY, type FxManager, easeOutCubic } from './fx';
 import type { ViewRig } from './camera';
-import type { Dir, PlayerId, SpecialDef, SpecialKind, Vec2 } from '../core/types';
+import { dirVec } from '../core/geometry';
+import type { Aim8, DiagDir, Dir, PlayerId, SpecialDef, SpecialKind, Vec2 } from '../core/types';
+import { slashPose } from './art/animations';
 
 // ───────────────────────────── Partie pure ─────────────────────────────
 
@@ -125,32 +127,20 @@ export function specialCenter(pos: Vec2): Vec2 {
   return { x: pos.x, y: pos.y };
 }
 
-/** Vecteur unitaire d'une direction cardinale. */
-export function dirUnit(dir: Dir): Vec2 {
-  switch (dir) {
-    case 'up':
-      return { x: 0, y: -1 };
-    case 'down':
-      return { x: 0, y: 1 };
-    case 'left':
-      return { x: -1, y: 0 };
-    default:
-      return { x: 1, y: 0 };
-  }
+/** Vecteur unitaire d'une direction de visée (cardinale, ou diagonale : ±√½ sur chaque axe). */
+export function dirUnit(dir: Aim8): Vec2 {
+  return dirVec(dir);
 }
 
-/** Angle (rad, y vers le bas) d'une direction cardinale. */
-export function dirAngle(dir: Dir): number {
-  switch (dir) {
-    case 'up':
-      return -Math.PI / 2;
-    case 'down':
-      return Math.PI / 2;
-    case 'left':
-      return Math.PI;
-    default:
-      return 0;
-  }
+/** Angle (rad, y vers le bas) d'une direction de visée (cardinale : 0 / ±π/2 / π ; diagonale : ±π/4 / ±3π/4). */
+export function dirAngle(dir: Aim8): number {
+  const v = dirVec(dir);
+  return Math.atan2(v.y, v.x);
+}
+
+/** Direction FINE d'un spécial : la diagonale visée si elle existe, sinon la direction cardinale (`dir`). */
+export function playAim(p: Pick<SpecialPlay, 'dir' | 'aim'>): Aim8 {
+  return p.aim ?? p.dir;
 }
 
 /** Direction cardinale la plus proche d'un angle (rad). */
@@ -344,6 +334,8 @@ export interface SpecialPlay {
   /** Position de l'événement `specialUsed` (centre réel de l'effet). */
   pos: Vec2;
   dir: Dir;
+  /** Diagonale visée (frappe en diagonale), seulement si le héros visait en diagonale : ruée, volée, fracas et nova suivent alors cet angle ; `dir` en reste la composante cardinale. */
+  aim?: DiagDir;
   /** Position actuelle de la lanceuse/du lanceur (texte flottant, arrivée de la ruée) ; défaut : `pos`. */
   casterPos?: Vec2;
   /** Frame d'atlas du héros (images rémanentes de la ruée). */
@@ -548,7 +540,7 @@ export class SpecialFx {
   /** Ruée : traits de vitesse derrière le héros et poussière (les images rémanentes sont dans PlayerView). */
   private dash(p: SpecialPlay, pal: SpecialPalette): void {
     const { x, y } = p.pos;
-    const back = dirAngle(p.dir) + Math.PI;
+    const back = dirAngle(playAim(p)) + Math.PI;
     this.shape({
       x,
       y: y - 2,
@@ -564,7 +556,7 @@ export class SpecialFx {
         }
       },
     });
-    const v = dirUnit(p.dir);
+    const v = dirUnit(playAim(p));
     for (let i = 0; i < 8; i++) {
       this.fx.sprite({
         x: Math.round(x - v.x * this.rng.range(2, 8) + this.rng.range(-3, 3)),
@@ -651,7 +643,7 @@ export class SpecialFx {
   /** Volée d'étoiles : éclat de lancement et éventail de rayons devant le héros. */
   private arrowFan(p: SpecialPlay, pal: SpecialPalette): void {
     const { x, y } = p.pos;
-    const base = dirAngle(p.dir);
+    const base = dirAngle(playAim(p));
     const reach = 44;
     const steps = 4;
     this.shape({
@@ -669,7 +661,7 @@ export class SpecialFx {
         }
       },
     });
-    const v = dirUnit(p.dir);
+    const v = dirUnit(playAim(p));
     this.fx.sprite({ x: Math.round(x + v.x * 9), y: Math.round(y - 3 + v.y * 9), dur: 260, frame: 'fx_star', tint: pal.light, additive: true, a0: 1, a1: 0, eased: true });
     for (let i = 0; i < 8; i++) {
       const a = base + this.rng.range(-0.7, 0.7);
@@ -723,7 +715,7 @@ export class SpecialFx {
   /** Fracas du troll : grand arc d'impact en cône, éclats de lame, étincelles. */
   private smash(p: SpecialPlay, pal: SpecialPalette, reach: number, arcDeg: number): void {
     const { x, y } = p.pos;
-    const base = dirAngle(p.dir);
+    const base = dirAngle(playAim(p));
     const steps = 5;
     this.shape({
       x,
@@ -739,14 +731,16 @@ export class SpecialFx {
         drawPoints(g, arcPoints(Math.max(4, rEnd - 2), rEnd + 1, base - half * 0.9, base + half * 0.9), pal.light, 2, 1);
       },
     });
-    const v = dirUnit(p.dir);
+    const v = dirUnit(playAim(p));
+    const slash = slashPose(p.dir, p.aim); // arc cardinal, ou celui de la composante horizontale pivoté de ±45° en diagonale
     for (let i = 0; i < 3; i++) {
       this.fx.sprite({
         x: Math.round(x + v.x * (10 + i * 8)),
         y: Math.round(y - 2 + v.y * (10 + i * 8)),
         dur: 260,
         delay: i * 45,
-        frame: `fx_slash_${p.dir}`,
+        frame: slash.frame,
+        rot: slash.rotation,
         tint: i === 2 ? pal.light : pal.main,
         additive: true,
         a0: 1,

@@ -21,7 +21,7 @@ import { SIM_STEP_MS } from '../core/constants';
 import type { ActionFrame, GameState, LevelDef, PlayerId, RoomDef, SimEvent } from '../core/types';
 import {
   HUMAN_ID,
-  LOGGED_EVENT_TYPES,
+  isLoggedEvent,
   MAX_LOGGED_EVENTS,
   PARTNER_ID,
   evalCondition,
@@ -181,7 +181,7 @@ export class TutorialDirector {
   }
 
   private log(e: SimEvent): void {
-    if (!LOGGED_EVENT_TYPES.has(e.type)) return;
+    if (!isLoggedEvent(e)) return;
     this.s.events.push(e);
     if (this.s.events.length > MAX_LOGGED_EVENTS) this.s.events.splice(0, this.s.events.length - MAX_LOGGED_EVENTS);
   }

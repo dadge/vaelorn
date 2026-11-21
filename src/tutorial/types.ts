@@ -26,9 +26,9 @@ export type Condition =
   | { k: 'nearSign'; id: string; ms: number }
   /**
    * Événement `type` survenu depuis le début de l'étape. `by` : joueur acteur (`playerId`, `byPlayer` ou `reviverId`) ;
-   * `match` : champs de l'événement qui doivent être égaux ; `count` : nombre minimal d'occurrences (défaut 1).
+   * `match` : champs de l'événement qui doivent être égaux ; `has` : champs qui doivent être PRÉSENTS (≠ undefined : ex. `aim` d'un `playerAttack` en diagonale) ; `count` : nombre minimal d'occurrences (défaut 1).
    */
-  | { k: 'event'; type: SimEvent['type']; by?: PlayerId; count?: number; match?: Record<string, unknown> }
+  | { k: 'event'; type: SimEvent['type']; by?: PlayerId; count?: number; match?: Record<string, unknown>; has?: string[] }
   /** Exigence au sens de `isRequirementMet` (mécanisme actif, 'clear', 'obj:<id>'…). */
   | { k: 'req'; token: string }
   /** Objectif personnel accompli. */
