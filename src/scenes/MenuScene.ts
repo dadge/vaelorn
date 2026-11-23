@@ -30,6 +30,7 @@ import type { CharacterId } from '../core/types';
 import { getMusic } from '../audio/music';
 import { musicSettings, stepVolume } from '../audio/musicSettings';
 import { SUPPORTED_LANGUAGES, getLanguage, setLanguage, t } from '../i18n/i18n';
+import { formatBuildLabel, getBuildInfo } from '../buildInfo';
 import { CHARACTERS } from '../core/characters';
 import { MenuNavigator, VIRTUAL_PAD_INDEX, inputManager, isNonStandardPad, listGamepads } from '../input';
 import type { MenuAction } from '../input';
@@ -182,6 +183,8 @@ export class MenuScene extends Phaser.Scene {
   private title!: Phaser.GameObjects.Text;
   private subtitle!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
+  /** Libellé de version du build (coin haut droit). */
+  private version!: Phaser.GameObjects.Text;
   private info!: Phaser.GameObjects.Text;
   private rows: RowView[] = [];
   private rowH = ROW_H;
@@ -266,6 +269,15 @@ export class MenuScene extends Phaser.Scene {
       origin: [0.5, 0.5],
       align: 'center',
     });
+
+    // Version du build (coin haut droit, discrète) : « v0.1.0 · 509b48e · 23/11/2026 » — le hash se compare au dernier commit GitHub.
+    this.version = createText(this, GAME_WIDTH - 14, 10, formatBuildLabel(getBuildInfo(), getLanguage()), {
+      size: 'sm',
+      color: UI_THEME.textDim,
+      origin: [1, 0],
+      align: 'right',
+    });
+    this.version.setAlpha(0.7);
 
     this.buildRows();
 
@@ -717,6 +729,7 @@ export class MenuScene extends Phaser.Scene {
     this.title.setText(t('menu.title'));
     this.subtitle.setText(t('menu.subtitle'));
     this.hint.setText(t('pad.menu.hint'));
+    this.version.setText(formatBuildLabel(getBuildInfo(), getLanguage())); // le format de la date dépend de la langue
     this.buildRows();
     if (this.controls) {
       this.closeControls();

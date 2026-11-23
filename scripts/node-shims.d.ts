@@ -41,4 +41,4 @@ declare module 'node:url' {
 }
 
 /** Variables d'environnement (calibrage long à la demande : `src/testing/lootCalibration.long.test.ts`). */
-declare const process: { env: Record<string, string | undefined> };
+declare const process: { env: Record<string, string | undefined>; cwd(): string };
