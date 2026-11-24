@@ -418,6 +418,8 @@ export class PauseMenu {
   private confirmingQuit = false;
   /** Tutoriel : la confirmation de sortie dit que rien n'est sauvegardé (au lieu de « progression perdue »). */
   private tutorialMode = false;
+  /** Partie avec minicarte (pas en démo ni en tutoriel) : le rappel de la touche Tab s'ajoute aux commandes. */
+  private mapHelp = false;
 
   constructor(ctx: ViewContext) {
     const cx = GAME_WIDTH / 2;
@@ -437,6 +439,13 @@ export class PauseMenu {
   /** Active la variante « tutoriel » du texte de confirmation de sortie. */
   setTutorial(on: boolean): void {
     this.tutorialMode = on;
+  }
+
+  /** Ajoute (ou retire) au rappel des commandes la ligne « Tab : afficher / masquer le plan » (partie avec minicarte seulement : ni démo ni tutoriel). */
+  setMapHelp(on: boolean): void {
+    this.mapHelp = on;
+    this.panel.setSize(520, on ? 448 : 392); // une ligne de plus (la ligne des commandes peut déjà occuper 5 lignes)
+    this.retranslate();
   }
 
   private setVisible(v: boolean): void {
@@ -499,7 +508,8 @@ export class PauseMenu {
     setTextIfChanged(this.title, t('hud.pause'));
     this.hint.setText(this.confirmingQuit ? t(this.tutorialMode ? 'tutorial.quit.confirm' : 'game.pause.quit.confirm') : t('game.pause.hint'));
     // rappel des commandes : déplacement, action, spécial et appeler (boutons dédiés), pause
-    this.controls.setText(`${t('controls.keyboard')} : ${t('controls.keyboard.move')} - ${t('game.pause.controls.keyboard')}\n${t('controls.gamepad')} : ${t('controls.gamepad.move')} - ${t('game.pause.controls.gamepad')}`);
+    const lines = `${t('controls.keyboard')} : ${t('controls.keyboard.move')} - ${t('game.pause.controls.keyboard')}\n${t('controls.gamepad')} : ${t('controls.gamepad.move')} - ${t('game.pause.controls.gamepad')}`;
+    this.controls.setText(this.mapHelp ? `${lines}\n${t('map.help')}` : lines);
     this.refreshItems();
   }
 

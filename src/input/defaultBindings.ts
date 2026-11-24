@@ -15,7 +15,7 @@
  * annuler ni libérer une place à l'écran de sélection) ; Select / Back (8) reste le « passer » du tutoriel sur manette
  * (GameScene.pollTutorialPad) ; B sert aussi de « retour » dans la pause et les dialogues (l'action « utiliser le cœur » n'existe qu'en jeu actif :
  * GameScene filtre le B qui vient de fermer la pause ou d'ouvrir la scène tant qu'il n'est pas relâché).
- * Clavier : Espace / E = action ; B = utiliser le cœur ; F ou X = spécial ; C = appel ; Entrée / Échap / M (menus, pause, son).
+ * Clavier : Espace / E = action ; B = utiliser le cœur ; F ou X = spécial ; C = appel ; Entrée / Échap / M (menus, pause, son) ; Tab = plan de la salle (minicarte, lu par GameScene, hors bindings d'action).
  * Un seul clavier existe (un seul joueur à la fois, dispositions flèches ET WASD en parallèle) : « B » et « C » ne figurent dans aucune
  * autre action ni direction, quelle que soit la disposition (`createKeyboardLayoutBindings`).
  */

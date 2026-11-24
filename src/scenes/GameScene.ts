@@ -58,6 +58,8 @@ import { getLevelByIndex } from '../levels';
 import { TUTORIAL_SEED, tutorialLevel } from '../levels/tutorial';
 import { TUTORIAL_GEAR_TTL_MS, TutorialRuntime, applyScripted, tutorialPlayers } from '../entities/tutorialRuntime';
 import { TutorialHud } from '../render/tutorialHud';
+import { MiniMapHud } from '../render/MiniMapHud';
+import { loadMapVisible, mapToggleMessageKey, saveMapVisible } from '../render/miniMap';
 import { visibleRegionIds } from '../render/tutorialHudLogic';
 import type { ButtonName } from '../tutorial/types';
 import { ViewRig } from '../render/camera';
@@ -151,6 +153,8 @@ export class GameScene extends Phaser.Scene {
   private lifeViews!: LifeViews;
   private huds: PlayerHud[] = [];
   private teamPanel: TeamPanelHud | null = null;
+  /** Minicarte du centre de l'écran (null en démo et en tutoriel : leur écran reste strictement celui d'avant). */
+  private miniMap: MiniMapHud | null = null;
   private overlay!: GameOverlay;
   private pauseMenu!: PauseMenu;
   private pauseNav: MenuNavigator | null = null;
@@ -230,6 +234,19 @@ export class GameScene extends Phaser.Scene {
     this.sfx.setMuted(muted);
     getMusic().setMuted(muted);
   };
+  /**
+   * Tab : affiche / masque la minicarte (préférence mémorisée, avec un court message dans chaque vue). M est déjà le « son » (onMute) :
+   * la carte prend Tab, la touche de carte habituelle des jeux, qu'aucune action ne lie (voir src/input/defaultBindings.ts).
+   */
+  private readonly onToggleMap = (e?: KeyboardEvent): void => {
+    const map = this.miniMap;
+    if (!map || e?.repeat || this.leaving) return;
+    const visible = !map.isVisible;
+    map.setVisible(visible);
+    saveMapVisible(visible);
+    const text = t(mapToggleMessageKey(visible));
+    for (const h of this.huds) h.showToast(text, 0xcfc8e8, 1400);
+  };
   private readonly onWindowBlur = (): void => {
     inputManager.reset();
     this.latched = null;
@@ -249,6 +266,8 @@ export class GameScene extends Phaser.Scene {
     this.callScratch.y = pv.y;
     return this.callScratch;
   };
+  /** Centre monde de la caméra de la vue `v` (fondu de la minicarte sous un héros) ; fonction créée une fois (aucune allocation par frame). */
+  private readonly mapCenterOf = (v: number): Vec2 => this.rig.centerOf(v);
   private readonly onShutdown = (): void => {
     this.cleanup();
   };
@@ -272,6 +291,7 @@ export class GameScene extends Phaser.Scene {
     this.playerViews = [];
     this.huds = [];
     this.teamPanel = null;
+    this.miniMap = null;
     this.pauseNav = null;
     this.pauseOwner = null;
     this.accumulatorMs = 0;
@@ -428,8 +448,14 @@ export class GameScene extends Phaser.Scene {
     // réseau : le HUD du joueur local (identifiant 1..3 pour un invité) dans l'unique vue 0 ; sinon joueur i = vue i
     this.huds = netInfo ? [new PlayerHud(env, netInfo.localPlayerId, state.players[netInfo.localPlayerId], 0)] : state.players.slice(0, viewCount).map((p) => new PlayerHud(env, p.id, p));
     if (this.layout.teamPanel) this.teamPanel = new TeamPanelHud(env, this.layout.teamPanel, state.players);
+    // Minicarte : partie normale et partie réseau (hôte / invité) ; jamais en démo ni en tutoriel (leur écran reste inchangé).
+    if (!demo && !tut) {
+      this.miniMap = new MiniMapHud(env);
+      this.miniMap.setVisible(loadMapVisible());
+    }
     this.overlay = new GameOverlay(this.ctx, level);
     this.pauseMenu = new PauseMenu(this.ctx);
+    if (this.miniMap) this.pauseMenu.setMapHelp(true); // rappel de la touche Tab (partie normale et réseau ; jamais en démo ni en tutoriel)
     if (demo) {
       // Démo : pilote automatique sur le joueur 0, aucun son, aucune bannière ; bandeau « DÉMO » + invite clignotants.
       this.sfx.setMuted(true);
@@ -461,6 +487,8 @@ export class GameScene extends Phaser.Scene {
     if (!demo) {
       this.input.keyboard?.on('keydown-ESC', this.onEscape);
       this.input.keyboard?.on('keydown-M', this.onMute);
+      this.input.keyboard?.on('keydown-TAB', this.onToggleMap);
+      if (this.miniMap) this.input.keyboard?.addCapture('TAB'); // sans cela, Tab déplace le focus du navigateur hors du jeu
     }
     if (tut) {
       this.input.keyboard?.on('keydown-ENTER', this.onEnter);
@@ -668,6 +696,8 @@ export class GameScene extends Phaser.Scene {
       this.huds[i].update({ state: s, room: this.sim.room, dtMs, timeMs, exitOpen, camCenter: this.rig.centerOf(i), banners });
     }
     this.teamPanel?.update(s, this.sim.room, dtMs);
+    // carte : TOUJOURS mise à jour (même masquée ou en pause : la découverte continue) ; centre de la caméra de chaque vue pour s'estomper sous un héros (1 vue comme 2-4 vues)
+    this.miniMap?.update(s, this.sim.room, dtMs, timeMs, this.mapCenterOf);
     this.updateTutorialHud(dtMs);
     this.overlay.update({
       phase: s.phase,
@@ -1501,6 +1531,7 @@ export class GameScene extends Phaser.Scene {
     this.huds.forEach((h, i) => h.retranslate(players[playerOfView(this.net?.info.localPlayerId ?? null, i)]));
     this.net?.hud?.retranslate();
     this.teamPanel?.retranslate(players);
+    this.miniMap?.retranslate();
     this.overlay.retranslate();
     this.demoOverlay?.retranslate();
     this.pauseMenu.retranslate();
@@ -1525,6 +1556,8 @@ export class GameScene extends Phaser.Scene {
     }
     this.input.keyboard?.off('keydown-ESC', this.onEscape);
     this.input.keyboard?.off('keydown-M', this.onMute);
+    this.input.keyboard?.off('keydown-TAB', this.onToggleMap);
+    if (this.miniMap) this.input.keyboard?.removeCapture('TAB');
     this.input.keyboard?.off('keydown-ENTER', this.onEnter);
     this.input.keyboard?.off('keydown-SPACE', this.onSpaceEnd);
     this.input.keyboard?.off('keydown', this.onAnyKey);
@@ -1537,6 +1570,8 @@ export class GameScene extends Phaser.Scene {
     this.huds = [];
     this.teamPanel?.destroy();
     this.teamPanel = null;
+    this.miniMap?.destroy();
+    this.miniMap = null;
     this.pauseMenu?.destroy();
     this.tutorialHud?.destroy();
     this.tutorialHud = null;

@@ -58,7 +58,9 @@ import {
   type GoalLine,
 } from './roomGoals';
 import { mixColor as mixHex } from './specialFx';
-import { SEPARATOR_COLOR, type ScreenRect, type SplitLayout } from './splitscreen';
+import { HUD_MARGIN, SPECIAL_HINT_MAX_CHARS, bannerMaxWidth, hudAnchor, mainBlockMetrics, sideBlockMaxWidth, type HudAnchor } from './hudAnchor';
+import { mapZone } from './mapZone';
+import { SEPARATOR_COLOR, rectsOverlap, type ScreenRect, type SplitLayout } from './splitscreen';
 import { showTorchHud, torchBarColor, torchBarWidth, torchBlinkAlpha, torchFraction, torchLevel, type TorchLevel } from './torchHud';
 import type { ViewContext } from '../entities/common';
 import type { HudRegionId } from '../tutorial/types';
@@ -446,8 +448,11 @@ type Text = Phaser.GameObjects.Text;
 type Img = Phaser.GameObjects.Image;
 type Rect = Phaser.GameObjects.Rectangle;
 
-/** Profondeurs de l'interface. */
-export const HUD_DEPTH = { overlay: 5, bg: 10, content: 11, banner: 20, fade: 100, pause: 200 } as const;
+/**
+ * Profondeurs de l'interface. `map` : minicarte (au-dessus des séparateurs, `bg + 5`, et des pions...) ; `transient` : éléments passagers qui peuvent entrer dans la zone de la carte (invite
+ * contextuelle, bulle de panneau, flèches et demi-cercles d'appel) : au-dessus de la carte (pions compris : `map + 0.7` au plus), sous les bandeaux et notifications (`banner`).
+ */
+export const HUD_DEPTH = { overlay: 5, bg: 10, content: 11, map: 16, transient: 17, banner: 20, fade: 100, pause: 200 } as const;
 
 export interface HudTextOptions {
   size?: number;
@@ -532,6 +537,17 @@ export interface ScreenBounds {
   y1: number;
 }
 
+/** Rectangle écran d'un objet d'interface (via `getBounds`, qui tient compte de l'origine et de l'échelle). */
+function screenBoundsOf(o: { getBounds(): { x: number; y: number; width: number; height: number } }): ScreenBounds {
+  const b = o.getBounds();
+  return { x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height };
+}
+
+/** Vrai si l'objet occupe une surface (un texte vide n'en a pas : il ne dessine rien). */
+function hasArea(o: { width: number; height: number }): boolean {
+  return o.width > 0 && o.height > 0;
+}
+
 /** Deux rectangles se recouvrent-ils (bords qui se touchent = non) ? Pur. */
 export function boundsOverlap(a: ScreenBounds, b: ScreenBounds): boolean {
   return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
@@ -583,7 +599,9 @@ export class PlayerHud {
   private readonly buffRing: Phaser.GameObjects.Graphics;
   private readonly buffCell: number;
   private readonly buffX0: number;
-  private readonly buffY0: number;
+  /** Pas (px) entre deux cases de bonus : positif à droite de l'équipement, négatif (colonne de droite) quand les bonus grandissent vers la gauche. */
+  private readonly buffStep: number;
+  private buffY0: number;
   private buffSig = '';
   private readonly objHeader: Text;
   private readonly objIcons: Img[] = [];
@@ -611,14 +629,20 @@ export class PlayerHud {
   private readonly goalHeader: Text;
   private readonly goalIcons: Img[] = [];
   private readonly goalTexts: Text[] = [];
-  private readonly goalRight: number;
-  private readonly goalTop: number;
+  /** Ancrage du HUD de cette vue (voir `hudAnchor.ts`) : côté du bloc principal, arête haut / bas, coin du bloc d'objectif de salle. */
+  private readonly anchor: HudAnchor;
+  /** X (écran) auquel s'accroche le contenu du bloc d'objectif de salle : son bord droit (coin droit) ou son bord gauche (coin gauche). */
+  private readonly goalAnchorX: number;
+  /** Y (écran) de l'arête extérieure du bloc d'objectif de salle : son bord haut (rangée du haut) ou son bord bas (rangée du bas). */
+  private readonly goalEdgeY: number;
   private readonly goalIconCol: number;
   private goalSig = '';
   private goalShown = false;
-  /** Bord bas (écran) du bloc d'objectif de salle, ou son bord haut s'il est masqué : les bandeaux et notifications se placent en dessous. */
-  private goalBottom: number;
-  private goalLeft: number;
+  /** Rectangle écran du bloc d'objectif de salle ; réduit à son ancre quand il est masqué : notifications et bandeaux se placent à côté / contre lui. */
+  private goalX0: number;
+  private goalX1: number;
+  private goalY0: number;
+  private goalY1: number;
   /** Bloc masqué parce qu'un bandeau d'arrivée de salle passerait dessus (il réapparaît quand le bandeau s'efface). */
   private goalBlocked = false;
   private readonly goalRect: ScreenBounds = { x0: 0, y0: 0, x1: 0, y1: 0 };
@@ -649,7 +673,14 @@ export class PlayerHud {
   private readonly lanText: Text;
   private readonly hgBarW: number;
   private readonly puzRight: number;
+  /** Largeur maximale (px) du fond d'un bandeau (sablier, lanterne) pour ne pas recouvrir le bloc principal (voir `bannerMaxWidth`). */
+  private readonly bannerMaxW: number;
   private puzTop: number;
+  /** Hauteur (px) du fond du bandeau de la lanterne (32, plus si le texte passe sur plusieurs lignes) et ordonnée de sa première ligne (pour ne recalculer que si elle change). */
+  private lanH = 32;
+  private lanY0 = -1e9;
+  /** X (écran) de chaque élément des bandeaux sablier / lanterne dans leur mise en page « collée à droite » (décalés d'un même `shift` quand ils sont collés à gauche). */
+  private readonly puzBase: { bg: number; hgIcon: number; hgBar: number; hgText: number; lanIcon: number; lanText: number };
   private hgShown = false;
   private hgLevel: HourglassLevel = 'ok';
   private hgRatio = 0;
@@ -674,6 +705,14 @@ export class PlayerHud {
   private heartsN: number;
   /** Mode démo (attract) : ni notifications, ni invite contextuelle, ni bulle de panneau (elles s'adressent à un joueur humain). */
   private demoQuiet = false;
+  /** Coin haut-gauche (écran) du bloc principal et hauteur de sa partie statique ; `blockObjs` = ses objets (recalés ensemble en bas de la vue, voir `reanchorBlock`). */
+  private blockX = 0;
+  private blockY = 0;
+  private readonly blockStaticH: number;
+  private readonly blockBottomEdge: number;
+  /** Bord droit (écran) du bloc principal quand il est collé à droite : les objectifs perso, de largeur variable, s'y alignent. */
+  private readonly blockRight: number;
+  private readonly blockObjs: (Text | Img | Rect)[] = [];
 
   /** Active / désactive le mode silencieux de la démo (notifications et invites masquées). */
   setDemoQuiet(on: boolean): void {
@@ -697,8 +736,9 @@ export class PlayerHud {
     this.fs = this.u >= 3 ? 17 : 13;
     this.color = PLAYER_COLORS[playerId];
     const { x: vx, y: vy, w: vw, h: vh } = this.vp;
-    const m = 10;
+    const m = HUD_MARGIN;
     const u = this.u;
+    this.anchor = hudAnchor(layout, viewIndex);
 
     // cadre coloré (liseré) autour de la vue, seulement en écran partagé
     this.frameGfx = ctx.scene.add.graphics();
@@ -712,48 +752,74 @@ export class PlayerHud {
     this.downOverlay = hudRect(ctx, vx + vw / 2, vy + vh / 2, vw, vh, 0x501018, 0.28, HUD_DEPTH.overlay);
     this.downOverlay.setVisible(false);
 
-    this.name = hudText(ctx, vx + m, vy + m, t(CHARACTERS[p.characterId].nameKey), { size: this.fs + 2, color: this.color });
-    this.hp = hudText(ctx, vx + m + 120, vy + m + 2, '', { size: this.fs - 2, color: 0xffffff });
-
+    // BLOC PRINCIPAL (nom, PV, cœurs, équipement, spécial, clés, torche, objectifs perso) : coin haut-gauche de la vue à 1 joueur ; à 2-4 joueurs il est collé au bord EXTÉRIEUR de l'écran
+    // (gauche / droite selon la colonne, haut / bas selon la rangée : voir `hudAnchor.ts`). Toutes les positions ci-dessous sont relatives à (bx, by) ; les formules sont celles de `mainBlockMetrics`.
+    const gearOn = env.gear !== false;
+    const slotOn = env.heartSlot === true;
     this.heartsN = heartCount(p.maxHp);
-    const hy = vy + m + this.fs + 10;
+    const spDef = CHARACTERS[p.characterId].special;
+    const nameStr = t(CHARACTERS[p.characterId].nameKey);
+    // largeur réelle du texte du spécial (libellés de la langue courante : « PRÊT [F/X / Y] » ou « Nom 99 s »), au lieu d'une estimation fixe très large : le bloc de la colonne de droite colle vraiment au bord
+    const specialChars = spDef ? Math.max(t('specialhud.ready').length + 3 + SPECIAL_HINT_MAX_CHARS, t(spDef.nameKey).length + 1 + t('specialhud.wait', { seconds: 99 }).length) : 0;
+    const mirror = this.anchor.alignX === 'right';
+    const met = mainBlockMetrics({ u, fs: this.fs, vw, heartsN: this.heartsN, gearOn, slotOn, buffCount: BUFF_HUD_ORDER.length, mirror, nameChars: nameStr.length, specialChars });
+    const bx = this.anchor.alignX === 'left' ? vx + m : vx + vw - m - met.w;
+    // colonne de droite : chaque ligne est collée au bord droit individuellement (la plus large touche le bord gauche du bloc) ; colonne de gauche : lignes alignées à gauche (inchangé)
+    const rowX = (rowW: number): number => (mirror ? bx + met.w - rowW : bx);
+    const bxName = rowX(met.rows.name);
+    const bxHearts = rowX(met.rows.hearts);
+    const bxGear = rowX(met.rows.gear);
+    const bxSp = rowX(met.rows.sp);
+    const bxKeys = rowX(met.rows.keys);
+    this.bannerMaxW = bannerMaxWidth(vw, met.w);
+    this.blockBottomEdge = vy + vh - m;
+    this.blockRight = vx + vw - m;
+    const by = this.anchor.alignY === 'top' ? vy + m : this.blockBottomEdge - met.staticH; // en bas : recalé quand les objectifs perso apparaissent (`reanchorBlock`)
+    this.blockY = by;
+    this.blockStaticH = met.staticH;
+    /** Enregistre un objet du bloc principal (pour le recaler verticalement en bas de la vue). */
+    const blk = <T extends Text | Img | Rect>(o: T): T => {
+      this.blockObjs.push(o);
+      return o;
+    };
+
+    this.name = blk(hudText(ctx, bxName, by, nameStr, { size: this.fs + 2, color: this.color }));
+    this.blockX = bxName;
+    this.hp = blk(hudText(ctx, bxName + 120, by + 2, '', { size: this.fs - 2, color: 0xffffff }));
+
+    const hy = by + met.hy;
     for (let i = 0; i < this.heartsN; i++) {
-      const h = hudIcon(ctx, vx + m + i * (8 * u + u), hy, 'ui_heart_full', u);
+      const h = blk(hudIcon(ctx, bxHearts + i * (8 * u + u), hy, 'ui_heart_full', u));
       this.hearts.push(h);
       this.heartFramesCache.push('ui_heart_full');
     }
     // rangée d'équipement : 6 cases (bottes, protection, artefact, magie, arme, accessoire) sous les cœurs. Le niveau I-III s'affiche dans une BANDE dédiée sous
     // l'icône (jamais sur le dessin) : 1 à 3 pastilles pleines, sur un fond sombre, lisibles même à 640x360 ou sur téléphone.
-    const gearOn = env.gear !== false;
-    const gy = hy + 8 * u + 4;
-    const pipH = Math.max(3, u + 1);
+    const gy = by + met.gy;
+    const { pipH, slotH, slotW, hintSize } = met;
     const pipW = Math.max(4, Math.floor((8 * u - 2) / 3));
     // EMPLACEMENT CŒUR : en tête de la 2e ligne (celle de l'équipement, pas à la fin de la rangée de cœurs qui peut passer sous le bloc « Objectifs de la salle »), cadre discret de la même
     // hauteur que les cases d'équipement : cœur / demi-cœur rangé ou silhouette atténuée, suivi du rappel du bouton en petit (police >= 11 px, lisible à l'échelle mobile) ; l'équipement
     // et les bonus se décalent à sa droite. Absent (démo) : aucune position ne change.
-    const slotOn = env.heartSlot === true;
-    const slotH = 8 * u + pipH + 4;
-    const hintSize = Math.max(12, this.fs - 3);
-    const slotW = 8 * u + 5 + Math.round(hintSize * 0.62) * 2 + 4; // place du libellé du bouton ET du « ½ » d'un demi-cœur rangé (lisible quand l'écran est réduit)
     if (slotOn) {
-      const sx = vx + m;
-      const bg = hudRect(ctx, sx - 1, gy - 1, slotW, slotH, 0x0b0912, 0.7);
+      const sx = bxGear + met.slotX;
+      const bg = blk(hudRect(ctx, sx - 1, gy - 1, slotW, slotH, 0x0b0912, 0.7));
       bg.setOrigin(0, 0).setStrokeStyle(1, heartSlotBorderColor(undefined, false), 0.9);
       this.heartSlotBg = bg;
       const v0 = heartSlotView(undefined);
-      this.heartSlotIcon = hudIcon(ctx, sx, gy, v0.frame, u).setTint(v0.tint ?? 0xffffff).setAlpha(v0.alpha);
-      this.heartSlotHint = hudText(ctx, sx + 8 * u + 3, gy + 4 * u, 'B', { size: hintSize, originY: 0.5, color: 0xcfc8e8, depth: HUD_DEPTH.content });
+      this.heartSlotIcon = blk(hudIcon(ctx, sx, gy, v0.frame, u).setTint(v0.tint ?? 0xffffff).setAlpha(v0.alpha));
+      this.heartSlotHint = blk(hudText(ctx, sx + 8 * u + 3, gy + 4 * u, 'B', { size: hintSize, originY: 0.5, color: 0xcfc8e8, depth: HUD_DEPTH.content }));
     }
-    const gearX0 = vx + m + (slotOn ? slotW + 7 : 0);
+    const gearX0 = bxGear + met.gearX0;
     for (let i = 0; gearOn && i < 6; i++) {
-      const gx = gearX0 + i * (8 * u + u + 3);
-      const bg = hudRect(ctx, gx - 1, gy - 1, 8 * u + 2, 8 * u + pipH + 4, 0x0b0912, 0.7);
+      const gx = gearX0 + i * met.gearCell;
+      const bg = blk(hudRect(ctx, gx - 1, gy - 1, 8 * u + 2, 8 * u + pipH + 4, 0x0b0912, 0.7));
       bg.setOrigin(0, 0);
-      const ic = hudIcon(ctx, gx, gy, 'gear_icon_boots_1', u);
+      const ic = blk(hudIcon(ctx, gx, gy, 'gear_icon_boots_1', u));
       ic.setVisible(false);
       const pips: Rect[] = [];
       for (let k = 0; k < 3; k++) {
-        const pip = hudRect(ctx, gx + k * (pipW + 1), gy + 8 * u + 1, pipW, pipH, 0xffffff, 1, HUD_DEPTH.content + 0.5);
+        const pip = blk(hudRect(ctx, gx + k * (pipW + 1), gy + 8 * u + 1, pipW, pipH, 0xffffff, 1, HUD_DEPTH.content + 0.5));
         pip.setOrigin(0, 0).setVisible(false);
         pips.push(pip);
       }
@@ -762,78 +828,82 @@ export class PlayerHud {
       this.gearPips.push(pips);
     }
     // bonus temporaires (potion, rage, étoile, cor) : icônes avec anneau de compte à rebours et secondes, à droite de la rangée d'équipement
-    this.buffCell = 8 * u + 8;
-    this.buffX0 = gearX0 + 6 * (8 * u + u + 3) + 8;
+    this.buffCell = met.buffCell;
+    this.buffX0 = bxGear + met.buffX0;
+    this.buffStep = met.buffStep;
     this.buffY0 = gy;
     this.buffRing = ctx.scene.add.graphics();
     this.buffRing.setDepth(HUD_DEPTH.content + 0.6);
     ctx.rig.registerHud(this.buffRing);
     for (let i = 0; gearOn && i < BUFF_HUD_ORDER.length; i++) {
-      const ic = hudIcon(ctx, this.buffX0 + i * this.buffCell, gy, 'gear_icon_buff_speed', u);
+      const ic = blk(hudIcon(ctx, this.buffX0 + i * this.buffStep, gy, 'gear_icon_buff_speed', u));
       ic.setVisible(false);
       this.buffIcons.push(ic);
       // secondes restantes : lisibles (>= 11 px de police à 4 joueurs, contour du texte compris) ; l'anneau reste l'indicateur principal
-      const tx = hudText(ctx, this.buffX0 + i * this.buffCell + 8 * u, gy + 8 * u, '', { size: Math.max(11, this.fs - 2), originX: 1, originY: 1, depth: HUD_DEPTH.content + 0.7 });
+      const tx = blk(hudText(ctx, this.buffX0 + i * this.buffStep + 8 * u, gy + 8 * u, '', { size: Math.max(11, this.fs - 2), originX: 1, originY: 1, depth: HUD_DEPTH.content + 0.7 }));
       tx.setVisible(false);
       this.buffTexts.push(tx);
     }
     // indicateur d'attaque spéciale : icône + jauge + texte, sous la rangée d'équipement (équipement désactivé : directement sous les cœurs)
-    const sy = gearOn ? gy + 8 * u + pipH + 7 : slotOn ? gy + slotH + 6 : hy + 8 * u + 6;
+    const sy = by + met.sy;
     const rowMid = sy + 4 * u;
-    this.spBarW = Math.max(64, Math.min(96, Math.floor(vw * 0.2)));
-    this.spIcon = hudIcon(ctx, vx + m, sy, 'ui_special', u);
-    const bx = vx + m + 8 * u + 6;
-    this.spBarBg = hudRect(ctx, bx - 2, rowMid, this.spBarW + 4, Math.max(10, u * 3 + 4), 0x0b0912, 0.85);
+    this.spBarW = met.spBarW;
+    this.spIcon = blk(hudIcon(ctx, bxSp, sy, 'ui_special', u));
+    const spx = bxSp + 8 * u + 6;
+    this.spBarBg = blk(hudRect(ctx, spx - 2, rowMid, this.spBarW + 4, Math.max(10, u * 3 + 4), 0x0b0912, 0.85));
     this.spBarBg.setOrigin(0, 0.5);
-    this.spBarFill = hudRect(ctx, bx, rowMid, 1, Math.max(6, u * 3), this.color, 1, HUD_DEPTH.content);
+    this.spBarFill = blk(hudRect(ctx, spx, rowMid, 1, Math.max(6, u * 3), this.color, 1, HUD_DEPTH.content));
     this.spBarFill.setOrigin(0, 0.5);
-    this.spText = hudText(ctx, bx + this.spBarW + 10, rowMid, '', { size: this.fs - 1, originY: 0.5, color: 0xffffff });
-    const spDef = CHARACTERS[p.characterId].special;
+    this.spText = blk(hudText(ctx, spx + this.spBarW + 10, rowMid, '', { size: this.fs - 1, originY: 0.5, color: 0xffffff }));
     for (const o of [this.spIcon, this.spBarBg, this.spBarFill, this.spText]) o.setVisible(!!spDef);
     this.spName = spDef ? t(spDef.nameKey) : '';
-    const ky = sy + 8 * u + 6;
+    const ky = by + met.ky;
     for (let i = 0; i < 3; i++) {
-      const k = hudIcon(ctx, vx + m + i * (8 * u + u), ky, 'ui_key_0', u);
+      const k = blk(hudIcon(ctx, bxKeys + i * (8 * u + u), ky, 'ui_key_0', u));
       k.setVisible(false);
       this.keyIcons.push(k);
     }
 
     // jauge de torche (salles sombres seulement) : icône + fine barre, à droite des clés
-    const tx0 = vx + m + 3 * (8 * u + u) + 10;
-    this.torchBarW = 14 * u;
-    this.torchIcon = hudIcon(ctx, tx0, ky, torchIconFrame(1), u);
+    const tx0 = bxKeys + met.tx0;
+    this.torchBarW = met.torchBarW;
+    this.torchIcon = blk(hudIcon(ctx, tx0, ky, torchIconFrame(1), u));
     const barH = Math.max(3, u + 1);
     const barY = ky + Math.round((8 * u - barH) / 2);
-    this.torchBarBg = hudRect(ctx, tx0 + 8 * u + 4 - 1, barY - 1, this.torchBarW + 2, barH + 2, 0x0b0912, 0.85);
+    this.torchBarBg = blk(hudRect(ctx, tx0 + 8 * u + 4 - 1, barY - 1, this.torchBarW + 2, barH + 2, 0x0b0912, 0.85));
     this.torchBarBg.setOrigin(0, 0);
-    this.torchBarFill = hudRect(ctx, tx0 + 8 * u + 4, barY, this.torchBarW, barH, torchBarColor('full'), 1, HUD_DEPTH.content);
+    this.torchBarFill = blk(hudRect(ctx, tx0 + 8 * u + 4, barY, this.torchBarW, barH, torchBarColor('full'), 1, HUD_DEPTH.content));
     this.torchBarFill.setOrigin(0, 0);
     for (const o of [this.torchIcon, this.torchBarBg, this.torchBarFill]) o.setVisible(false);
 
-    const oy = ky + 8 * u + 8;
-    this.objBg = hudRect(ctx, vx + m - 4, oy - 3, 10, 10, 0x0b0912, 0.55);
+    const oy = by + met.oy;
+    this.objBg = blk(hudRect(ctx, bx - 4, oy - 3, 10, 10, 0x0b0912, 0.55));
     this.objBg.setOrigin(0, 0).setVisible(false);
-    this.objHeader = hudText(ctx, vx + m, oy, '', { size: this.fs - 1, color: 0xf0e2b0 });
-    // largeur réduite : le bloc « Objectif de la salle » occupe le haut à droite (jusqu'à 40 % de la vue)
-    const wrapW = Math.min(Math.floor(vw * 0.45), 460);
+    this.objHeader = blk(hudText(ctx, bx, oy, '', { size: this.fs - 1, color: 0xf0e2b0 }));
+    // largeur réduite : le bloc « Objectif de la salle » occupe un coin de l'arête extérieure (jusqu'à 40 % de la vue)
+    const wrapW = met.objWrap;
     for (let i = 0; i < 4; i++) {
       const ly = oy + this.fs + 6 + i * (this.fs + 8);
-      const ic = hudIcon(ctx, vx + m, ly + 1, 'ui_cross', Math.max(1, u - 1));
+      const ic = blk(hudIcon(ctx, bx, ly + 1, 'ui_cross', met.objScale));
       ic.setVisible(false);
       this.objIcons.push(ic);
-      const tx = hudText(ctx, vx + m + 8 * Math.max(1, u - 1) + 6, ly, '', { size: this.fs - 1, color: 0xffffff, wrap: wrapW });
+      const tx = blk(hudText(ctx, bx + 8 * met.objScale + 6, ly, '', { size: this.fs - 1, color: 0xffffff, wrap: wrapW }));
       tx.setVisible(false);
       this.objTexts.push(tx);
     }
 
-    // invite contextuelle (bas de la vue) et bulle de panneau (au-dessus)
-    this.promptBg = hudRect(ctx, vx + vw / 2, vy + vh - 26, 10, 10, 0x0b0912, 0.72);
+    // invite contextuelle et bulle de panneau : en bas de la vue (rangée du haut / 1 joueur) ; EN HAUT dans la rangée du bas, dont le bord extérieur (bas) porte le bloc principal et l'objectif
+    const bottomRow = this.anchor.alignY === 'bottom';
+    const promptY = bottomRow ? vy + 26 : vy + vh - 26;
+    const signY = bottomRow ? vy + 80 : vy + vh - 80;
+    // profondeur « transitoire » : au-dessus de la minicarte (ces éléments peuvent passer dans sa zone et doivent rester lisibles)
+    this.promptBg = hudRect(ctx, vx + vw / 2, promptY, 10, 10, 0x0b0912, 0.72, HUD_DEPTH.transient);
     this.promptBg.setVisible(false);
-    this.promptText = hudText(ctx, vx + vw / 2, vy + vh - 26, '', { size: this.fs, originX: 0.5, originY: 0.5, align: 'center', wrap: Math.floor(vw * 0.8) });
+    this.promptText = hudText(ctx, vx + vw / 2, promptY, '', { size: this.fs, originX: 0.5, originY: 0.5, align: 'center', wrap: Math.floor(vw * 0.8), depth: HUD_DEPTH.transient + 0.1 });
     this.promptText.setVisible(false);
-    this.signBg = hudRect(ctx, vx + vw / 2, vy + vh - 80, 10, 10, 0x1c1530, 0.86);
+    this.signBg = hudRect(ctx, vx + vw / 2, signY, 10, 10, 0x1c1530, 0.86, HUD_DEPTH.transient);
     this.signBg.setStrokeStyle(2, 0xf0e2b0, 0.9).setVisible(false);
-    this.signText = hudText(ctx, vx + vw / 2, vy + vh - 80, '', { size: this.fs, originX: 0.5, originY: 0.5, align: 'center', wrap: Math.floor(vw * 0.72), color: 0xfff6d8 });
+    this.signText = hudText(ctx, vx + vw / 2, signY, '', { size: this.fs, originX: 0.5, originY: 0.5, align: 'center', wrap: Math.floor(vw * 0.72), color: 0xfff6d8, depth: HUD_DEPTH.transient + 0.1 });
     this.signText.setVisible(false);
 
     // à terre
@@ -868,49 +938,63 @@ export class PlayerHud {
       a.setOrigin(0.5, 0.5).setTint(0xff5a4a).setVisible(false);
       this.enemyArrows.push(a);
     }
-    // demi-cercles d'appel (ondes sonores des alliés qui appellent, hors de la vue). Profondeur SOUS les textes du HUD
-    // (nom, PV, jauges, objectif) : ils ne doivent pas les recouvrir quand l'appelant est vers un coin ; les fonds (bg = 10) restent dessous.
-    this.callHud = new CallEdgeHud(ctx, this.vp, HUD_DEPTH.content - 0.5, this.edgeAnchors.length);
-    // bloc « Objectif de la salle » (haut à droite de la vue) : fusionne l'ancien compteur d'ennemis restants
-    this.goalRight = vx + vw - m - 6;
-    this.goalTop = vy + m;
-    this.goalLeft = this.goalRight;
-    this.goalBottom = this.goalTop;
+    // demi-cercles d'appel (ondes sonores des alliés qui appellent, hors de la vue). Profondeur « transitoire » : AU-DESSUS de la minicarte (au centre de l'écran partagé, le bord de la vue
+    // touche la carte : l'appel ne doit pas être voilé par son fond) ; leurs traits fins sont brefs et le HUD permanent est aux bords extérieurs, loin du centre.
+    this.callHud = new CallEdgeHud(ctx, this.vp, HUD_DEPTH.transient, this.edgeAnchors.length);
+    // bloc « Objectif de la salle » : fusionne l'ancien compteur d'ennemis restants. Coin droit de l'arête extérieure pour une vue de la colonne gauche (et à 1 joueur), coin gauche pour la colonne droite.
+    this.goalAnchorX = this.anchor.goalAlignX === 'right' ? vx + vw - m - 6 : vx + m + 6;
+    this.goalEdgeY = this.anchor.goalAlignY === 'top' ? vy + m : vy + vh - m;
+    this.goalX0 = this.goalAnchorX;
+    this.goalX1 = this.goalAnchorX;
+    this.goalY0 = this.goalEdgeY;
+    this.goalY1 = this.goalEdgeY;
     const goalScale = Math.max(1, u - 1);
     this.goalIconCol = 8 * goalScale + 6;
-    const goalWrap = Math.max(120, Math.min(420, Math.floor(vw * 0.4)) - this.goalIconCol);
-    this.goalBg = hudRect(ctx, this.goalRight, this.goalTop, 10, 10, 0x0b0912, 0.66);
+    // largeur bornée : le fond (texte + icône + 2 x 5 px de marge) ne recouvre jamais le bloc principal collé à l'autre bord (2 joueurs : vue de 638 px)
+    const goalMaxW = Math.min(420, Math.floor(vw * 0.4), sideBlockMaxWidth(vw, met.w) - 10);
+    const goalWrap = Math.max(60, goalMaxW - this.goalIconCol);
+    // 2 joueurs (vues de 638 px, zoom 3) : le bloc est plus étroit pour laisser la place au bloc principal ; un corps d'1 px de moins garde sa hauteur au-dessus de la zone de la carte (milieu de l'écran)
+    const goalFs = layout.playerCount === 2 ? this.fs - 2 : this.fs - 1;
+    this.goalBg = hudRect(ctx, this.goalAnchorX, this.goalEdgeY, 10, 10, 0x0b0912, 0.66);
     this.goalBg.setOrigin(0, 0).setStrokeStyle(2, 0xf0e2b0, 0.7).setVisible(false);
-    this.goalHeader = hudText(ctx, this.goalRight, this.goalTop, '', { size: this.fs - 1, color: 0xf0e2b0 });
+    this.goalHeader = hudText(ctx, this.goalAnchorX, this.goalEdgeY, '', { size: goalFs, color: 0xf0e2b0 });
     this.goalHeader.setVisible(false);
     for (let i = 0; i < MAX_GOAL_LINES; i++) {
-      const ic = hudIcon(ctx, this.goalRight, this.goalTop, 'ui_cross', goalScale);
+      const ic = hudIcon(ctx, this.goalAnchorX, this.goalEdgeY, 'ui_cross', goalScale);
       ic.setVisible(false);
       this.goalIcons.push(ic);
-      const tx = hudText(ctx, this.goalRight, this.goalTop, '', { size: this.fs - 1, color: 0xffffff, wrap: goalWrap });
+      const tx = hudText(ctx, this.goalAnchorX, this.goalEdgeY, '', { size: goalFs, color: 0xffffff, wrap: goalWrap });
       tx.setVisible(false);
       this.goalTexts.push(tx);
     }
 
-    // bandeaux « sablier » et « lanterne » : sous le bloc d'objectif de salle, alignés à droite (repositionnés dynamiquement)
+    // bandeaux « sablier » et « lanterne » : empilés contre le bloc d'objectif de salle, dans son coin, vers l'intérieur de la vue (repositionnés dynamiquement) ;
+    // construits « collés à droite », décalés d'un `shift` horizontal quand le coin est à gauche (largeur variable : voir `puzShift`)
     this.puzRight = vx + vw - m;
     this.puzTop = vy + m + 4;
     this.hgBarW = Math.max(70, Math.min(120, Math.floor(vw * 0.18)));
-    this.puzBg = hudRect(ctx, this.puzRight + 4, this.puzTop - 4, 10, 10, 0x0b0912, 0.62);
+    this.puzBase = {
+      bg: this.puzRight + 4,
+      hgIcon: this.puzRight - 32,
+      hgBar: this.puzRight - 32 - 6 - this.hgBarW,
+      hgText: this.puzRight - 32 - 6,
+      lanIcon: this.puzRight - 24,
+      lanText: this.puzRight - 24 - 6,
+    };
+    this.puzBg = hudRect(ctx, this.puzBase.bg, this.puzTop - 4, 10, 10, 0x0b0912, 0.62);
     this.puzBg.setOrigin(1, 0).setStrokeStyle(2, 0xe8b44a, 0.8).setVisible(false);
-    this.hgIcon = hudIcon(ctx, this.puzRight - 32, this.puzTop, hourglassFrame(1), 2);
-    const hgBarX = this.puzRight - 32 - 6 - this.hgBarW;
+    this.hgIcon = hudIcon(ctx, this.puzBase.hgIcon, this.puzTop, hourglassFrame(1), 2);
     const hgBarY = this.puzTop + this.fs + 8;
-    this.hgBarBg = hudRect(ctx, hgBarX - 1, hgBarY - 1, this.hgBarW + 2, 10, 0x0b0912, 0.9);
+    this.hgBarBg = hudRect(ctx, this.puzBase.hgBar - 1, hgBarY - 1, this.hgBarW + 2, 10, 0x0b0912, 0.9);
     this.hgBarBg.setOrigin(0, 0);
-    this.hgBarFill = hudRect(ctx, hgBarX, hgBarY, this.hgBarW, 8, hourglassBarColor('ok'), 1, HUD_DEPTH.content);
+    this.hgBarFill = hudRect(ctx, this.puzBase.hgBar, hgBarY, this.hgBarW, 8, hourglassBarColor('ok'), 1, HUD_DEPTH.content);
     this.hgBarFill.setOrigin(0, 0);
-    this.hgText = hudText(ctx, this.puzRight - 32 - 6, this.puzTop + 2, '', { size: this.fs - 2, originX: 1, color: 0xffe08a });
+    this.hgText = hudText(ctx, this.puzBase.hgText, this.puzTop + 2, '', { size: this.fs - 2, originX: 1, color: 0xffe08a });
     for (const o of [this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText]) o.setVisible(false);
-    this.lanBg = hudRect(ctx, this.puzRight + 4, this.puzTop - 4, 10, 10, 0x0b0912, 0.62);
+    this.lanBg = hudRect(ctx, this.puzBase.bg, this.puzTop - 4, 10, 10, 0x0b0912, 0.62);
     this.lanBg.setOrigin(1, 0).setStrokeStyle(2, 0xffd86a, 0.8).setVisible(false);
-    this.lanIcon = hudIcon(ctx, this.puzRight - 24, this.puzTop, lanternFrame(0), 3);
-    this.lanText = hudText(ctx, this.puzRight - 24 - 6, this.puzTop + 12, '', { size: this.fs - 2, originX: 1, originY: 0.5, color: 0xffe9a8, wrap: Math.floor(vw * 0.4), align: 'right' });
+    this.lanIcon = hudIcon(ctx, this.puzBase.lanIcon, this.puzTop, lanternFrame(0), 3);
+    this.lanText = hudText(ctx, this.puzBase.lanText, this.puzTop + 12, '', { size: this.fs - 2, originX: 1, originY: 0.5, color: 0xffe9a8, wrap: Math.max(60, Math.min(Math.floor(vw * 0.4), this.bannerMaxW - 42)), align: 'right' });
     for (const o of [this.lanIcon, this.lanText]) o.setVisible(false);
   }
 
@@ -948,6 +1032,38 @@ export class PlayerHud {
     return out;
   }
 
+  /**
+   * Rectangles écran (lecture seule) de tous les éléments PERMANENTS du HUD ACTUELLEMENT affichés : nom, PV, cœurs, équipement, bonus, spécial, clés, torche, objectifs perso, bloc
+   * d'objectif de salle, bandeaux sablier / lanterne. Exclut les éléments transitoires (invite, bulle de panneau, notification, écran « à terre », flèches et demi-cercles d'appel), qui peuvent
+   * passer sur la carte. Sert aux tests (« aucun texte permanent dans la zone réservée à la carte ») ; ne modifie rien.
+   */
+  permanentBounds(): ScreenBounds[] {
+    const out: ScreenBounds[] = [];
+    for (const o of this.blockObjs) if (o.visible && hasArea(o)) out.push(screenBoundsOf(o));
+    for (const o of [this.goalBg, this.goalHeader, ...this.goalIcons, ...this.goalTexts, this.puzBg, this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText, this.lanBg, this.lanIcon, this.lanText]) {
+      if (o.visible && hasArea(o)) out.push(screenBoundsOf(o));
+    }
+    return out;
+  }
+
+  /**
+   * Rectangles écran (lecture seule) des éléments affichés du bloc principal SANS les objectifs perso (nom, PV, cœurs, équipement, bonus, spécial, clés, torche) : la partie dont
+   * l'emprise est réservée sur l'arête de la vue. Sert aux tests (« l'objectif de salle et les bandeaux ne recouvrent pas le bloc principal »).
+   */
+  mainBlockBounds(): ScreenBounds[] {
+    const personal = new Set<unknown>([this.objBg, this.objHeader, ...this.objIcons, ...this.objTexts]);
+    const out: ScreenBounds[] = [];
+    for (const o of this.blockObjs) if (!personal.has(o) && o.visible && hasArea(o)) out.push(screenBoundsOf(o));
+    return out;
+  }
+
+  /** Rectangles écran (lecture seule) du bloc « Objectif de la salle » et des bandeaux sablier / lanterne AFFICHÉS. Sert aux tests. */
+  sideBlockBounds(): ScreenBounds[] {
+    const out: ScreenBounds[] = [];
+    for (const o of [this.goalBg, this.puzBg, this.lanBg]) if (o.visible && hasArea(o)) out.push(screenBoundsOf(o));
+    return out;
+  }
+
   /** Force la re-traduction des textes au prochain rafraîchissement (changement de langue). */
   retranslate(p: PlayerState): void {
     this.name.setText(t(CHARACTERS[p.characterId].nameKey));
@@ -967,8 +1083,9 @@ export class PlayerHud {
   /** Affiche une notification brève dans la vue du joueur. */
   showToast(text: string, color = 0xffffff, durationMs = 2600): void {
     if (this.demoQuiet) return;
-    // largeur disponible : à gauche du bloc d'objectif de salle et des bandeaux sablier/lanterne (jamais par-dessus ni sous eux)
-    const avail = Math.max(80, Math.min(Math.floor(this.vp.w * 0.7), this.toastRightLimit() - this.vp.x - 8) - 24);
+    // largeur disponible : entre les blocs posés sur l'arête haute (objectif de salle, bandeaux sablier/lanterne : jamais par-dessus ni sous eux)
+    const lim = this.toastLimits();
+    const avail = Math.max(80, Math.min(Math.floor(this.vp.w * 0.7), lim.right - lim.left - 8) - 24);
     this.toastText.setWordWrapWidth(avail, true);
     this.toastText.setText(text).setColor(hex(color));
     fitBg(this.toastBg, this.toastText, 12, 6);
@@ -978,23 +1095,41 @@ export class PlayerHud {
     this.placeToast();
   }
 
-  /** Bord droit (écran) que la notification ne doit pas dépasser : bord gauche du bloc d'objectif de salle / des bandeaux sablier-lanterne. */
-  private toastRightLimit(): number {
-    let limit = this.vp.x + this.vp.w;
-    if (this.goalShown) limit = Math.min(limit, this.goalLeft - 8);
-    if (this.puzBg.visible) limit = Math.min(limit, this.puzBg.x - this.puzBg.width - 8);
-    if (this.lanBg.visible) limit = Math.min(limit, this.lanBg.x - this.lanBg.width - 8);
-    return limit;
+  private readonly toastLim = { left: 0, right: 0 };
+
+  /**
+   * Bords (écran) entre lesquels la notification doit rester : elle évite le bloc d'objectif de salle et les bandeaux sablier/lanterne, qui sont dans un coin de l'arête haute
+   * (à droite pour la colonne gauche et à 1 joueur, à gauche pour la colonne droite). Dans la rangée du bas ces blocs sont sur l'arête basse : aucune limite (la notification est en haut).
+   */
+  private toastLimits(): { left: number; right: number } {
+    const lim = this.toastLim;
+    lim.left = this.vp.x;
+    lim.right = this.vp.x + this.vp.w;
+    if (this.anchor.goalAlignY !== 'top') return lim;
+    const left = this.anchor.goalAlignX === 'left';
+    if (this.goalShown) {
+      if (left) lim.left = Math.max(lim.left, this.goalX1 + 8);
+      else lim.right = Math.min(lim.right, this.goalX0 - 8);
+    }
+    for (const bg of [this.puzBg, this.lanBg]) {
+      if (!bg.visible) continue;
+      if (left) lim.left = Math.max(lim.left, bg.x + 8);
+      else lim.right = Math.min(lim.right, bg.x - bg.width - 8);
+    }
+    return lim;
   }
 
-  /** Place la notification au centre haut de la vue, décalée vers la gauche pour ne pas recouvrir le bloc d'objectif de salle ni les bandeaux. */
+  /** Place la notification au centre haut de la vue, décalée pour ne pas recouvrir le bloc d'objectif de salle ni les bandeaux. */
   private placeToast(): void {
     const { x: vx, y: vy, w: vw, h: vh } = this.vp;
-    const y = vy + Math.round(vh * 0.24);
+    let y = vy + Math.round(vh * 0.24);
+    // rangée du bas : la bulle de panneau est dans la même zone haute que la notification (le bas porte le bloc principal) ; la notification s'empile SOUS la bulle (jamais par-dessus)
+    if (this.anchor.alignY === 'bottom' && this.signBg.visible) y = Math.max(y, Math.round(this.signBg.y + this.signBg.height / 2 + 4 + this.toastBg.height / 2));
     const w = this.toastBg.width;
     let cx = vx + vw / 2;
-    const limit = this.toastRightLimit();
-    if (cx + w / 2 > limit) cx = Math.max(vx + 4 + w / 2, limit - w / 2);
+    const lim = this.toastLimits();
+    if (cx + w / 2 > lim.right) cx = Math.max(vx + 4 + w / 2, lim.right - w / 2);
+    if (lim.left > vx && cx - w / 2 < lim.left) cx = Math.min(vx + vw - 4 - w / 2, lim.left + w / 2);
     if (this.toastBg.y !== y || this.toastBg.x !== cx) {
       this.toastBg.setPosition(cx, y);
       this.toastText.setPosition(cx, y);
@@ -1040,6 +1175,19 @@ export class PlayerHud {
         this.toastBg.setAlpha(0.78);
       }
     }
+  }
+
+  /**
+   * Rangée du bas : recale tout le bloc principal pour que son bord bas (partie statique, ou fond des objectifs perso s'ils sont affichés : `objBottom` > 0) touche le bord extérieur
+   * (bas) de la vue. Appelé seulement quand les objectifs perso changent (jamais à chaque frame).
+   */
+  private reanchorBlock(objBottom: number): void {
+    const bottom = Math.max(this.blockY + this.blockStaticH, objBottom);
+    const dy = this.blockBottomEdge - bottom;
+    if (dy === 0) return;
+    this.blockY += dy;
+    this.buffY0 += dy;
+    for (const o of this.blockObjs) o.setY(o.y + dy);
   }
 
   /** Clignotement de la jauge de torche (à chaque frame : seulement l'opacité). */
@@ -1108,11 +1256,12 @@ export class PlayerHud {
     }
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
-      const cx = this.buffX0 + i * this.buffCell + 4 * u;
+      const bxi = this.buffX0 + i * this.buffStep;
+      const cx = bxi + 4 * u;
       const cy = this.buffY0 + 4 * u;
       const r = 4 * u + 2;
-      this.buffIcons[i].setPosition(this.buffX0 + i * this.buffCell, this.buffY0);
-      this.buffTexts[i].setPosition(this.buffX0 + i * this.buffCell + 8 * u + 2, this.buffY0 + 8 * u + 2).setVisible(true);
+      this.buffIcons[i].setPosition(bxi, this.buffY0);
+      this.buffTexts[i].setPosition(bxi + 8 * u + 2, this.buffY0 + 8 * u + 2).setVisible(true);
       setTextIfChanged(this.buffTexts[i], String(e.seconds));
       g.lineStyle(2, 0x0b0912, 0.8);
       g.beginPath();
@@ -1137,7 +1286,7 @@ export class PlayerHud {
     // PV
     const hpStr = `${t('hud.hp')} ${Math.max(0, Math.ceil(p.hp))}/${p.maxHp}`;
     setTextIfChanged(this.hp, hpStr);
-    this.hp.setX(this.vp.x + 10 + this.name.width + 14);
+    this.hp.setX(this.blockX + this.name.width + 14);
     for (let i = 0; i < this.hearts.length; i++) {
       const f = heartFrame(i, Math.max(0, p.hp), HP_PER_HEART);
       if (f !== this.heartFramesCache[i]) {
@@ -1240,6 +1389,12 @@ export class PlayerHud {
         this.objBg.setPosition(this.objHeader.x - 6, this.objHeader.y - 4);
         this.objBg.setSize(maxW + 14, bottom - this.objHeader.y + 6);
       }
+      if (showBg && this.anchor.alignX === 'right') {
+        // collé à droite : le bloc d'objectifs perso (largeur variable) touche le bord droit du bloc (ses lignes restent alignées à gauche entre elles)
+        const dx = this.blockRight - (this.objBg.x + this.objBg.width);
+        if (dx !== 0) for (const o of [this.objBg, this.objHeader, ...this.objIcons, ...this.objTexts]) o.setX(o.x + dx);
+      }
+      if (this.anchor.alignY === 'bottom') this.reanchorBlock(showBg ? this.objBg.y + this.objBg.height : 0);
     }
 
     // invite contextuelle
@@ -1270,6 +1425,7 @@ export class PlayerHud {
         this.signText.setText(signStr);
         fitBg(this.signBg, this.signText, 16, 10);
       }
+      if (this.toastLeftMs > 0) this.placeToast(); // la bulle apparaît / disparaît : la notification s'empile dessous ou reprend sa place
     }
 
     // à terre
@@ -1289,22 +1445,22 @@ export class PlayerHud {
   }
 
   /**
-   * Bloc « Objectif de la salle » (haut à droite) : ce qu'il faut faire pour ouvrir la sortie, une ligne cochable par exigence
-   * (ennemis restants fusionnés dedans). Masqué quand le joueur est à terre. Repositionne ensuite les bandeaux sablier/lanterne
-   * sous le bloc. Re-dessiné seulement quand sa signature change.
+   * Bloc « Objectif de la salle » : ce qu'il faut faire pour ouvrir la sortie, une ligne cochable par exigence (ennemis restants fusionnés dedans). Il est dans un coin de l'arête
+   * extérieure de la vue (haut à droite à 1 joueur et dans la colonne gauche, haut / bas à gauche dans la colonne droite : voir `hudAnchor.ts`). Masqué quand le joueur est à terre.
+   * Repositionne ensuite les bandeaux sablier/lanterne contre le bloc (rangée du haut ; dans la rangée du bas : `refreshPuzzles`). Re-dessiné seulement quand sa signature change.
    */
   private refreshGoals(a: PlayerHudUpdate, down: boolean): void {
     const { state, room } = a;
     const { level } = this.env;
     this.enemyLeft = enemiesRemaining(state, room);
-    // le bandeau de nom de salle / d'indice est centré sur tout l'écran : il recouvrirait le bloc de la vue de gauche
+    // le bandeau de nom de salle / d'indice est centré sur tout l'écran : il recouvrirait le bloc d'une vue qui touche le centre
     let blocked = false;
     if (this.goalShown && a.banners) {
       const r = this.goalRect;
-      r.x0 = this.goalLeft;
-      r.x1 = this.goalRight;
-      r.y0 = this.goalTop;
-      r.y1 = this.goalBottom;
+      r.x0 = this.goalX0;
+      r.x1 = this.goalX1;
+      r.y0 = this.goalY0;
+      r.y1 = this.goalY1;
       for (let i = 0; i < a.banners.length && !blocked; i++) blocked = boundsOverlap(r, a.banners[i]);
     }
     if (blocked !== this.goalBlocked) {
@@ -1318,10 +1474,10 @@ export class PlayerHud {
       this.goalSig = sig;
       this.layoutGoals(lines);
     }
-    this.applyPuzTop(this.goalShown ? this.goalBottom + 12 : this.goalTop + 4);
+    if (this.anchor.goalAlignY === 'top') this.applyPuzTop(this.goalShown ? this.goalY1 + 12 : this.goalEdgeY + 4);
   }
 
-  /** Remplit et dispose le bloc d'objectif de salle (largeur ajustée au contenu, aligné à droite). */
+  /** Remplit et dispose le bloc d'objectif de salle (largeur ajustée au contenu, collé à son coin : à droite = bord droit fixe, à gauche = bord gauche fixe ; en bas il grandit vers le haut). */
   private layoutGoals(lines: readonly GoalLine[]): void {
     const show = lines.length > 0;
     this.goalShown = show;
@@ -1333,8 +1489,10 @@ export class PlayerHud {
         this.goalTexts[i].setVisible(false);
         this.goalIcons[i].setVisible(false);
       }
-      this.goalBottom = this.goalTop;
-      this.goalLeft = this.goalRight;
+      this.goalX0 = this.goalAnchorX;
+      this.goalX1 = this.goalAnchorX;
+      this.goalY0 = this.goalEdgeY;
+      this.goalY1 = this.goalEdgeY;
       return;
     }
     const pad = 5;
@@ -1358,8 +1516,14 @@ export class PlayerHud {
       ic.setFrame(l.done || l.highlight ? 'ui_check' : 'ui_cross').setVisible(vis);
       maxW = Math.max(maxW, this.goalIconCol + tx.width);
     }
-    const x0 = this.goalRight - maxW;
-    let y = this.goalTop + pad;
+    const rightCorner = this.anchor.goalAlignX === 'right';
+    const x0 = rightCorner ? this.goalAnchorX - maxW : this.goalAnchorX;
+    // hauteur du bloc (en-tête + lignes), puis son bord haut : l'arête haute (rangée du haut) ou l'arête basse moins la hauteur (rangée du bas)
+    let hh = pad + this.goalHeader.height + gap;
+    for (let i = 0; i < this.goalTexts.length; i++) if (lines[i]) hh += this.goalTexts[i].height + gap;
+    const h = hh - gap + pad;
+    const top = this.anchor.goalAlignY === 'top' ? this.goalEdgeY : this.goalEdgeY - h;
+    let y = top + pad;
     this.goalHeader.setPosition(x0, y);
     y += this.goalHeader.height + gap;
     for (let i = 0; i < this.goalTexts.length; i++) {
@@ -1369,12 +1533,13 @@ export class PlayerHud {
       this.goalIcons[i].setPosition(x0, y + 1);
       y += tx.height + gap;
     }
-    const h = y - gap + pad - this.goalTop;
-    this.goalBg.setPosition(x0 - pad, this.goalTop);
+    this.goalBg.setPosition(x0 - pad, top);
     this.goalBg.setSize(maxW + 2 * pad, h);
     this.goalBg.setStrokeStyle(2, highlight ? 0x8dffa8 : 0xf0e2b0, highlight ? 0.9 : 0.7);
-    this.goalLeft = x0 - pad;
-    this.goalBottom = this.goalTop + h;
+    this.goalX0 = x0 - pad;
+    this.goalX1 = rightCorner ? this.goalAnchorX : x0 + maxW + pad; // coin droit : l'ancre (comme avant) ; coin gauche : le vrai bord droit du fond
+    this.goalY0 = top;
+    this.goalY1 = top + h;
   }
 
   /** Décale les bandeaux sablier/lanterne pour que leur bord haut soit à `top` (écran). */
@@ -1383,6 +1548,23 @@ export class PlayerHud {
     if (dy === 0) return;
     this.puzTop = top;
     for (const o of [this.puzBg, this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText]) o.setY(o.y + dy);
+  }
+
+  /** Décalage horizontal (px) d'un bandeau de largeur `pw` : nul quand il est collé à droite ; collé à gauche (colonne droite), son bord gauche touche la marge de la vue. */
+  private puzShift(pw: number): number {
+    return this.anchor.goalAlignX === 'left' ? this.vp.x + HUD_MARGIN - 4 + pw - this.puzBase.bg : 0;
+  }
+
+  /** Place horizontalement le bandeau du sablier (fond de largeur `pw`). Sans effet quand le coin est à droite (positions de construction). */
+  private placeHourglassX(pw: number): void {
+    if (this.anchor.goalAlignX === 'right') return;
+    const s = this.puzShift(pw);
+    const b = this.puzBase;
+    this.puzBg.setX(b.bg + s);
+    this.hgIcon.setX(b.hgIcon + s);
+    this.hgBarBg.setX(b.hgBar - 1 + s);
+    this.hgBarFill.setX(b.hgBar + s);
+    this.hgText.setX(b.hgText + s);
   }
 
   /** Sablier (temps de sable restant) et lanterne (porteur) : bandeaux de la vue, rafraîchis à ~16 Hz. */
@@ -1394,6 +1576,14 @@ export class PlayerHud {
       this.hgShown = showHg;
       for (const o of [this.hgIcon, this.hgBarBg, this.hgBarFill, this.hgText]) o.setVisible(showHg);
       this.hgSig = '';
+    }
+    const info = lanternHudInfo(lanternBearers(state, room), p.id);
+    const showLan = info !== null && p.status === 'alive';
+    // rangée du bas : les bandeaux sont posés AU-DESSUS du bloc d'objectif (ou de l'arête basse) ; leur bord haut dépend de ce qui est affiché (le haut est traité par `refreshGoals`)
+    if (this.anchor.goalAlignY === 'bottom') {
+      const bottomVisual = this.goalShown ? this.goalY0 - 8 : this.goalEdgeY;
+      const extent = showLan ? (showHg ? 46 : 0) + (this.lanH - 4) : showHg ? 36 : 0; // bord bas visuel des bandeaux sous `puzTop` : sablier 36, lanterne 28 (plus si son texte passe à la ligne), les deux 46 + 28
+      this.applyPuzTop(bottomVisual - extent);
     }
     let rowBottom = this.puzTop;
     let any = false;
@@ -1415,6 +1605,7 @@ export class PlayerHud {
         this.hgW = -1;
         const w = Math.max(this.hgBarW + 38, this.hgText.width + 44);
         this.puzBg.setSize(w + 8, 32 + 8);
+        this.placeHourglassX(w + 8);
       }
       const bw = hourglassBarWidth(s.ratio, this.hgBarW);
       if (bw !== this.hgW) {
@@ -1426,8 +1617,6 @@ export class PlayerHud {
     }
     this.puzBg.setVisible(any);
 
-    const info = lanternHudInfo(lanternBearers(state, room), p.id);
-    const showLan = info !== null && p.status === 'alive';
     if (showLan !== this.lanShown) {
       this.lanShown = showLan;
       this.lanIcon.setVisible(showLan);
@@ -1438,16 +1627,26 @@ export class PlayerHud {
     if (showLan && info) {
       const sig = `${info.isBearer ? 'b' : 'f'}${info.bearerId}`;
       const y0 = any ? rowBottom + 6 : this.puzTop;
-      if (sig !== this.lanSig || this.lanIcon.y !== y0) {
+      if (sig !== this.lanSig || this.lanY0 !== y0) {
         this.lanSig = sig;
+        this.lanY0 = y0;
         const bearer = state.players[info.bearerId];
         const name = bearer ? t(CHARACTERS[bearer.characterId].nameKey) : '';
         this.lanText.setText(info.isBearer ? t('hud.lantern.bearer') : t('hud.lantern.follow', { name }));
         this.lanText.setColor(info.isBearer ? '#ffe9a8' : hex(PLAYER_COLORS[info.bearerId] ?? 0xffffff));
-        this.lanIcon.setY(y0);
-        this.lanText.setY(y0 + 12);
+        // le texte est replié à la largeur disponible (il ne recouvre pas le bloc principal) : le fond grandit avec le nombre de lignes, icône et texte restent centrés dedans
+        const h = Math.max(32, Math.ceil(this.lanText.height) + 8);
+        this.lanH = h;
+        const dy = (h - 32) / 2;
+        this.lanIcon.setY(y0 + dy);
+        this.lanText.setY(y0 + 12 + dy);
         const w = this.lanText.width + 24 + 18;
-        this.lanBg.setPosition(this.puzRight + 4, y0 - 4).setSize(w, 32);
+        const sx = this.anchor.goalAlignX === 'right' ? 0 : this.puzShift(w);
+        this.lanBg.setPosition(this.puzBase.bg + sx, y0 - 4).setSize(w, h);
+        if (sx !== 0) {
+          this.lanIcon.setX(this.puzBase.lanIcon + sx);
+          this.lanText.setX(this.puzBase.lanText + sx);
+        }
       }
       const lf = lanternFrame(a.timeMs);
       if (lf !== this.lanFrame) {
@@ -1576,6 +1775,7 @@ export class PlayerHud {
     ];
     for (const o of all) o.destroy();
     this.heartSlotBg = null;
+    this.blockObjs.length = 0;
     this.heartSlotIcon = null;
     this.heartSlotHint = null;
     this.gearBgs.length = 0;
@@ -1623,6 +1823,11 @@ interface TeamRow {
   sig: string;
 }
 
+/** Marge (px) entre la zone réservée à la carte et la première ligne du panneau d'équipe. */
+export const TEAM_ZONE_GAP = 6;
+/** Hauteur (px) de la ligne « Équipe / salle » en bas du panneau d'équipe. */
+export const TEAM_FOOTER_H = 28;
+
 /** Panneau d'équipe : 4ᵉ quadrant quand il n'y a que 3 joueurs (PV, état, objectif, clés de chaque joueur). */
 export class TeamPanelHud {
   private readonly rows: TeamRow[] = [];
@@ -1640,11 +1845,15 @@ export class TeamPanelHud {
     const { ctx } = env;
     const { x, y, w, h } = panel;
     this.bg = hudRect(ctx, x + w / 2, y + h / 2, w, h, 0x14121f, 1, HUD_DEPTH.bg - 1);
-    this.title = hudText(ctx, x + 12, y + 8, t('hud.team'), { size: 15, color: 0xf0e2b0 });
-    this.roomText = hudText(ctx, x + w - 12, y + 9, '', { size: 12, color: 0xb8c0d8, originX: 1, bold: false });
-    const rowH = Math.floor((h - 34) / Math.max(1, players.length));
+    // Le coin haut-gauche de ce quadrant touche le centre de l'écran, où se trouve la carte (`mapZone`) : les lignes des joueurs commencent SOUS la zone réservée, et le titre / la salle
+    // passent sur le bord BAS (extérieur) du panneau. Les textes à droite (état, jauges) restent contre le bord droit de l'écran.
+    const zone = mapZone(env.layout);
+    const rowsTop = zone !== null && rectsOverlap(zone, panel) ? Math.max(32, zone.y + zone.h - y + TEAM_ZONE_GAP) : 32;
+    this.title = hudText(ctx, x + 12, y + h - 8, t('hud.team'), { size: 15, color: 0xf0e2b0, originY: 1 });
+    this.roomText = hudText(ctx, x + w - 12, y + h - 9, '', { size: 12, color: 0xb8c0d8, originX: 1, originY: 1, bold: false });
+    const rowH = Math.floor((h - rowsTop - TEAM_FOOTER_H) / Math.max(1, players.length));
     players.forEach((p, i) => {
-      const ry = y + 32 + i * rowH;
+      const ry = y + rowsTop + i * rowH;
       const color = PLAYER_COLORS[p.id];
       const swatch = hudRect(ctx, x + 12, ry, 6, rowH - 8, color, 1, HUD_DEPTH.content);
       swatch.setOrigin(0, 0);
@@ -1681,6 +1890,17 @@ export class TeamPanelHud {
       for (const o of [tIcon, tBg, tFill]) o.setVisible(false);
       this.rows.push({ spIcon, spBg, spFill, spW, tIcon, tBg, tFill, tW, tShown: false, tLvl: 'full', tW0: -1, tFrame: '', swatch, name, state, hearts, slot, slotSig: '', keys, obj, frames: hearts.map(() => 'ui_heart_full'), sig: '' });
     });
+  }
+
+  /** Rectangles écran (lecture seule) des textes et icônes du panneau (hors fond plein) : voir `PlayerHud.permanentBounds`. */
+  permanentBounds(): ScreenBounds[] {
+    const out: ScreenBounds[] = [screenBoundsOf(this.title), screenBoundsOf(this.roomText)];
+    for (const r of this.rows) {
+      const all: (Text | Img | Rect)[] = [r.swatch, r.name, r.state, ...r.hearts, ...r.keys, r.obj, r.spIcon, r.spBg, r.spFill, r.tIcon, r.tBg, r.tFill];
+      if (r.slot) all.push(r.slot);
+      for (const o of all) if (o.visible && hasArea(o)) out.push(screenBoundsOf(o));
+    }
+    return out;
   }
 
   retranslate(players: readonly PlayerState[]): void {
