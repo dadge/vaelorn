@@ -931,3 +931,36 @@ export function hash01(a: number, b = 0, seed = 0): number {
   h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
 }
+
+// ───────────────────────────── Hauteur des lignes du menu ─────────────────────────────
+
+/** Ordonnée (px logiques) de la première ligne du menu principal. */
+export const MENU_ROWS_TOP = 152;
+/** Espace (px) entre deux lignes. */
+export const MENU_ROW_GAP = 3;
+/** Hauteur (px) d'une ligne de remarque (non sélectionnable). */
+export const MENU_NOTE_H = 24;
+/**
+ * Bas maximal (px) de la dernière ligne : la ligne d'aide (centrée à 52 px du bas de l'écran, deux lignes de texte au plus) commence à ≈ 652.
+ * Les lignes doivent finir au plus à cet ordonnée.
+ */
+export const MENU_ROWS_BOTTOM_MAX = 650;
+/**
+ * Hauteurs de ligne possibles (px), de la plus confortable à la plus serrée : 34 (jusqu'à 12 lignes sélectionnables), 31 (13), 28 (14 et 15 : sauvegarde
+ * valide + 4 joueurs, avant la ligne « Multijoueur réseau »), 26 (16 : avec la ligne réseau). La première qui tient est retenue (`menuRowHeight`).
+ */
+export const MENU_ROW_HEIGHTS: readonly number[] = [34, 31, 28, 26];
+
+/** Bas (px) de la dernière ligne du menu pour `selectableCount` lignes sélectionnables de hauteur `rowH` et `noteCount` remarques. */
+export function menuRowsBottom(selectableCount: number, noteCount: number, rowH: number): number {
+  return MENU_ROWS_TOP + selectableCount * (rowH + MENU_ROW_GAP) + noteCount * (MENU_NOTE_H + MENU_ROW_GAP);
+}
+
+/**
+ * Hauteur d'une ligne sélectionnable : la plus grande de `MENU_ROW_HEIGHTS` pour laquelle le menu tient au-dessus de la ligne d'aide
+ * (`MENU_ROWS_BOTTOM_MAX`) ; la plus petite si rien ne tient (jamais de hauteur inférieure : le texte ne se lirait plus).
+ */
+export function menuRowHeight(selectableCount: number, noteCount = 1): number {
+  for (const h of MENU_ROW_HEIGHTS) if (menuRowsBottom(selectableCount, noteCount, h) <= MENU_ROWS_BOTTOM_MAX) return h;
+  return MENU_ROW_HEIGHTS[MENU_ROW_HEIGHTS.length - 1];
+}

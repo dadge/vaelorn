@@ -15,6 +15,11 @@
  * (`ActivityWatcher` → `DemoFlow`). Ni sauvegarde, ni pause, ni son, ni bannières ; bandeau « DÉMO » et invite clignotants ; retour au
  * menu (avec fondu) quand la durée est écoulée ou dès que le joueur fait quelque chose. Tous les ajouts sont gardés par `if (this.demoFlow)`.
  *
+ * RÉSEAU (`session.net`, docs/NET.md) : un joueur par appareil, HÔTE AUTORITAIRE. L'hôte (joueur 0) simule à 60 Hz avec ses entrées + celles des invités et diffuse l'état à 20 Hz (`HostSessionApi`) ;
+ * l'invité NE SIMULE PAS : il applique l'état reçu à une simulation « miroir » (`GameSimulation.applyMirrorState`), rejoue les événements reçus (sons, FX) et interpole en affichant un intervalle
+ * d'instantané de retard (`MirrorClock`). Les deux n'ont qu'UNE vue (comme le tutoriel), sur leur propre héros ; aucune sauvegarde, aucune pause qui fige, pas de campagne enchaînée (fin de niveau =
+ * retour au salon). Tous les ajouts sont gardés par `if (this.net)` et la boucle réseau est SÉPARÉE (`updateNet`) : le chemin local ne change pas d'un octet. Logique pure : `netGame.ts`, `entities/netView.ts`.
+ *
  * MUSIQUE (src/audio/) : jouée pendant le jeu (fondu d'entrée), jamais en démo, à moitié volume en tutoriel ; la pause la baisse (ducking, elle
  * continue) ; M coupe / remet tout le son (effets + musique) ; départ de la scène (fin de niveau, résultat, menu) : arrêt en fondu.
  *
@@ -71,8 +76,14 @@ import { HUD_DEPTH, hudRect, hudText } from '../render/hud';
 import { isSavingAllowed } from '../render/saveMenuLogic';
 import { getSaveContext, getSaveRepository } from '../render/saveStore';
 import { getQuickParams } from '../render/menuLogic';
-import { SCENE_KEYS, type DialogueSceneData, type GameSceneData, type GameSession, type MenuSceneData } from '../render/session';
+import { SCENE_KEYS, type DialogueSceneData, type GameSceneData, type GameSession, type MenuSceneData, type NetLobbySceneData } from '../render/session';
 import { computeLayout, type SplitLayout } from '../render/splitscreen';
+import { MirrorClock, playerOfView, viewOfPlayer } from '../entities/netView';
+import { NetViewRig } from '../entities/netViewRig';
+import { noticeForClose, noticeForEnd, type ClientSessionApi, type HostSessionApi, type NetNotice, type NetSessionInfo, type NetSnapshot } from '../net/contracts';
+import { clearNetRuntime, getClientSession, getHostSession } from '../net/netRuntime';
+import { NetGameHud } from './NetGameHud';
+import { NET_EMPTY_FRAME, SnapshotGate, composeHostInputs, levelEndAction, localNetFrame, lostPeers, playerDisplayName, stallStatus } from './netGame';
 
 /** Durée (ms) de la célébration avant d'enchaîner sur le dialogue de fin de niveau. */
 const CELEBRATION_MS = 3200;
@@ -91,6 +102,24 @@ const TUTORIAL_END_CONFIRM_DELAY_MS = 1200;
 const TUTORIAL_DEVICE_REFRESH_MS = 250;
 
 let sessionCounter = 0;
+
+/** État propre à une partie RÉSEAU de cette scène (voir `netGame.ts`) : sessions (vivantes, dans `netRuntime`), horloge d'interpolation, garde des instantanés, abonnements. */
+interface NetMode {
+  readonly info: NetSessionInfo;
+  readonly host: HostSessionApi | null;
+  readonly client: ClientSessionApi | null;
+  readonly clock: MirrorClock;
+  readonly gate: SnapshotGate;
+  hud: NetGameHud | null;
+  /** Instant (`performance.now`) du dernier instantané reçu (invité), null avant le premier. */
+  lastSnapAtMs: number | null;
+  /** Dernier masque des joueurs connectés connu (bit = identifiant de jeu), null avant le premier. */
+  mask: number | null;
+  /** Désabonnements (écouteurs des sessions) : libérés à la fermeture de la scène. */
+  offs: (() => void)[];
+  /** Un événement mal formé a déjà été signalé (un seul avertissement dans la console). */
+  warned: boolean;
+}
 
 export class GameScene extends Phaser.Scene {
   private session!: GameSession;
@@ -171,6 +200,9 @@ export class GameScene extends Phaser.Scene {
   private tutorialLabels: Record<ButtonName, string> | null = null;
   private tutorialDeviceAccumMs = TUTORIAL_DEVICE_REFRESH_MS;
   private padEdgeDown: Record<number, boolean> = {};
+
+  // ── Partie réseau (null hors réseau) ──
+  private net: NetMode | null = null;
 
   private offLanguage: (() => void) | null = null;
   private readonly onEscape = (): void => {
@@ -261,6 +293,7 @@ export class GameScene extends Phaser.Scene {
     this.demoPilot = null;
     this.demoWatcher = null;
     this.demoOverlay = null;
+    this.net = null;
     this.tutorial = null;
     this.tutorialHud = null;
     this.tutorialEnded = false;
@@ -278,7 +311,30 @@ export class GameScene extends Phaser.Scene {
     // dev : `?dev=statues|hourglass|bridge|bosses` remplace le niveau par une salle de test (voir entities/devRooms.ts)
     const tut = this.session.tutorial;
     const demo = this.session.demo ?? null;
-    const devKind = tut || demo ? null : devTestKind(typeof window !== 'undefined' ? window.location.search : '', import.meta.env.DEV);
+    // Partie réseau : les sessions vivent dans `netRuntime` ; sans elles (session.net présent mais rien d'ouvert), erreur lisible puis menu.
+    const netInfo = this.session.net ?? null;
+    const netHost = netInfo?.role === 'host' ? getHostSession() : null;
+    const netClient = netInfo?.role === 'client' ? getClientSession() : null;
+    if (netInfo && !netHost && !netClient) {
+      clearNetRuntime();
+      this.showFatalError();
+      return;
+    }
+    // Session déjà fermée ou déjà revenue au salon pendant le fondu de lancement (le salon s'est désabonné : personne n'a été prévenu) : on ne démarre pas la partie.
+    const netPhase = (netHost ?? netClient)?.phase;
+    if (netInfo && netPhase !== undefined && netPhase !== 'playing') {
+      this.failed = true;
+      if (netPhase === 'closed') {
+        clearNetRuntime();
+        const menuData: MenuSceneData = { notice: { code: netHost ? 'aborted' : 'hostLost' } };
+        this.time.delayedCall(0, () => this.scene.start(SCENE_KEYS.Menu, menuData));
+      } else {
+        const lobbyData: NetLobbySceneData = { entry: 'return', notice: { code: 'aborted' } };
+        this.time.delayedCall(0, () => this.scene.start(SCENE_KEYS.NetLobby, lobbyData));
+      }
+      return;
+    }
+    const devKind = tut || demo || netInfo ? null : devTestKind(typeof window !== 'undefined' ? window.location.search : '', import.meta.env.DEV);
     const baseLevel = tut ? tutorialLevel : devKind ? buildDevTestLevel(devKind) : getLevelByIndex(this.session.levelIndex);
     if (!baseLevel || this.session.players.length === 0) {
       this.showFatalError();
@@ -286,18 +342,18 @@ export class GameScene extends Phaser.Scene {
     }
     // dev : `?dark=1` force toutes les salles sombres (clone du niveau ; brasero virtuel en mode DEV uniquement)
     const search = typeof window !== 'undefined' ? window.location.search : '';
-    const level = !tut && !demo && isDevDarkAllowed(search, import.meta.env.DEV) ? forceDarkLevel(baseLevel, import.meta.env.DEV) : baseLevel;
+    const level = !tut && !demo && !netInfo && isDevDarkAllowed(search, import.meta.env.DEV) ? forceDarkLevel(baseLevel, import.meta.env.DEV) : baseLevel;
     this.level = level;
     // Tutoriel : 2 joueurs simulés (le joueur + le partenaire scripté) mais UNE seule vue / UNE seule entrée humaine.
     const setups = tut ? tutorialPlayers(this.session.players[0]) : this.session.players;
     const playerCount = Math.max(1, Math.min(4, setups.length));
-    const viewCount = tut ? 1 : playerCount;
+    const viewCount = tut || netInfo ? 1 : playerCount; // tutoriel et réseau : une seule vue (celle du joueur local) pour plusieurs joueurs simulés
     this.kills = Array.from({ length: playerCount }, () => 0);
     this.downs = Array.from({ length: playerCount }, () => 0);
 
     // simulation (graine dérivée d'un compteur + horloge : la scène peut utiliser Date.now, pas le core)
     sessionCounter++;
-    const seed = tut ? TUTORIAL_SEED : demo ? demo.seed : (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0;
+    const seed = tut ? TUTORIAL_SEED : demo ? demo.seed : netInfo ? netInfo.seed : (Date.now() ^ Math.imul(sessionCounter, 0x9e3779b1)) >>> 0; // réseau : graine tirée par l'hôte (commune aux deux rôles)
     // Salle de départ : reprise d'une sauvegarde ou dev `?room=N` (honorée par la simulation, voir SimConfig.startRoomIndex).
     const players = setups.slice(0, playerCount);
     // Appel automatique (objet laissé aux coéquipiers, échange d'accessoire, croix rouge) : partie normale ET tutoriel (il y enseigne les 4 déclencheurs), pas en démo ; aucun autre effet sur le jeu.
@@ -309,11 +365,11 @@ export class GameScene extends Phaser.Scene {
         levelId: level.id,
         players,
         seed,
-        startRoomIndex: this.session.startRoomIndex,
+        startRoomIndex: netInfo ? undefined : this.session.startRoomIndex, // réseau : toujours la première salle (ni reprise, ni dev)
         // gear / gearDrops / loot / autoCall / heartSlot selon le mode (testé : `modeSimFlags`). Tutoriel : aucun butin aléatoire (les cœurs et les objets d'équipement sont posés par le script : l'emplacement est vide à l'arrivée dans la salle du cœur) ; l'équipement y est actif (rangée du HUD, ramassage, échange, appel).
         ...modeSimFlags({ tutorial: !!tut, demo: !!demo }),
-        initialGear: tut || demo ? undefined : this.session.startGear,
-        initialHearts: tut || demo ? undefined : this.session.startHearts,
+        initialGear: tut || demo || netInfo ? undefined : this.session.startGear,
+        initialHearts: tut || demo || netInfo ? undefined : this.session.startHearts,
       },
       level,
     );
@@ -321,7 +377,8 @@ export class GameScene extends Phaser.Scene {
     // Sauvegarde automatique : désactivée en démarrage rapide, `?nosave=1` et paramètres de dev (la vraie sauvegarde n'est jamais écrasée).
     // Tutoriel : AUCUN AutoSaver (le niveau n'est pas dans le contexte de sauvegarde, et rien ne doit jamais être écrit).
     // Démo : AUCUN AutoSaver non plus (`isSavingAllowed({ demo: true })` vaut false) : la démo n'écrit jamais rien.
-    if (!tut && !demo) {
+    // Réseau : AUCUN AutoSaver non plus (ni côté hôte ni côté invité : une partie réseau n'écrit jamais de sauvegarde).
+    if (!tut && !demo && !netInfo) {
       this.autoSaver = new AutoSaver({
         repository: getSaveRepository(),
         context: getSaveContext(),
@@ -344,7 +401,7 @@ export class GameScene extends Phaser.Scene {
     // vues
     ensureFxTextures(this);
     this.layout = computeLayout(viewCount);
-    this.rig = new ViewRig(this, this.layout);
+    this.rig = netInfo ? new NetViewRig(this, this.layout, netInfo.localPlayerId) : new ViewRig(this, this.layout);
     this.fx = new FxManager(this, this.rig, this.layout.zoom);
     this.specialFx = new SpecialFx(this, this.rig, this.fx);
     this.ctx = { scene: this, rig: this.rig, fx: this.fx, zoom: this.layout.zoom, playerCount };
@@ -362,13 +419,14 @@ export class GameScene extends Phaser.Scene {
       ctx: this.ctx,
       level,
       layout: this.layout,
-      specialHint: (id) => specialHintLabel(inputManager.getAssignments()[id], inputManager.getBindings().special),
+      specialHint: (id) => specialHintLabel(inputManager.getAssignments()[netInfo ? 0 : id], inputManager.getBindings().special), // réseau : l'appareil local est l'entrée 0, quel que soit son identifiant de jeu
       gear: state.gearEnabled !== false, // rangée d'équipement : partie et tutoriel (équipement actif, sans butin aléatoire) ; pas dans la démo
       heartSlot: state.heartSlot === true, // emplacement cœur (partie et tutoriel, pas la démo)
-      heartHint: (id) => specialHintLabel(inputManager.getAssignments()[id], inputManager.getBindings().heart),
+      heartHint: (id) => specialHintLabel(inputManager.getAssignments()[netInfo ? 0 : id], inputManager.getBindings().heart),
     };
     createSeparators(this.ctx, this.layout);
-    this.huds = state.players.slice(0, viewCount).map((p) => new PlayerHud(env, p.id, p));
+    // réseau : le HUD du joueur local (identifiant 1..3 pour un invité) dans l'unique vue 0 ; sinon joueur i = vue i
+    this.huds = netInfo ? [new PlayerHud(env, netInfo.localPlayerId, state.players[netInfo.localPlayerId], 0)] : state.players.slice(0, viewCount).map((p) => new PlayerHud(env, p.id, p));
     if (this.layout.teamPanel) this.teamPanel = new TeamPanelHud(env, this.layout.teamPanel, state.players);
     this.overlay = new GameOverlay(this.ctx, level);
     this.pauseMenu = new PauseMenu(this.ctx);
@@ -393,6 +451,8 @@ export class GameScene extends Phaser.Scene {
       this.tutorialHud = new TutorialHud(this.ctx, this.layout.viewports[0]);
       this.tutorialHud.setSkipHandler(() => this.doTutorialSkip());
     }
+
+    if (netInfo) this.initNet(netInfo, netHost, netClient);
 
     // construction de la vue de la salle de départ
     this.buildRoom('start');
@@ -487,6 +547,12 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // Partie réseau : boucle séparée (hôte : simulation + diffusion ; invité : miroir), le reste de `update` est le chemin LOCAL, inchangé.
+    if (this.net) {
+      this.updateNet(dt);
+      return;
+    }
+
     // Démo : chronomètre en temps réel + détection d'activité (toute action du joueur interrompt la démo).
     const demoFlow = this.demoFlow;
     if (demoFlow) {
@@ -553,9 +619,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Synchronise vues, caméras, FX, HUD et bandeaux avec l'état courant. */
-  private syncViews(dtMs: number, stepped: boolean, alpha: number): void {
+  private syncViews(dtMs: number, stepped: boolean, alpha: number, timeOverrideMs?: number): void {
     const s = this.sim.state;
-    const timeMs = s.timeMs;
+    const timeMs = timeOverrideMs ?? s.timeMs; // invité réseau : temps d'animation interpolé entre deux instantanés
     this.sinceEnterMs += dtMs;
 
     for (let i = 0; i < this.playerViews.length; i++) {
@@ -582,9 +648,15 @@ export class GameScene extends Phaser.Scene {
 
     const snap = this.snapCameras;
     this.snapCameras = false;
-    for (let i = 0; i < this.playerViews.length; i++) {
-      const pv = this.playerViews[i];
-      this.rig.follow(i, { x: pv.x, y: pv.y - 3 }, dtMs, snap);
+    if (this.net) {
+      // réseau : une seule caméra (vue 0), sur le héros de CET appareil
+      const mine = this.playerViews[this.net.info.localPlayerId];
+      if (mine) this.rig.follow(0, { x: mine.x, y: mine.y - 3 }, dtMs, snap);
+    } else {
+      for (let i = 0; i < this.playerViews.length; i++) {
+        const pv = this.playerViews[i];
+        this.rig.follow(i, { x: pv.x, y: pv.y - 3 }, dtMs, snap);
+      }
     }
 
     this.fx.update(dtMs);
@@ -648,7 +720,8 @@ export class GameScene extends Phaser.Scene {
         if (downed) {
           const name = t(`character.${downed.characterId}.name`);
           for (let j = 0; j < this.huds.length; j++) {
-            if (j !== e.playerId && state.players[j]?.status === 'alive') this.huds[j].showToast(t('game.allyDown', { name }), PLAYER_COLORS[e.playerId], 2400);
+            const owner = playerOfView(this.net?.info.localPlayerId ?? null, j); // joueur dont le HUD est la vue j (identité hors réseau)
+            if (owner !== e.playerId && state.players[owner]?.status === 'alive') this.huds[j].showToast(t('game.allyDown', { name }), PLAYER_COLORS[e.playerId], 2400);
           }
         }
         this.rig.shake(240, 0.006, e.playerId);
@@ -826,7 +899,7 @@ export class GameScene extends Phaser.Scene {
         break;
       }
       case 'specialReady': {
-        this.huds[e.playerId]?.flashSpecialReady();
+        this.hudOf(e.playerId)?.flashSpecialReady();
         const pos = this.playerPos(e.playerId, state);
         this.specialFx.readyFlash(pos.x, pos.y, PLAYER_COLORS[e.playerId] ?? 0xffffff);
         break;
@@ -870,7 +943,7 @@ export class GameScene extends Phaser.Scene {
         }
         this.rig.shake(160, 0.004);
         for (let j = 0; j < this.huds.length; j++) {
-          if (state.players[j]?.status === 'alive') this.huds[j].showToast(t('hud.hourglass.emptyToast'), 0xff7a4a, 2600);
+          if (state.players[playerOfView(this.net?.info.localPlayerId ?? null, j)]?.status === 'alive') this.huds[j].showToast(t('hud.hourglass.emptyToast'), 0xff7a4a, 2600);
         }
         break;
       }
@@ -891,7 +964,7 @@ export class GameScene extends Phaser.Scene {
           fx.burst(c.x, c.y - 6, 12, 0xffa03c, 46, 600, -24);
           fx.sparkles(c.x, c.y - 8, 0xffe0a0, 10, 8);
         }
-        this.huds[e.playerId]?.showToast(t('hud.brazier.lit'), 0xffc86a, 1500);
+        this.hudOf(e.playerId)?.showToast(t('hud.brazier.lit'), 0xffc86a, 1500);
         break;
       }
       case 'torchRefueled': {
@@ -900,19 +973,19 @@ export class GameScene extends Phaser.Scene {
         fx.ring(pos.x, pos.y, 0xffd27a, 26, 450);
         const c = this.roomView?.centerOfMechanism(e.brazierId);
         if (c) fx.pulse(c.x, c.y - 4, 0xffd27a);
-        this.huds[e.playerId]?.showToast(t('hud.torch.refueled'), 0xffd27a, 1400);
-        this.huds[e.playerId]?.flashTorch(state.timeMs);
+        this.hudOf(e.playerId)?.showToast(t('hud.torch.refueled'), 0xffd27a, 1400);
+        this.hudOf(e.playerId)?.flashTorch(state.timeMs);
         break;
       }
       case 'torchLow':
-        this.huds[e.playerId]?.showToast(t('hud.torch.low'), 0xffa040, 3200);
-        this.huds[e.playerId]?.flashTorch(state.timeMs, 1400);
+        this.hudOf(e.playerId)?.showToast(t('hud.torch.low'), 0xffa040, 3200);
+        this.hudOf(e.playerId)?.flashTorch(state.timeMs, 1400);
         break;
       case 'torchOut': {
         const pos = this.playerPos(e.playerId, state);
         fx.burst(pos.x, pos.y - 8, 7, 0xa8a8b8, 22, 650, -14);
-        this.huds[e.playerId]?.showToast(t('hud.torch.out'), 0xff5a5a, 3200);
-        this.huds[e.playerId]?.flashTorch(state.timeMs, 1400);
+        this.hudOf(e.playerId)?.showToast(t('hud.torch.out'), 0xff5a5a, 3200);
+        this.hudOf(e.playerId)?.flashTorch(state.timeMs, 1400);
         break;
       }
       case 'mechanismChanged': {
@@ -924,7 +997,7 @@ export class GameScene extends Phaser.Scene {
       case 'keyPicked': {
         const pos = this.playerPos(e.playerId, state);
         fx.sparkles(pos.x, pos.y - 4, PLAYER_COLORS[e.playerId], 12, 8);
-        this.huds[e.playerId]?.showToast(t('hud.key.have'), PLAYER_COLORS[e.playerId]);
+        this.hudOf(e.playerId)?.showToast(t('hud.key.have'), PLAYER_COLORS[e.playerId]);
         break;
       }
       case 'doorOpened': {
@@ -954,7 +1027,7 @@ export class GameScene extends Phaser.Scene {
         const pos = this.playerPos(e.playerId, state);
         fx.sparkles(pos.x, pos.y - 6, 0x7dffb0, 14, 9);
         fx.ring(pos.x, pos.y, 0x7dffb0, 30, 520);
-        if (def) this.huds[e.playerId]?.showToast(`${t('hud.done')} - ${t(def.labelKey)}`, 0x8dffa8);
+        if (def) this.hudOf(e.playerId)?.showToast(`${t('hud.done')} - ${t(def.labelKey)}`, 0x8dffa8);
         break;
       }
       case 'roomCleared': {
@@ -972,6 +1045,170 @@ export class GameScene extends Phaser.Scene {
       default:
         break;
     }
+  }
+
+  // ───────────────────────────── Partie réseau ─────────────────────────────
+
+  /** HUD du joueur `id` (undefined s'il n'en a pas : en réseau, seul le joueur de CET appareil en a un). Hors réseau : `huds[id]`, comme toujours. */
+  private hudOf(id: PlayerId): PlayerHud | undefined {
+    return this.huds[viewOfPlayer(this.net?.info.localPlayerId ?? null, id)];
+  }
+
+  /** Branche la scène sur les sessions réseau (créées par le salon, rangées dans `netRuntime`) : bandeau d'état, fin de partie, perte de l'hôte, perte d'un invité. */
+  private initNet(info: NetSessionInfo, host: HostSessionApi | null, client: ClientSessionApi | null): void {
+    const net: NetMode = { info, host, client, clock: new MirrorClock(), gate: new SnapshotGate(), hud: null, lastSnapAtMs: null, mask: null, offs: [], warned: false };
+    this.net = net;
+    net.hud = new NetGameHud(this.ctx, info.localPlayerId, info.names);
+    if (client) {
+      net.hud.setStall('waiting'); // jusqu'au premier instantané : « En attente de l'hôte… »
+      // l'hôte met fin à la partie (niveau terminé, il quitte) : tout le monde retourne au salon, la liaison reste ouverte
+      net.offs.push(
+        client.onEnd((reason) => {
+          if (this.leaving || this.failed) return;
+          this.leaveToLobby(noticeForEnd(reason));
+        }),
+      );
+      // l'hôte est perdu ou a fermé le salon : retour au menu avec un message
+      net.offs.push(
+        client.onClosed((closed) => {
+          if (this.leaving || this.failed) return;
+          this.leaveToMenu(noticeForClose(closed) ?? undefined);
+        }),
+      );
+    }
+    if (host) {
+      // un invité perdu : sa partie continue sans lui (frame vide, son héros reste immobile) ; on le dit
+      net.offs.push(
+        host.onPeerEvent((e) => {
+          if (e.type === 'joined') return;
+          this.huds[0]?.showToast(t('net.game.peerLost', { name: e.name }), 0xff9a6a, 3200);
+        }),
+      );
+    }
+  }
+
+  /** Boucle d'une partie réseau (appelée par `update` à la place du chemin local). */
+  private updateNet(dt: number): void {
+    const net = this.net as NetMode;
+    const now = performance.now(); // même horloge que le salon : les sessions mesurent leurs silences avec elle
+    // Pause : le menu s'ouvre et se ferme comme d'habitude, mais la partie CONTINUE (docs/NET.md § 7.5) ; pas de pause « manette déconnectée » en réseau.
+    if (this.pollPadStart() && !this.leaving) {
+      if (this.paused) this.closePause();
+      else this.openPause(pauseOwnerForPad(this.lastStartPad));
+    }
+    if (this.paused) this.updatePause();
+    if (net.host) this.updateNetHost(net, net.host, dt, now);
+    else if (net.client) this.updateNetClient(net, net.client, dt, now);
+
+    // Fin de niveau : la célébration puis, côté hôte, fin de la partie pour tous (le salon) ; l'invité attend le message `end` de l'hôte.
+    if (this.finishing && !this.leaving) {
+      this.finishMs += dt;
+      if (levelEndAction(net.info.role, true, this.finishMs, CELEBRATION_MS) === 'endGame' && net.host) {
+        net.host.endGame('levelCompleted');
+        this.leaveToLobby(noticeForEnd('levelCompleted'));
+      }
+    }
+  }
+
+  /** Hôte : simulation à 60 Hz avec SES entrées (joueur 0) et celles des invités, instantané diffusé par la session tous les 3 pas. */
+  private updateNetHost(net: NetMode, host: HostSessionApi, dt: number, now: number): void {
+    const state = this.sim.state;
+    let stepped = false;
+    let alpha = 1;
+    if (!this.leaving) {
+      host.update(now);
+      // B (utiliser le cœur) masqué tant qu'il n'a pas été relâché ; menu de pause ouvert : le joueur local ne pilote plus (frame vide), la partie continue
+      const cur: TickInputs = this.paused ? {} : this.heartGuard.filter(inputManager.poll());
+      this.lastPolled = cur;
+      this.latched = mergeTickInputs(this.latched, cur);
+      const plan = planSteps(this.accumulatorMs, dt, SIM_STEP_MS, MAX_STEPS_PER_FRAME);
+      this.accumulatorMs = plan.accumulatorMs;
+      alpha = plan.alpha;
+      for (let i = 0; i < plan.steps; i++) {
+        const local = i === 0 ? (this.latched ?? cur) : cur; // appuis courts conservés comme en local
+        const inputs = composeHostInputs(host.pollRemoteInputs(), localNetFrame(this.paused, local));
+        const events = this.sim.step(SIM_STEP_MS, inputs);
+        if (i === 0) this.latched = null;
+        stepped = true;
+        host.afterStep(state, events); // accumule les événements, émet un instantané tous les 3 pas
+        for (let k = 0; k < events.length; k++) this.handleEvent(events[k], state);
+      }
+    }
+    if (state.roomIndex !== this.viewRoomIndex || this.forceRebuild) this.buildRoom(this.pendingReason);
+    this.syncViews(dt, stepped, alpha);
+    net.hud?.update(state, host.connectedMask(), dt);
+  }
+
+  /** Invité : AUCUN pas de simulation. Envoie ses entrées, applique le dernier instantané reçu au miroir, rejoue les événements reçus, interpole avec un intervalle de retard. */
+  private updateNetClient(net: NetMode, client: ClientSessionApi, dt: number, now: number): void {
+    const state = this.sim.state;
+    if (!this.leaving) {
+      client.update(now); // peut fermer la session (hôte perdu) : `leaveToMenu` est alors déjà parti
+      if (!this.leaving) {
+        const cur: TickInputs = this.paused ? {} : this.heartGuard.filter(inputManager.poll());
+        this.lastPolled = cur;
+        client.sendInput(localNetFrame(this.paused, cur) ?? NET_EMPTY_FRAME, now); // la session cadence (30 Hz) et mémorise les appuis courts
+        const snap = client.takeSnapshot();
+        if (snap && net.gate.accept(snap)) this.applyNetSnapshot(net, snap);
+      }
+    }
+    if (state.roomIndex !== this.viewRoomIndex || this.forceRebuild) this.buildRoom(this.pendingReason);
+    const view = net.clock.advance(dt);
+    this.syncViews(dt, view.stepped, view.alpha, net.clock.hasSnapshot ? view.timeMs : undefined);
+    net.hud?.setStall(stallStatus(now, net.lastSnapAtMs));
+    net.hud?.update(state, net.mask, dt);
+  }
+
+  /** Applique un instantané : état (validé par le miroir), horloge d'interpolation, joueurs perdus, événements (sons, FX, textes) ; un état invalide quitte la partie. */
+  private applyNetSnapshot(net: NetMode, snap: NetSnapshot): void {
+    const result = this.sim.applyMirrorState(snap.state);
+    if (!result.ok) {
+      console.warn('[net] état reçu rejeté :', result.reason);
+      this.leaveToMenu({ code: 'protocolError' });
+      return;
+    }
+    const state = this.sim.state;
+    net.clock.feed(state.timeMs, snap.intervalMs);
+    net.lastSnapAtMs = snap.receivedAtMs;
+    for (const id of lostPeers(net.mask, snap.connectedMask, state.playerCount, net.info.localPlayerId)) {
+      this.huds[0]?.showToast(t('net.game.peerLost', { name: playerDisplayName(net.info.names, id) }), 0xff9a6a, 3200);
+    }
+    net.mask = snap.connectedMask;
+    // un événement mal formé ne doit jamais faire tomber le rendu
+    for (const e of snap.events) {
+      try {
+        this.handleEvent(e, state);
+      } catch (err) {
+        if (!net.warned) {
+          net.warned = true;
+          console.warn('[net] événement reçu ignoré :', err);
+        }
+      }
+    }
+  }
+
+  /** Quitter la partie depuis le menu de pause : l'hôte met fin à la partie pour tous et retourne au salon ; l'invité part (session libérée) et retourne au menu, sans message. */
+  private quitNetGame(): void {
+    const net = this.net;
+    if (!net || this.leaving) return;
+    if (net.host) {
+      net.host.endGame('hostQuit');
+      this.leaveToLobby();
+    } else this.leaveToMenu();
+  }
+
+  /** Retour au salon réseau : la session (liaisons) survit, le salon la retrouve dans `netRuntime`. */
+  private leaveToLobby(notice?: NetNotice): void {
+    const data: NetLobbySceneData = { entry: 'return', ...(notice ? { notice } : {}) };
+    this.leaveTo(SCENE_KEYS.NetLobby, data);
+  }
+
+  /** Sortie du multijoueur : la session est libérée (`leave` envoyé, liaisons fermées) puis retour au menu, avec un message éventuel. */
+  private leaveToMenu(notice?: NetNotice): void {
+    if (this.leaving) return;
+    clearNetRuntime();
+    const data: MenuSceneData | undefined = notice ? { notice } : undefined;
+    this.leaveTo(SCENE_KEYS.Menu, data);
   }
 
   // ───────────────────────────── Tutoriel ─────────────────────────────
@@ -1128,6 +1365,7 @@ export class GameScene extends Phaser.Scene {
     this.accumulatorMs = 0;
     this.pauseNav = new MenuNavigator(); // ignore les touches déjà tenues (celle qui a ouvert la pause)
     this.pauseMenu.show();
+    if (this.net) this.huds[0]?.showToast(t('net.game.pauseNote'), 0xffd27a, 3500); // la partie continue pendant ce menu
   }
 
   /** `restoreMusic = false` : la partie se quitte, la musique reste baissée jusqu'à son fondu de sortie (lancé par `leaveTo`). */
@@ -1178,7 +1416,8 @@ export class GameScene extends Phaser.Scene {
           } else {
             // Quitter : pas de dé-ducking (la musique remonterait de 35 % vers 100 % pendant 0,15 s juste avant son fondu de sortie).
             this.closePause(false);
-            this.leaveTo(SCENE_KEYS.Menu);
+            if (this.net) this.quitNetGame();
+            else this.leaveTo(SCENE_KEYS.Menu);
             return;
           }
           break;
@@ -1259,7 +1498,8 @@ export class GameScene extends Phaser.Scene {
     const players = this.sim.state.players;
     this.roomView?.retranslate();
     this.lifeViews?.retranslate();
-    this.huds.forEach((h, i) => h.retranslate(players[i]));
+    this.huds.forEach((h, i) => h.retranslate(players[playerOfView(this.net?.info.localPlayerId ?? null, i)]));
+    this.net?.hud?.retranslate();
     this.teamPanel?.retranslate(players);
     this.overlay.retranslate();
     this.demoOverlay?.retranslate();
@@ -1277,6 +1517,12 @@ export class GameScene extends Phaser.Scene {
     this.demoFlow = null;
     this.offLanguage?.();
     this.offLanguage = null;
+    if (this.net) {
+      for (const off of this.net.offs) off(); // la session réseau n'est PAS fermée ici : elle survit (retour au salon) ou est libérée par la sortie
+      this.net.offs.length = 0;
+      this.net.hud?.destroy();
+      this.net.hud = null;
+    }
     this.input.keyboard?.off('keydown-ESC', this.onEscape);
     this.input.keyboard?.off('keydown-M', this.onMute);
     this.input.keyboard?.off('keydown-ENTER', this.onEnter);

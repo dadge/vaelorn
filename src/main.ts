@@ -1,6 +1,6 @@
 /**
  * Point d'entrée : configuration Phaser 3 (canvas logique 1280×720, Scale.FIT centré, pixel art, manettes)
- * et liste des scènes : Boot → Menu → CharacterSelect → Dialogue → Game → Result.
+ * et liste des scènes : Boot → Menu → CharacterSelect → Dialogue → Game → Result (+ NetLobby : salon du multijoueur réseau, ouvert depuis le menu, puis Game).
  *
  * PARAMÈTRES D'URL (dev / tests automatiques — voir menuLogic.parseQuickParams) :
  *   ?quick=1&players=2&level=2&chars=david,sandrine&diff=1,2&lang=en&room=3[&p1pad=1][&debug=1]
@@ -14,7 +14,8 @@
  *   - attract=0|1 : mode démo (« attract mode », src/attract/) désactivé / forcé (même en mode de test : quick, tutorial, nosave…) ;
  *     attractIdle=<secondes> : inactivité avant la démo (défaut 60) ; attractDemo=<secondes> : durée de la démo (défaut 30)
  *     (ex. `?attractIdle=5&attractDemo=10`).
- *   - music=0|1 : force la musique de fond désactivée / activée SANS toucher au réglage mémorisé (src/audio/musicSettings.ts).
+ *   - music=0|1 : force la musique de fond désactivée / activée SANS toucher au réglage mémorisé (src/audio/musicSettings.ts) ;
+ *   - net=bc : salon réseau en mode DÉVELOPPEMENT (BroadcastChannel : deux fenêtres du même navigateur, sans copier-coller de codes) au lieu de WebRTC (docs/NET.md).
  * `window.__vaelorn = { game }` est exposé en mode dev (import.meta.env.DEV), avec ?debug=1 ou ?quick=1 ;
  * en démarrage rapide un événement `vaelorn:quickstart` (detail = GameSession) est émis sur `window`.
  */
@@ -36,6 +37,7 @@ import { CharacterSelectScene } from './scenes/CharacterSelectScene';
 import { DialogueScene } from './scenes/DialogueScene';
 import { GameScene } from './scenes/GameScene';
 import { MenuScene } from './scenes/MenuScene';
+import { NetLobbyScene } from './scenes/NetLobbyScene';
 import { ResultScene } from './scenes/ResultScene';
 
 declare global {
@@ -90,7 +92,7 @@ function start(): void {
     // Le plugin manette de Phaser n'est PAS utilisé (src/input lit navigator.getGamepads) et plante à la fermeture
     // d'une scène quand les indices de manettes ne sont pas contigus (trou dans `gamepads`) : désactivé.
     input: { gamepad: false },
-    scene: [BootScene, MenuScene, CharacterSelectScene, DialogueScene, GameScene, ResultScene],
+    scene: [BootScene, MenuScene, CharacterSelectScene, DialogueScene, NetLobbyScene, GameScene, ResultScene],
   };
 
   const game = new Phaser.Game(config);

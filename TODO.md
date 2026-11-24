@@ -186,9 +186,35 @@ Effets de bord de la progression (non corrigés volontairement) :
 - [ ] Packaging Capacitor, icônes, écran de démarrage, orientation paysage.
 - [ ] Adaptation aux tailles d'écran / HUD pour petit écran ; tests de performance sur appareils modestes.
 
+## Multijoueur en réseau local (prototype ; voir README « Multijoueur en réseau local (prototype) » et docs/NET.md ; prouvé par tests (Loopback, faux transports, faux WebRTC) et vérifié dans un navigateur de bureau, deux fenêtres BroadcastChannel et deux vraies connexions WebRTC dans un même navigateur ; JAMAIS essayé sur de vrais téléphones ni derrière un point d'accès)
+
+Livré : hôte autoritaire (simulation à 60 Hz sur l'hôte, instantanés à 20 Hz avec événements, miroir côté invité), trois transports (Loopback, BroadcastChannel `?net=bc`, WebRTC à signalisation manuelle sans serveur), salon (personnages uniques, niveau et difficulté choisis par l'hôte), vérification de version, déconnexions (invité perdu = frame vide, hôte perdu = retour au menu avec message), ligne « Multijoueur réseau » du menu.
+
+À valider à la main :
+
+- [ ] **Connexion sur de vrais téléphones** (risque majeur, à tester en premier) : partage de connexion Wi-Fi d'un Android puis d'un iPhone, 2 puis 3 invités ; la collecte ICE aboutit-elle (code d'invitation produit en moins de 4 s) ? Le canal s'ouvre-t-il malgré mDNS (`xxxx.local`) et l'isolation des clients ? Quels messages d'erreur voit-on quand ça échoue (délai ICE dépassé, échec de connexion) ? Si ça échoue : hôte natif Capacitor ou relais WebSocket local.
+- [ ] **Latence réelle** : ressentie entre l'entrée et l'écran de l'invité (estimation 100 à 200 ms sans prédiction) ; relever, pendant une partie, l'aller-retour (`rttMs()`), l'intervalle d'instantané et `bufferedAmount` (`stats()` des sessions) ; le jeu est-il jouable sans prédiction (esquives, attaques de boss) ? L'interpolation est-elle fluide (pas de saccades ni de téléportations) ?
+- [ ] **Déconnexion** : couper le Wi-Fi d'un invité, fermer son onglet, verrouiller son écran : l'hôte affiche le message (perte après 6 s), la partie continue, le héros de l'invité reste immobile ; couper l'hôte : les invités reviennent au menu avec le message traduit (« hôte perdu », puis après un départ propre : « l'hôte a fermé le salon »). Aucune erreur dans la console ; plus aucun canal ouvert après le retour au menu.
+- [ ] **Fragmentation et gros états** : niveau à 40 ennemis (niveau 5) à 4 joueurs : états fragmentés (> 12 000 caractères) bien réassemblés, pas de blocage ; l'hôte saute des instantanés sur canal saturé sans geler (débit au pire cas ≈ 19 Mbit/s en émission, voir docs/NET.md § 2) ; une perte de paquet (canal fiable) provoque-t-elle des rafales visibles ?
+- [ ] **Chauffe et batterie de l'hôte** : l'hôte simule à 60 Hz ET diffuse à 3 invités : température, consommation et baisse de fréquence d'images après 10 à 20 minutes sur un téléphone modeste ; l'invité (rendu seul) est-il plus sobre ?
+- [ ] **Vérification de version** : deux builds différents (hash ou date) : refus explicite avec message dans la langue de l'invité ; PWA installée en cache après un déploiement : message clair ?
+- [ ] **Salon** : unicité des personnages (deux invités veulent le même), invité qui arrive avec un personnage pris, départ d'un invité au salon, 4e invité refusé (« salon plein »), arrivée pendant une partie refusée (« partie en cours »), retour au salon après un niveau terminé (niveau suivant présélectionné), relance d'une partie sans reconnexion.
+- [ ] **Interface du salon sur téléphone** : copier le code d'invitation (bouton « Copier » et repli manuel), coller par appui long, collage d'un code tronqué ou altéré (message d'erreur, invitation conservée : la zone de réponse reste affichée et recollable), Échap / B côté hôte avec invités connectés (demande un second appui dans les 3 s avant de fermer le salon), code de réponse renvoyé, mise en page paysage avec la manette tactile, lisibilité des zones de saisie ; la ligne « Multijoueur réseau » du menu (16 lignes sélectionnables au plus, lignes plus basses) reste lisible sur un petit écran.
+- [ ] **En partie** : caméra et HUD du bon joueur (identifiant 1 à 3 dans l'unique vue), énigme de runes visible seulement du joueur voyant, secousse d'écran seulement pour le joueur touché, bandeau des PV des autres, textes « en attente de l'hôte » / « connexion instable », pause qui ne fige pas (toast), fin de niveau : célébration puis retour au salon pour tous, aucune sauvegarde écrite (vérifier `vaelorn.save` avant / après).
+- [ ] **Veille / arrière-plan** : écran qui s'éteint, application mise en arrière-plan, onglet caché (deux onglets BroadcastChannel dans une même fenêtre : l'onglet caché gèle sa boucle) : combien de temps avant la perte ? Utile : verrou d'écran (`navigator.wakeLock`) côté hôte.
+- [ ] **Local intact** : une partie locale à 1, 2 et 4 joueurs, le tutoriel, la démo, « Continuer » et la sauvegarde se comportent comme avant (seule nouveauté visible : la ligne « Multijoueur réseau » du menu).
+
+Reste à faire (hors prototype) :
+
+- [ ] **QR codes** : le code d'invitation / de réponse (≈ 320 caractères en pratique) tient dans un QR (génération locale et lecture caméra, contexte sécurisé), collage manuel conservé.
+- [ ] **Prédiction côté invité** (joueur local simulé localement et réconcilié à chaque instantané) : exige un accusé d'entrée (changement de protocole).
+- [ ] **Reconnexion en cours de partie** (jeton de reprise, réattribution du joueur immobile, instantané complet immédiat).
+- [ ] **Hôte natif Capacitor** (vrai port d'écoute, nouveau `Transport` WebSocket, plus de signalisation manuelle ni de problème mDNS).
+- [ ] Compaction de l'instantané (protocole v2), verrou d'écran, panneau d'équipe réseau complet, pause réseau avec accord des joueurs, sauvegarde d'une partie réseau (côté hôte), tutoriel à plusieurs, campagne enchaînée en réseau.
+
 ## Multijoueur en ligne (voir README, « Multijoueur en ligne futur »)
 
-- [ ] Choisir le modèle réseau (lockstep déterministe ou hôte autoritaire) et le transport (WebRTC/WebSocket).
+- [x] Choisir le modèle réseau (hôte autoritaire) et le transport (WebRTC DataChannel à signalisation manuelle pour le réseau local) : fait pour le prototype local, voir la section ci-dessus. Reste ouvert : jeu au-delà du réseau local (serveur de signalisation, STUN/TURN, WebSocket).
 - [ ] Implémenter `NetAdapter` (serveur/relais, appariement, reconnexion) et `RemoteInputSource` côté jeu.
 - [ ] Définir le protocole (versionnage), la gestion de la latence (prédiction/réconciliation) et l'anti-triche.
 - [ ] Mixer joueurs locaux (splitscreen) et distants.

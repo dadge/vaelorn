@@ -685,10 +685,14 @@ export class PlayerHud {
     }
   }
 
-  constructor(env: HudEnv, readonly playerId: PlayerId, p: PlayerState) {
+  /**
+   * @param viewIndex indice de la VUE (rectangle de `layout.viewports`) où ce HUD s'affiche ; par défaut l'identifiant du joueur (écran partagé : joueur i = vue i). En partie réseau, l'appareil local
+   *   est le joueur 1..3 dans l'UNIQUE vue 0 (docs/NET.md § 7.2) : `new PlayerHud(env, id, p, 0)`.
+   */
+  constructor(env: HudEnv, readonly playerId: PlayerId, p: PlayerState, viewIndex: number = playerId) {
     this.env = env;
     const { ctx, layout } = env;
-    this.vp = layout.viewports[playerId];
+    this.vp = layout.viewports[viewIndex];
     this.u = layout.zoom;
     this.fs = this.u >= 3 ? 17 : 13;
     this.color = PLAYER_COLORS[playerId];

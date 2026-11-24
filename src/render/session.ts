@@ -1,4 +1,5 @@
 import type { PickupKind, PlayerGear, PlayerId, PlayerSetup } from '../core/types';
+import type { NetNotice, NetSessionInfo } from '../net/contracts';
 import type { DeviceKind } from '../tutorial/types';
 
 /** Clés de scènes Phaser (une seule source de vérité). */
@@ -7,6 +8,8 @@ export const SCENE_KEYS = {
   Menu: 'Menu',
   CharacterSelect: 'CharacterSelect',
   Dialogue: 'Dialogue',
+  /** Salon du multijoueur réseau (hôte / invité) : voir docs/NET.md. */
+  NetLobby: 'NetLobby',
   Game: 'Game',
   Result: 'Result',
 } as const;
@@ -65,6 +68,12 @@ export interface GameSession {
    * scène de menu avec `Math.random`, jamais par le coeur). JSON pur.
    */
   demo?: { seed: number; durationMs: number };
+  /**
+   * Partie en RÉSEAU (un joueur par appareil, hôte autoritaire : docs/NET.md). Posé par `NetLobbyScene` au lancement, jamais par le jeu local. JSON pur : le transport et
+   * les sessions vivent dans `src/net/netRuntime.ts`. Quand il est présent : `GameScene` n'écrit AUCUNE sauvegarde (hôte comme invité), n'enchaîne pas la campagne
+   * (fin de niveau = retour au salon), n'a ni tutoriel ni démo ; sur un INVITÉ elle ne simule pas (elle affiche l'état reçu). Absent = partie locale, strictement inchangée.
+   */
+  net?: NetSessionInfo;
 }
 
 /** Données de MenuScene : session précédente (pour restaurer les choix en revenant au menu). */
@@ -75,6 +84,17 @@ export interface MenuSceneData {
    * a interrompu la démo ne doit pas valider un élément) et n'applique aucune session (la démo ne modifie pas les choix du joueur).
    */
   afterDemo?: boolean;
+  /** Message à afficher à l'arrivée (retour d'une partie réseau : hôte perdu, refus…). Rien d'autre ne change. */
+  notice?: NetNotice;
+}
+
+/**
+ * Données de NetLobbyScene. `menu` : arrivée depuis le menu principal (choix hôte / invité) ; `return` : retour d'une partie réseau, la session est DÉJÀ ouverte dans
+ * `netRuntime` (la scène affiche le salon et le `notice` éventuel, par exemple « Niveau terminé »).
+ */
+export interface NetLobbySceneData {
+  entry: 'menu' | 'return';
+  notice?: NetNotice;
 }
 
 /** Données de CharacterSelectScene : session construite par le menu (joueurs, difficultés, niveau de départ). */

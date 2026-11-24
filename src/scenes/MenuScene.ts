@@ -11,6 +11,11 @@
  * La manette qui lance « Jouer » réclame automatiquement l'emplacement 1 de l'écran de sélection.
  * Les choix sont mémorisés (localStorage) et passés à CharacterSelect sous forme de GameSession.
  *
+ * MULTIJOUEUR RÉSEAU (docs/NET.md) : la ligne « Multijoueur réseau » (sous « Tutoriel », visible partout) ouvre `NetLobbyScene` (salon : héberger ou rejoindre,
+ * un joueur par appareil sur le même réseau local). Au retour d'une partie ou d'un salon réseau, `MenuSceneData.notice` (hôte perdu, refus de version…) est affiché
+ * à la place de l'aide de la ligne, un instant. Cette ligne porte le menu à 16 lignes sélectionnables au plus : la hauteur des lignes s'adapte
+ * (`menuRowHeight`, src/render/menuLogic.ts) ; pour 1 à 15 lignes elle reste celle d'avant.
+ *
  * MODE DÉMO (« attract mode », src/attract/) : sur l'écran-titre PRINCIPAL (ni panneau « Contrôles », ni dialogue, ni transition), une
  * minuterie d'inactivité (`IdleTimer`, remise à zéro par toute activité : clavier, souris / toucher / molette, manette, langue ; en pause
  * quand l'onglet est caché ; suspendue tant que l'invite de rotation d'un téléphone en portrait masque le jeu) lance, au bout de
@@ -31,6 +36,7 @@ import { getMusic } from '../audio/music';
 import { musicSettings, stepVolume } from '../audio/musicSettings';
 import { SUPPORTED_LANGUAGES, getLanguage, setLanguage, t } from '../i18n/i18n';
 import { formatBuildLabel, getBuildInfo } from '../buildInfo';
+import { noticeKey, type NetNotice } from '../net/contracts';
 import { CHARACTERS } from '../core/characters';
 import { MenuNavigator, VIRTUAL_PAD_INDEX, inputManager, isNonStandardPad, listGamepads } from '../input';
 import type { MenuAction } from '../input';
@@ -38,8 +44,11 @@ import { ATLAS_KEY } from '../render/art';
 import { LEVELS, getLevelByIndex } from '../levels';
 import {
   MENU_CHOICES_STORAGE_KEY,
+  MENU_ROWS_TOP,
+  MENU_ROW_GAP,
   choicesFromSession,
   defaultMenuChoices,
+  menuRowHeight,
   parseChoices,
   serializeChoices,
   sessionFromChoices,
@@ -51,7 +60,7 @@ import {
   withStartLevel,
   type MenuChoices,
 } from '../render/menuLogic';
-import { SCENE_KEYS, type CharacterSelectSceneData, type GameSceneData, type MenuSceneData } from '../render/session';
+import { SCENE_KEYS, type CharacterSelectSceneData, type GameSceneData, type MenuSceneData, type NetLobbySceneData } from '../render/session';
 import { initialDeviceFromMenuSource } from '../tutorial/deviceHints';
 import { ActivityWatcher, carryActivity } from '../attract/activity';
 import { ATTRACT_RETURN_GRACE_MS, ATTRACT_START_FADE_MS, getAttractConfig } from '../attract/config';
@@ -96,25 +105,23 @@ import {
 
 const ROWS_X = 450;
 const ROWS_W = 780;
-const ROW_H = 34; // 12 lignes au plus (4 joueurs + Continuer + Effacer la sauvegarde) doivent tenir au-dessus de la ligne d'aide
-/** Avec la ligne « Tutoriel » (13 lignes sélectionnables au plus), les lignes sont un peu plus basses. */
-const ROW_H_COMPACT = 31;
-/** Nombre de lignes sélectionnables au-delà duquel on passe à `ROW_H_COMPACT`. */
-const COMPACT_ROWS_FROM = 12;
-/** Avec les lignes « Musique » et « Volume », 15 lignes sélectionnables au plus (sauvegarde + 4 joueurs) : lignes plus basses encore. */
-const ROW_H_TIGHT = 28;
-/** Nombre de lignes sélectionnables au-delà duquel on passe à `ROW_H_TIGHT`. */
-const TIGHT_ROWS_FROM = 13;
+/**
+ * Hauteur d'une ligne : fonction du nombre de lignes sélectionnables (`menuRowHeight`, src/render/menuLogic.ts) pour que tout tienne au-dessus de la ligne d'aide
+ * (34 jusqu'à 12 lignes, 31 pour 13, 28 pour 14 et 15, 26 pour 16 avec la ligne « Multijoueur réseau »).
+ */
+const ROW_H = menuRowHeight(0);
 /** Durée (s) du fondu de sortie de l'aperçu de la musique. */
 const MUSIC_PREVIEW_FADE_S = 0.3;
-const ROW_GAP = 3;
-const ROWS_TOP = 152;
+const ROW_GAP = MENU_ROW_GAP;
+const ROWS_TOP = MENU_ROWS_TOP;
 const VALUE_CX = 575;
 const VALUE_W = 380;
 const LABEL_MAX_W = 330;
 
 /** Durée (ms) d'affichage d'un message d'information (sauvegarde effacée…). */
 const NOTICE_MS = 3500;
+/** Durée (ms) d'affichage d'un message venu du réseau (hôte perdu, refus de version : plus long à lire). */
+const NET_NOTICE_MS = 7000;
 /** L'alerte « sauvegarde illisible » n'est affichée automatiquement qu'une fois par lancement du jeu. */
 let corruptNoticeShown = false;
 
@@ -205,8 +212,13 @@ export class MenuScene extends Phaser.Scene {
   private dialog: SaveDialog | null = null;
   private dialogObjects: Phaser.GameObjects.GameObject[] = [];
   private dialogButtons: UiButton[] = [];
-  /** Message d'information temporaire (affiché à la place de l'aide de la ligne). */
-  private notice: { text: string; until: number } | null = null;
+  /**
+   * Message d'information temporaire (affiché à la place de l'aide de la ligne). `net` : message venu du réseau, retraduit à chaque affichage (suit la langue) ;
+   * `until` vaut +Infinity jusqu'à la première image (l'horloge de la scène n'est connue qu'à `update`).
+   */
+  private notice: { text: string; until: number; net?: NetNotice } | null = null;
+  /** Message réseau reçu à l'arrivée (`MenuSceneData.notice`), affiché dès la création. */
+  private incomingNotice: NetNotice | null = null;
   /** Mode démo (null si désactivé : `?attract=0`, mode de test). */
   private attract: AttractRuntime | null = null;
   /** true dès que la démo est lancée (fondu en cours) : on continue de surveiller le joueur pour ne pas perdre une action. */
@@ -239,6 +251,7 @@ export class MenuScene extends Phaser.Scene {
     this.dialogObjects = [];
     this.dialogButtons = [];
     this.notice = null;
+    this.incomingNotice = data?.notice ?? null;
     this.lastSource = null;
     this.starting = false;
     this.demoLaunching = false;
@@ -279,6 +292,11 @@ export class MenuScene extends Phaser.Scene {
     });
     this.version.setAlpha(0.7);
 
+    // Message de retour d'une partie / d'un salon réseau : posé avant la construction des lignes (qui rafraîchit la ligne d'aide).
+    if (this.incomingNotice) {
+      this.notice = { text: '', until: Number.POSITIVE_INFINITY, net: this.incomingNotice };
+      this.incomingNotice = null;
+    }
     this.buildRows();
 
     // Navigation (créée APRÈS l'affichage : les touches déjà tenues sont ignorées jusqu'au relâchement).
@@ -317,6 +335,7 @@ export class MenuScene extends Phaser.Scene {
 
   update(time: number): void {
     this.lastTime = time;
+    if (this.notice && this.notice.until === Number.POSITIVE_INFINITY) this.notice.until = time + NET_NOTICE_MS;
     if (this.notice && time >= this.notice.until) {
       this.notice = null;
       this.refreshInfo();
@@ -496,6 +515,7 @@ export class MenuScene extends Phaser.Scene {
       confirm: () => this.onNewGame(),
     });
     specs.push({ id: 'tutorial', kind: 'action', label: () => t('menu.tutorial'), confirm: () => this.startTutorial() });
+    specs.push({ id: 'net', kind: 'action', label: () => t('menu.net'), confirm: () => this.openNet() });
     specs.push({
       id: 'players',
       kind: 'choice',
@@ -601,9 +621,10 @@ export class MenuScene extends Phaser.Scene {
     this.rows = [];
     let y = ROWS_TOP;
     const specs = this.specs();
-    // 13 lignes sélectionnables au plus (avec « Tutoriel ») : lignes un peu plus basses pour tout tenir au-dessus de la ligne d'aide
+    // 16 lignes sélectionnables au plus (sauvegarde + 4 joueurs + « Multijoueur réseau ») : lignes plus basses pour tout tenir au-dessus de la ligne d'aide
     const selectableCount = specs.filter((x) => x.kind !== 'note').length;
-    this.rowH = selectableCount > TIGHT_ROWS_FROM ? ROW_H_TIGHT : selectableCount > COMPACT_ROWS_FROM ? ROW_H_COMPACT : ROW_H;
+    const noteCount = specs.length - selectableCount;
+    this.rowH = menuRowHeight(selectableCount, noteCount);
     for (const spec of specs) {
       const view = this.createRowView(spec, y);
       this.rows.push(view);
@@ -700,12 +721,14 @@ export class MenuScene extends Phaser.Scene {
   private refreshInfo(): void {
     const sel = this.selectedId;
     if (this.notice) {
-      this.info.setText(this.notice.text);
+      this.info.setText(this.notice.net ? t(noticeKey(this.notice.net.code), this.notice.net.params) : this.notice.text);
     } else if (sel === 'continue' && this.saveState.kind === 'valid') {
       const names = this.saveState.save.players.map((p) => t(CHARACTERS[p.characterId].nameKey)).join(', ');
       this.info.setText(t('save.continue.team', { names }));
     } else if (sel === 'tutorial') {
       this.info.setText(t('menu.tutorial.hint'));
+    } else if (sel === 'net') {
+      this.info.setText(t('menu.net.hint'));
     } else if (sel === 'music' || sel === 'musicVolume') {
       this.info.setText(t('audio.hint'));
     } else if (sel.startsWith('diff')) {
@@ -806,6 +829,17 @@ export class MenuScene extends Phaser.Scene {
     const session = sessionForTutorial(this.lastCharacters, initialDeviceFromMenuSource(this.lastSource, padName), this.choices.playerCount);
     const data: GameSceneData = { session };
     transitionTo(this, SCENE_KEYS.Game, data);
+  }
+
+  /**
+   * « Multijoueur réseau » : ouvre le salon (`NetLobbyScene`, entrée `menu`). Comme le tutoriel, ne lit ni n'écrit aucune sauvegarde ni aucun choix du menu.
+   * Le salon n'a besoin d'aucun appareil de jeu : il se pilote au clavier, à la manette, à la souris et au toucher comme ce menu.
+   */
+  private openNet(): void {
+    if (this.starting) return;
+    this.starting = true;
+    const data: NetLobbySceneData = { entry: 'menu' };
+    transitionTo(this, SCENE_KEYS.NetLobby, data);
   }
 
   /** « Nouvelle partie » : confirmation avant d'écraser une sauvegarde existante (valide ou illisible), sinon on lance. */

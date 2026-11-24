@@ -154,6 +154,8 @@ import { dirFromVec, distSq, isDiagonal, pointInTileRect, tileCenter } from './g
 import { RoomGrid } from './grid';
 import { canAcceptHeart, canStoreHeart, heartCollectorFor, heartUseAmount, isHeartKind, mergeHeart, normalizeHeartField, planHeartUse } from './heartSlot';
 import { lightSources, type LightSource } from './light';
+import { cloneJson, validateMirrorState } from './mirror';
+import type { MirrorApplyResult } from '../net/contracts';
 import {
   areAllRequirementsMet,
   brazierAction,
@@ -495,6 +497,37 @@ export class GameSimulation implements IGameSimulation {
   /** Snapshot JSON du `GameState`. */
   serialize(): string {
     return JSON.stringify(this.state);
+  }
+
+  /**
+   * MIROIR RÉSEAU (invité d'une partie en ligne, docs/NET.md § 7.3) : remplace le contenu de `state` par un état AUTORITAIRE reçu de l'hôte. Méthode ADDITIVE : ni `step`, ni `restore`,
+   * ni `createSimulation` ne l'appellent ni n'en dépendent (une partie locale ne passe jamais ici).
+   *  1. l'état reçu est VALIDÉ en entier avant toute écriture (`validateMirrorState` : forme, plages, tailles, identifiants connus du niveau) : en cas d'échec, RIEN n'est modifié ;
+   *  2. il est copié (copie défensive : l'appelant garde son objet) SUR PLACE : l'identité de `this.state` est conservée, les clés absentes sont supprimées, l'ordre des clés est celui de l'état reçu ;
+   *  3. mêmes normalisations qu'à la construction (butin, équipement, appel automatique, emplacement cœur) : sans effet sur un état valide ;
+   *  4. la grille de la salle n'est reconstruite que si `roomIndex` change (`roomChanged`).
+   * Ne fait AUCUN pas, ne touche ni aux événements en attente ni aux flux aléatoires (ils vivent dans l'état copié). Un état reçu puis les mêmes entrées donnent le même déroulement que
+   * la simulation source.
+   */
+  applyMirrorState(next: unknown): MirrorApplyResult {
+    const problem = validateMirrorState(next, this.level, this.state.playerCount);
+    if (problem !== null) return { ok: false, reason: problem };
+    const incoming = cloneJson(next as GameState);
+    const roomChanged = incoming.roomIndex !== this.state.roomIndex;
+    const target = this.state as unknown as Record<string, unknown>;
+    const source = incoming as unknown as Record<string, unknown>;
+    const targetKeys = Object.keys(target);
+    const sourceKeys = Object.keys(source);
+    const sameOrder = targetKeys.length === sourceKeys.length && targetKeys.every((k, i) => k === sourceKeys[i]);
+    if (!sameOrder) for (const k of targetKeys) delete target[k];
+    for (const k of sourceKeys) target[k] = source[k];
+    const state = this.state;
+    normalizeLootState(state, this.level.rooms[state.roomIndex]);
+    normalizeGearState(state);
+    for (const p of state.players) normalizeAutoCallFields(p);
+    for (const p of state.players) normalizeHeartField(p, state.heartSlot === true);
+    if (roomChanged) this.roomGrid = new RoomGrid(this.level.rooms[state.roomIndex].layout);
+    return { ok: true, roomChanged };
   }
 
   /**
