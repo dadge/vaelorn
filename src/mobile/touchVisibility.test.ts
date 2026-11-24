@@ -32,6 +32,11 @@ describe('shouldShowVirtualPad', () => {
   it('?touch=0 : masquée même sur téléphone', () => {
     expect(shouldShowVirtualPad({ ...phone, param: 'off' })).toBe(false);
   });
+  it('masquage temporaire demandé par un écran (QR code du salon réseau) : prioritaire, même avec ?touch=1', () => {
+    expect(shouldShowVirtualPad({ ...phone, suspended: true })).toBe(false);
+    expect(shouldShowVirtualPad({ ...phone, param: 'on', suspended: true })).toBe(false);
+    expect(shouldShowVirtualPad({ ...phone, suspended: false })).toBe(true);
+  });
   it('une vraie manette connectée la masque (y compris avec ?touch=1), et elle réapparaît quand elle disparaît', () => {
     expect(shouldShowVirtualPad({ ...phone, realGamepad: true })).toBe(false);
     expect(shouldShowVirtualPad({ ...phone, param: 'on', realGamepad: true })).toBe(false);

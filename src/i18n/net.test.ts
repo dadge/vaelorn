@@ -7,7 +7,21 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getDictionary, type Language } from './i18n';
-import { NET_LOBBY_I18N_KEYS, RTC_ERROR_CODES, messageFromCodeCheck, messageFromJoinError, messageFromStartReason, statusKey, type CodeError, type StartBlock } from '../render/netLobbyLogic';
+import {
+  NET_LOBBY_I18N_KEYS,
+  RTC_ERROR_CODES,
+  messageFromCodeCheck,
+  messageFromJoinError,
+  messageFromScanError,
+  messageFromStartReason,
+  scanIgnoredKey,
+  statusKey,
+  type CodeError,
+  type ScanErrorKind,
+  type ScanIgnore,
+  type ScanTarget,
+  type StartBlock,
+} from '../render/netLobbyLogic';
 import { noticeKey, type NetNoticeCode } from '../net/contracts';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -119,6 +133,35 @@ describe('i18n réseau : couverture des codes du contrat', () => {
       expect(fr[key], `fr:${key}`).toBeTruthy();
       expect(en[key], `en:${key}`).toBeTruthy();
     }
+  });
+});
+
+describe('i18n réseau : lecture de QR codes', () => {
+  it('un message pour chaque erreur de caméra, chaque contenu ignoré (et chaque cible du « mauvais genre »), dans les deux langues', () => {
+    const keys: string[] = [];
+    for (const error of ['unsupported', 'insecure', 'denied', 'noCamera', 'failed'] satisfies ScanErrorKind[]) keys.push(messageFromScanError(error).key);
+    for (const reason of ['notCode', 'badCode', 'wrongVersion', 'otherInvite', 'wrongKind'] satisfies ScanIgnore[]) {
+      for (const target of ['invite', 'answer'] satisfies ScanTarget[]) keys.push(scanIgnoredKey(reason, target));
+    }
+    expect(new Set(keys).size).toBeGreaterThanOrEqual(9);
+    for (const key of keys) {
+      expect(fr[key], `fr:${key}`).toBeTruthy();
+      expect(en[key], `en:${key}`).toBeTruthy();
+    }
+  });
+
+  it('les textes du scanner et des QR codes existent, sans {placeholder} inattendu', () => {
+    const scanKeys = Object.keys(fr).filter((k) => k.startsWith('net.scan.') || k.startsWith('net.qr.'));
+    expect(scanKeys.length).toBeGreaterThanOrEqual(25);
+    for (const key of scanKeys) {
+      expect(placeholders(fr[key]), key).toEqual([]);
+      expect(placeholders(en[key]), key).toEqual([]);
+    }
+  });
+
+  it('la caméra : la consigne dit où viser et le texte rappelle qu\'aucune image n\'est envoyée', () => {
+    expect(fr['net.scan.tips']).toMatch(/ni envoyée ni enregistrée/);
+    expect(en['net.scan.tips']).toMatch(/never sent or saved/);
   });
 });
 

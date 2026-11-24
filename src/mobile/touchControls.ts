@@ -24,6 +24,20 @@ import { onLanguageChange, t } from '../i18n/i18n';
 import { computeMobileUi, isPortrait, parseTouchParam, shouldShowVirtualPad } from './device';
 import { readEnvironment } from './mobileUi';
 
+/** Attribut posé sur `<html>` par un écran qui veut masquer la manette virtuelle (QR code / caméra du salon réseau) ; relu par le sondage de `installTouchControls`. */
+const SUSPEND_ATTR = 'data-vp-suspended';
+
+/** Demande (ou lève la demande de) masquage de la manette virtuelle ; prise en compte au prochain sondage (≤ `POLL_MS`) ou redimensionnement. Sans effet hors navigateur. */
+export function setVirtualPadSuspended(suspended: boolean): void {
+  try {
+    if (typeof document === 'undefined') return;
+    if (suspended) document.documentElement.setAttribute(SUSPEND_ATTR, '');
+    else document.documentElement.removeAttribute(SUSPEND_ATTR);
+  } catch {
+    /* jamais bloquant */
+  }
+}
+
 /** Période (ms) du sondage léger des vraies manettes (certains navigateurs n'émettent pas `gamepadconnected` sans appui). */
 const POLL_MS = 500;
 /** Durée (ms) du retour haptique à l'appui d'un bouton. */
@@ -323,6 +337,7 @@ function build(): TouchControlsHandle {
         landscape,
         param,
         realGamepad,
+        suspended: document.documentElement.hasAttribute(SUSPEND_ATTR),
       });
       if (next === visible) return;
       visible = next;

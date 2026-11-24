@@ -23,7 +23,7 @@ Principe retenu : **hôte autoritaire** (l'hôte, joueur 0, simule à 60 Hz ; le
 |---|---|---|
 | 1 | Modèle de synchronisation | **Tranché : hôte autoritaire.** Pas de lockstep (flottants différents entre iPhone et Android). |
 | 2 | Transport | **Tranché :** un canal fiable et ordonné ; WebRTC DataChannel avec signalisation **manuelle** (aucun serveur, aucun STUN / TURN en LAN), BroadcastChannel (dev), Loopback (tests). Pas de WebSocket / relais dans le lot 1 (hôte natif Capacitor au plan, lot 6). |
-| 3 | Découverte / appariement | **Tranché :** code d'invitation texte copié-collé (un par invité) et code de réponse. QR codes : lot 3. |
+| 3 | Découverte / appariement | **Tranché :** code d'invitation texte copié-collé (un par invité) et code de réponse. QR codes (lecture caméra, repli copier-coller) : `src/net/qr/`, docs/NET.md § 4.4. |
 | 4 | Latence | **Tranché pour le lot 1 :** interpolation d'un intervalle de retard côté invité, pas de prédiction (lot 4). Estimation ≈ 100–200 ms d'entrée à l'écran. |
 | 5 | Mapping joueurs ↔ pairs | **Tranché :** un joueur par appareil ; l'hôte = joueur 0, les invités 1..3 dans l'ordre d'arrivée, ids contigus au lancement ; personnage choisi au salon, unicité imposée par l'hôte. |
 | 6 | Déconnexion / reconnexion | **Tranché :** invité perdu = frame vide, la partie continue ; hôte perdu = retour au menu avec message. **Reconnexion en cours de partie : hors lot 1** (lot 5). |
@@ -31,4 +31,4 @@ Principe retenu : **hôte autoritaire** (l'hôte, joueur 0, simule à 60 Hz ; le
 | 8 | Versionnage | **Tranché :** à la connexion, version de protocole + libellé de build (`src/buildInfo.ts`) + nombre de niveaux ; refus explicite avec message traduit. |
 | 9 | Menus et sélection de personnage | **Tranché :** `NetLobbyScene` (salon) ; chaque participant choisit son personnage, l'hôte arbitre ; `GameSession.net` posé au lancement. |
 
-Hors lot 1 : sauvegarde (jamais écrite en partie réseau), tutoriel, démo, pause qui fige, prédiction, reconnexion, QR codes, hôte natif.
+Hors lot 1 : sauvegarde (jamais écrite en partie réseau), tutoriel, démo, pause qui fige, prédiction, reconnexion, hôte natif (les QR codes sont livrés depuis : `src/net/qr/`).

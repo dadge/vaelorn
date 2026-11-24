@@ -18,7 +18,7 @@ import {
   type RtcOptions,
   type Transport,
 } from './contracts';
-import { buildSdp, decodeSignalCode, encodeSignalCode, parseSdp } from './rtcCodec';
+import { answerMatchesOffer, buildSdp, decodeSignalCode, encodeSignalCode, offerRef, parseSdp } from './rtcCodec';
 import { RtcSignalingError } from './rtcErrors';
 import { createRtcTransport, type RtcDataChannelLike } from './transportRtc';
 
@@ -201,6 +201,8 @@ export function createRtcHostSignalingWith(env: () => RtcEnv, options: RtcOption
             if (used) throw new RtcSignalingError('failed', 'invitation déjà utilisée');
             // un code illisible ne « consomme » pas l'invitation : l'utilisateur peut recoller
             const answer = await cancel.race(decodeSignalCode(answerCode, 'answer'));
+            // la réponse d'une AUTRE invitation (l'invité montre encore l'écran d'une invitation annulée) ne « consomme » pas non plus l'invitation : `badCode`
+            if (!answerMatchesOffer(answer, desc)) throw new RtcSignalingError('badCode', 'réponse à une autre invitation');
             used = true;
             try {
               await cancel.race(pc.setRemoteDescription({ type: 'answer', sdp: buildSdp(answer) }));
@@ -245,7 +247,7 @@ export function createRtcGuestSignalingWith(env: () => RtcEnv, options: RtcOptio
         if (!sdp) throw new RtcSignalingError('failed', 'description locale absente');
         const desc = parseSdp(sdp);
         if (desc.candidates.length === 0) throw new RtcSignalingError('iceTimeout', 'aucun candidat réseau utilisable');
-        const answerCode = await cancel.race(encodeSignalCode('answer', desc));
+        const answerCode = await cancel.race(encodeSignalCode('answer', { ...desc, offerRef: offerRef(invite) })); // la réponse porte l'empreinte de SON invitation
         const transport = cancel
           .race(waitChannelOpen(pc, dc, connectTimeoutMs))
           .then((): Transport => createRtcTransport(dc, pc))

@@ -75,6 +75,11 @@ export interface VirtualPadVisibilityInput {
   param: TouchParam;
   /** Une vraie manette (indice < 4) est connectée. */
   realGamepad: boolean;
+  /**
+   * Masquage TEMPORAIRE demandé par un écran (ex. le salon réseau quand un QR code ou la caméra est affiché : le stick translucide
+   * recouvrirait des modules du QR). Absent = false. Prioritaire sur tout le reste.
+   */
+  suspended?: boolean;
 }
 
 /**
@@ -82,7 +87,7 @@ export interface VirtualPadVisibilityInput {
  * `?touch=0` ; sinon `?touch=1` l'affiche partout (test sur PC), et automatiquement : appareil tactile ET paysage.
  */
 export function shouldShowVirtualPad(input: VirtualPadVisibilityInput): boolean {
-  if (input.realGamepad || input.param === 'off') return false;
+  if (input.suspended || input.realGamepad || input.param === 'off') return false;
   if (input.param === 'on') return true;
   return input.touch && input.landscape;
 }

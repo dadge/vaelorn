@@ -14,7 +14,9 @@
     "i18n:merge": "node scripts/merge-i18n.mjs"
   },
   "dependencies": {
-    "phaser": "3.90.0"
+    "jsqr": "1.4.0",
+    "phaser": "3.90.0",
+    "qrcode-generator": "2.0.4"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

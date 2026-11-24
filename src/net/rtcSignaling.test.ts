@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Transport } from './contracts';
-import { cleanCode, decodeSignalCode, encodeSignalCode, parseSdp } from './rtcCodec';
+import { answerMatchesOffer, cleanCode, decodeSignalCode, encodeSignalCode, offerRef, parseSdp } from './rtcCodec';
 import {
   RTC_GUEST_CONNECT_TIMEOUT_MS,
   RTC_HOST_CONNECT_TIMEOUT_MS,
@@ -177,6 +177,33 @@ describe('signalisation WebRTC : codes invalides', () => {
     expect(await code(invite.accept('???'))).toBe('badCode');
     // la bonne réponse fonctionne encore
     const t = await invite.accept(answer.answerCode);
+    expect(t.state).toBe('open');
+  });
+
+  it("la réponse porte l'empreinte de SON invitation ; la réponse à une AUTRE invitation est refusée (badCode) sans consommer l'invitation courante", async () => {
+    const { host, guest } = setup();
+    const first = await host.createInvite();
+    const staleAnswer = await guest.join(first.code); // l'invité affiche encore cette réponse...
+    first.cancel();
+    const second = await host.createInvite(); // ...mais l'hôte a recréé une invitation
+    const stale = await decodeSignalCode(staleAnswer.answerCode, 'answer');
+    expect(stale.offerRef).toBe(offerRef(await decodeSignalCode(first.code, 'invite')));
+    expect(answerMatchesOffer(stale, await decodeSignalCode(second.code, 'invite'))).toBe(false);
+    expect(await code(second.accept(staleAnswer.answerCode))).toBe('badCode');
+    // l'invitation n'a pas été consommée : la bonne réponse fonctionne encore
+    const fresh = await guest.join(second.code);
+    const t = await second.accept(fresh.answerCode);
+    expect(t.state).toBe('open');
+  });
+
+  it("une réponse sans empreinte (code d'une autre génération) reste acceptée", async () => {
+    const { host, guest } = setup();
+    const invite = await host.createInvite();
+    const answer = await guest.join(invite.code);
+    const { offerRef: _ignored, ...legacy } = await decodeSignalCode(answer.answerCode, 'answer');
+    const legacyCode = await encodeSignalCode('answer', legacy);
+    expect((await decodeSignalCode(legacyCode, 'answer')).offerRef).toBeUndefined();
+    const t = await invite.accept(legacyCode);
     expect(t.state).toBe('open');
   });
 

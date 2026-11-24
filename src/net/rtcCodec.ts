@@ -48,6 +48,11 @@ export interface SignalDesc {
   sctpPort: number;
   maxMessageSize: number;
   candidates: SignalCandidate[];
+  /**
+   * RÉPONSES seulement : empreinte (4 caractères base64url) de l'invitation à laquelle l'invité répond (`offerRef`). Elle permet à l'hôte d'écarter la réponse à une
+   * AUTRE invitation (ancien écran de l'invité) sans consommer l'invitation courante. Facultative : un code sans elle (autre génération de l'application) reste accepté.
+   */
+  offerRef?: string;
 }
 
 // ───────────────────────────── base64url ─────────────────────────────
@@ -107,6 +112,16 @@ export function codeChecksum(text: string): string {
     h = Math.imul(h, 0x01000193) >>> 0;
   }
   return bytesToBase64Url(new Uint8Array([(h >>> 16) & 255, (h >>> 8) & 255, h & 255]));
+}
+
+/** Empreinte courte (24 bits) d'une invitation : identifiants ICE + empreinte DTLS (propres à CHAQUE connexion). Jointe par l'invité à sa réponse. */
+export function offerRef(offer: SignalDesc): string {
+  return codeChecksum(`${offer.ufrag}|${offer.fingerprint}`);
+}
+
+/** Cette réponse répond-elle à cette invitation ? Vrai aussi pour une réponse sans empreinte (code d'une autre génération : on ne peut pas savoir, on laisse faire). */
+export function answerMatchesOffer(answer: SignalDesc, offer: SignalDesc): boolean {
+  return answer.offerRef === undefined || answer.offerRef === offerRef(offer);
 }
 
 // ───────────────────────────── SDP ↔ SignalDesc ─────────────────────────────
@@ -226,9 +241,10 @@ const CODE_TO_SETUP: Record<string, DtlsSetup> = { x: 'actpass', a: 'active', p:
 const TYPE_TO_CODE: Record<CandidateType, string> = { host: 'h', srflx: 's', prflx: 'p', relay: 'r' };
 const CODE_TO_TYPE: Record<string, CandidateType> = { h: 'host', s: 'srflx', p: 'prflx', r: 'relay' };
 
-/** Description → JSON compact `{u,p,f,s,m,o,z,c}`. */
+/** Description → JSON compact `{u,p,f,s,m,o,z,c}` (+ `r` : empreinte de l'invitation, réponses seulement). */
 export function descToPayload(desc: SignalDesc): string {
   return JSON.stringify({
+    ...(desc.offerRef !== undefined ? { r: desc.offerRef } : {}),
     u: desc.ufrag,
     p: desc.pwd,
     f: bytesToBase64Url(hexToBytes(desc.fingerprint)),
@@ -253,6 +269,8 @@ export function payloadToDesc(v: unknown): SignalDesc | null {
   const port = own('o');
   const z = own('z');
   const c = own('c');
+  const r = own('r');
+  if (r !== undefined && (typeof r !== 'string' || !/^[A-Za-z0-9_-]{4}$/.test(r))) return null;
   if (typeof u !== 'string' || !/^[A-Za-z0-9+/]{3,256}$/.test(u)) return null;
   if (typeof p !== 'string' || !/^[A-Za-z0-9+/]{8,256}$/.test(p)) return null;
   if (typeof f !== 'string') return null;
@@ -273,7 +291,9 @@ export function payloadToDesc(v: unknown): SignalDesc | null {
     if (typeof tcode !== 'string' || !Object.prototype.hasOwnProperty.call(CODE_TO_TYPE, tcode)) return null;
     candidates.push({ foundation, priority, address, port: cport, type: CODE_TO_TYPE[tcode] });
   }
-  return { ufrag: u, pwd: p, fingerprint: bytesToHex(fpBytes), setup: CODE_TO_SETUP[s], mid: m, sctpPort: port, maxMessageSize: z, candidates };
+  const desc: SignalDesc = { ufrag: u, pwd: p, fingerprint: bytesToHex(fpBytes), setup: CODE_TO_SETUP[s], mid: m, sctpPort: port, maxMessageSize: z, candidates };
+  if (r !== undefined) desc.offerRef = r;
+  return desc;
 }
 
 // ───────────────────────────── Compression (optionnelle) ─────────────────────────────

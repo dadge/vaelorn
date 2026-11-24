@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { NET } from './contracts';
 import {
   RTC_MAX_CANDIDATES,
+  answerMatchesOffer,
   base64UrlToBytes,
   buildSdp,
   bytesToBase64Url,
@@ -15,6 +16,7 @@ import {
   descToPayload,
   encodeSignalCode,
   groupCode,
+  offerRef,
   parseSdp,
   payloadToDesc,
   type SignalDesc,
@@ -209,6 +211,43 @@ describe('rtcCodec : SDP ↔ description', () => {
 
   it('l\'empreinte du SDP reconstruit est en majuscules séparées par « : »', () => {
     expect(buildSdp(sampleDesc())).toMatch(/a=fingerprint:sha-256 (?:[0-9A-F]{2}:){31}[0-9A-F]{2}\r\n/);
+  });
+});
+
+describe("rtcCodec : empreinte de l'invitation dans la réponse", () => {
+  it("offerRef : 4 caractères base64url, stable, différent d'une invitation à l'autre (ufrag ou empreinte DTLS)", () => {
+    const a = sampleDesc();
+    expect(offerRef(a)).toMatch(/^[A-Za-z0-9_-]{4}$/);
+    expect(offerRef(a)).toBe(offerRef({ ...a }));
+    expect(offerRef({ ...a, ufrag: 'autre' })).not.toBe(offerRef(a));
+    expect(offerRef({ ...a, fingerprint: 'ff'.repeat(32) })).not.toBe(offerRef(a));
+  });
+
+  it("aller-retour : l'empreinte survit au code de réponse ; sans empreinte, rien n'est ajouté au code (compatibilité)", async () => {
+    const base = sampleDesc();
+    const withRef = { ...base, offerRef: offerRef(base) };
+    expect(await decodeSignalCode(await encodeSignalCode('answer', withRef), 'answer')).toEqual(withRef);
+    const plain = await decodeSignalCode(await encodeSignalCode('answer', base), 'answer');
+    expect(plain.offerRef).toBeUndefined();
+    expect(descToPayload(base)).not.toContain('"r"');
+  });
+
+  it('une empreinte mal formée est refusée (badCode)', async () => {
+    const base = sampleDesc();
+    for (const bad of ['abc', 'abcde', 'ab c', 'a\r\nb', '']) {
+      await expect(decodeSignalCode(await encodeSignalCode('answer', { ...base, offerRef: bad }), 'answer')).rejects.toMatchObject({ code: 'badCode' });
+    }
+    const asNumber = JSON.parse(descToPayload(base)) as Record<string, unknown>;
+    asNumber.r = 1234;
+    expect(payloadToDesc(asNumber)).toBeNull();
+  });
+
+  it('answerMatchesOffer : la bonne invitation, une autre, et une réponse sans empreinte (acceptée)', () => {
+    const offer = sampleDesc();
+    const other = sampleDesc({ ufrag: 'zzzz' });
+    expect(answerMatchesOffer({ ...sampleDesc(), offerRef: offerRef(offer) }, offer)).toBe(true);
+    expect(answerMatchesOffer({ ...sampleDesc(), offerRef: offerRef(offer) }, other)).toBe(false);
+    expect(answerMatchesOffer(sampleDesc(), other)).toBe(true);
   });
 });
 

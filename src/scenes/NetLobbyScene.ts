@@ -15,6 +15,12 @@
  * DataChannel à signalisation manuelle. Les zones de texte et les boutons Copier / Coller / Valider sont de vrais éléments DOM superposés au canvas (`netLobbyDom.ts`) :
  * le presse-papiers et le clavier virtuel d'un téléphone l'exigent ; ils sont retirés (avec leurs écouteurs) à la fermeture de la scène.
  *
+ * QR CODES (remplacent le copier-coller, qui reste en REPLI complet) : le code d'invitation de l'hôte et le code de réponse de l'invité s'affichent en QR code
+ * (le plus grand possible, texte + « Copier » dessous) ; l'invité « Scanner l'invitation », l'hôte « Scanner la réponse » : la caméra arrière (`startQrScanner`) lit
+ * le QR de l'autre téléphone et le code lu est soumis par le MÊME chemin que « Coller » + « Valider » (`submitJoinCode` / `acceptInvite`). Un QR qui n'est pas un code
+ * valide du bon genre est IGNORÉ (message court, caméra ouverte, invitation intacte). La caméra est coupée à la lecture réussie, à l'annulation, à Échap / B, au
+ * départ de l'écran, à l'arrière-plan de la page et à la fermeture de la scène. Aucune image n'est envoyée ni enregistrée. Mise en page : `netLobbyLogic.ts`.
+ *
  * SESSIONS : créées ici (`createHostSession` / `createClientSession`), rangées dans `netRuntime` et PARTAGÉES avec `GameScene`, qui les lit ; elles survivent aux
  * parties (retour au salon : entrée `return`, mêmes liaisons). Elles sont libérées (`clearNetRuntime`) en quittant le multijoueur. Aucun minuteur interne : la scène appelle
  * `update(performance.now())` des sessions à chaque image.
@@ -54,12 +60,28 @@ import { createClientSession } from '../net/clientSession';
 import { createHostSession } from '../net/hostSession';
 import { connectBroadcastGuest, createBroadcastHost } from '../net/transportBroadcast';
 import { createRtcGuestSignaling, createRtcHostSignaling, isRtcSupported } from '../net/rtcSignaling';
+import { answerMatchesOffer, cleanCode, decodeSignalCode, type RtcCodeKind, type SignalDesc } from '../net/rtcCodec';
+import { qrMatrix, type QrMatrix } from '../net/qr/qrCode';
+import { createScanGate, qrScanSupport, startQrScanner, type QrScanner, type QrScanError } from '../net/qr/qrScanner';
 import { clearNetRuntime, createClientRuntime, createHostRuntime, getClientSession, getHostSession, getNetRuntime, setNetRuntime } from '../net/netRuntime';
 import {
   activeInvite,
   chipInvites,
   backOutcome,
   checkPastedCode,
+  classifyScannedText,
+  DEFAULT_VIEW_METRICS,
+  guestAnswerLayout,
+  guestCodeLayout,
+  hostInviteLayout,
+  metricsSignature,
+  portraitMessageRect,
+  scanButtonState,
+  scanCoveredByRotatePrompt,
+  scanIgnoreFromError,
+  scanIgnoredKey,
+  scanZoneLayout,
+  viewMetrics,
   needsCloseConfirm,
   createNetLobbyState,
   createReturnState,
@@ -87,14 +109,24 @@ import {
   takenCharacters,
   type LobbyAction,
   type LobbyActionId,
+  type HostInviteLayout,
+  type InviteView,
   type LobbyMessage,
+  type LogicalRect,
   type NetLobbyEvent,
   type NetLobbyState,
   type NetTransportChoice,
+  type ScanIgnore,
+  type ScanSupport,
+  type ScanTarget,
+  type ViewMetrics,
 } from '../render/netLobbyLogic';
+import { computeMobileUi } from '../mobile/device';
+import { readEnvironment } from '../mobile/mobileUi';
+import { setVirtualPadSuspended } from '../mobile/touchControls';
 import { SCENE_KEYS, type GameSceneData, type MenuSceneData, type NetLobbySceneData } from '../render/session';
 import { PANEL_STYLES, UI_THEME, beginScene, bindLanguage, createDawnBackground, createPanel, createText, css, drawArrow, playerColor, transitionTo, type DecorHandle } from '../render/ui';
-import { NetLobbyDom, copyToClipboard, readFromClipboard, type DomButtonSpec, type DomFieldSpec } from './netLobbyDom';
+import { NetLobbyDom, copyToClipboard, readFromClipboard, type DomButtonSpec, type DomCameraSpec, type DomFieldSpec, type DomLabelSpec, type DomQrSpec, type DomTone } from './netLobbyDom';
 
 // ───────────────────────────── Géométrie (pixels logiques 1280 × 720) ─────────────────────────────
 
@@ -121,6 +153,8 @@ const INFO_MESSAGE_MS = 5000;
 const LAUNCH_FADE_MS = 120;
 /** Délai (ms) accordé à un invité BroadcastChannel pour trouver l'hôte. */
 const BC_JOIN_TIMEOUT_MS = 5000;
+/** Durée (ms) d'affichage du message « contenu ignoré » dans la zone caméra (renouvelée à chaque nouvelle lecture du même contenu). */
+const SCAN_IGNORED_MS = 3500;
 
 // ───────────────────────────── Objets vivants hors scène ─────────────────────────────
 
@@ -161,6 +195,14 @@ function localStore(): Storage | null {
 }
 
 // ───────────────────────────── Lignes ─────────────────────────────
+
+/** Éléments « média » d'un rendu (QR codes, étiquettes DOM, zone caméra, fond de feuille portrait) ; accumulés par les étapes puis donnés à `NetLobbyDom.sync`. */
+interface RenderMedia {
+  qrs: DomQrSpec[];
+  labels: DomLabelSpec[];
+  camera: DomCameraSpec | null;
+  backdrop: boolean;
+}
 
 /** Ligne du salon : bouton (`action`), choix à flèches (`choice`) ou simple affichage (`info`, non sélectionnable). */
 interface RowSpec {
@@ -223,6 +265,18 @@ export class NetLobbyScene extends Phaser.Scene {
   private pendingAnswer: RtcGuestAnswer | null = null;
   /** Dernier `seq` de salon pour lequel on a tenté de remettre l'hôte « prêt » (évite toute boucle). */
   private lastEnsureSeq = -1;
+  /** Mesures de l'écran (mise en page des panneaux QR) et leur signature : un changement redessine le salon. */
+  private metrics: ViewMetrics = DEFAULT_VIEW_METRICS;
+  private metricsSig = '';
+  /** Lecture de QR codes possible ici (API présentes, contexte sécurisé) ? Lu une fois à l'ouverture : `qrScanSupport()` n'ouvre pas la caméra. */
+  private scanSupport: ScanSupport = 'unsupported';
+  /** Lecteur de caméra en cours (null : caméra éteinte) ; `scanToken` invalide les réponses tardives d'une lecture fermée. */
+  private scanner: QrScanner | null = null;
+  private scanToken = 0;
+  /** Instant (`performance.now`) où le message « contenu ignoré » s'efface de la zone caméra. */
+  private scanIgnoredUntil = 0;
+  /** Dernier QR code encodé (même texte = même matrice : le canvas DOM n'est redessiné que si elle change). */
+  private qrCache: { text: string; matrix: QrMatrix | null } | null = null;
 
   constructor() {
     super(SCENE_KEYS.NetLobby);
@@ -235,6 +289,17 @@ export class NetLobbyScene extends Phaser.Scene {
     this.joinToken = 0;
     this.pendingAnswer = null;
     this.lastEnsureSeq = -1;
+    this.scanner = null;
+    this.scanToken++;
+    this.scanIgnoredUntil = 0;
+    this.qrCache = null;
+    this.metrics = DEFAULT_VIEW_METRICS;
+    this.metricsSig = '';
+    try {
+      this.scanSupport = qrScanSupport();
+    } catch {
+      this.scanSupport = 'unsupported';
+    }
     this.objects = [];
     this.rows = [];
     this.unsubs = [];
@@ -280,6 +345,10 @@ export class NetLobbyScene extends Phaser.Scene {
     bindLanguage(this, () => {
       this.dirty = true;
     });
+    this.refreshMetrics();
+    // la caméra ne reste jamais allumée quand la page passe en arrière-plan
+    document.addEventListener('visibilitychange', this.onVisibility);
+    window.addEventListener('pagehide', this.onPageHide);
     this.events.once('shutdown', () => this.cleanup());
     this.events.once('destroy', () => this.cleanup());
 
@@ -310,6 +379,10 @@ export class NetLobbyScene extends Phaser.Scene {
       this.dirty = false;
       this.render();
     }
+    if (this.refreshMetrics()) this.dirty = true;
+    if (this.state.scan?.ignored && now >= this.scanIgnoredUntil) this.dispatch({ type: 'scanIgnoredClear' });
+    // l'invite « Tourne ton téléphone » (portrait sur téléphone) recouvre tout le salon : la caméra ne reste pas allumée, ni active, derrière elle
+    if (this.state.scan && scanCoveredByRotatePrompt(this.state, this.rotatePromptShown())) this.closeScan();
     this.dom?.layout();
     if (this.starting) return;
     for (const intent of this.nav.pollMenu()) {
@@ -331,11 +404,51 @@ export class NetLobbyScene extends Phaser.Scene {
   private cleanup(): void {
     if (this.closed) return;
     this.closed = true;
+    this.stopScanner();
+    setVirtualPadSuspended(false);
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    window.removeEventListener('pagehide', this.onPageHide);
     this.unbind();
-    this.dom?.destroy();
+    this.dom?.destroy(); // retire aussi la zone caméra : toutes les pistes du flux sont arrêtées
     this.dom = null;
     this.objects = [];
     this.rows = [];
+  }
+
+  /** Page en arrière-plan : la caméra est coupée (elle ne se rallume pas toute seule au retour : le joueur relance le scan). */
+  private readonly onVisibility = (): void => {
+    if (document.visibilityState === 'hidden') this.closeScan();
+  };
+
+  private readonly onPageHide = (): void => {
+    this.closeScan();
+  };
+
+  /** L'invite de rotation (téléphone en portrait) est-elle affichée ? Même calcul que l'interface mobile (`installMobileUi`). */
+  private rotatePromptShown(): boolean {
+    try {
+      return computeMobileUi(readEnvironment()).showRotatePrompt;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Mesures de l'écran (canvas + fenêtre) ; true si la mise en page des panneaux QR doit être refaite. */
+  private refreshMetrics(): boolean {
+    let next = DEFAULT_VIEW_METRICS;
+    if (this.dom) {
+      try {
+        const m = this.dom.measure();
+        next = viewMetrics(m.box, m.viewport);
+      } catch {
+        next = DEFAULT_VIEW_METRICS;
+      }
+    }
+    const sig = metricsSignature(next);
+    if (sig === this.metricsSig) return false;
+    this.metricsSig = sig;
+    this.metrics = next;
+    return true;
   }
 
   private unbind(): void {
@@ -355,6 +468,7 @@ export class NetLobbyScene extends Phaser.Scene {
     const previous = this.state;
     this.state = reduceNetLobby(previous, event);
     if (this.state === previous) return;
+    if (previous.scan && !this.state.scan) this.stopScanner(); // lecture fermée (réussie, annulée, cible disparue, erreur) : la caméra s'éteint tout de suite
     if (this.state.message !== previous.message) {
       this.messageUntil = this.state.message && this.state.message.tone === 'info' ? performance.now() + INFO_MESSAGE_MS : Number.POSITIVE_INFINITY;
     }
@@ -374,6 +488,7 @@ export class NetLobbyScene extends Phaser.Scene {
     if (this.starting) return;
     this.starting = true;
     this.commitName();
+    this.stopScanner();
     this.dom?.destroy(); // les zones de saisie ne restent pas affichées pendant le fondu
     this.dom = null;
     this.unbind();
@@ -493,6 +608,7 @@ export class NetLobbyScene extends Phaser.Scene {
     this.starting = true;
     this.commitName();
     cancelPendingInvites(); // les invitations non abouties ne servent plus : la partie a commencé
+    this.stopScanner();
     this.dom?.destroy();
     this.dom = null;
     this.prepareInput();
@@ -524,8 +640,9 @@ export class NetLobbyScene extends Phaser.Scene {
     }
   }
 
-  private async acceptInvite(id: number): Promise<void> {
-    const raw = this.dom?.getValue(`inviteAnswer${id}`) ?? '';
+  /** Accepte le code de réponse de l'invité : celui de la zone de texte (« Valider »), ou `scanned` (QR code lu par la caméra) : le chemin est le MÊME. */
+  private async acceptInvite(id: number, scanned?: string): Promise<void> {
+    const raw = scanned ?? this.dom?.getValue(`inviteAnswer${id}`) ?? '';
     const check = checkPastedCode(raw);
     if (!check.ok) {
       this.fail(messageFromCodeCheck(check.error));
@@ -574,6 +691,132 @@ export class NetLobbyScene extends Phaser.Scene {
     this.dispatch({ type: 'inviteDismissed', id });
   }
 
+  // ───────────────────────────── Lecture de QR codes (caméra) ─────────────────────────────
+
+  /**
+   * Ouvre la caméra pour lire un QR code : `invite` (invité : l'invitation de l'hôte) ou `answer` (hôte : la réponse de l'invité). La zone vidéo est créée par un
+   * rendu immédiat (le lecteur a besoin de l'élément `<video>`), puis `startQrScanner` demande la caméra arrière. Sans caméra (refus, absente, contexte non sécurisé,
+   * API manquante) : message traduit, le copier-coller reste là.
+   */
+  private openScan(target: ScanTarget): void {
+    if (this.starting || this.closed || this.state.scan) return;
+    if (!scanButtonState(this.state, this.scanSupport).available) return;
+    this.dom?.blur();
+    this.dispatch({ type: 'scanOpen', target });
+    if (!this.state.scan) return; // refusé par la machine d'états (la cible n'existe plus)
+    if (this.dirty) {
+      this.dirty = false;
+      this.render();
+    }
+    const video = this.dom?.cameraVideo() ?? null;
+    if (!video) {
+      this.dispatch({ type: 'scanFailed', error: 'unsupported' });
+      return;
+    }
+    const token = ++this.scanToken;
+    const gate = createScanGate((text) => this.acceptScanned(text, target, token));
+    startQrScanner({
+      video,
+      onText: (text) => {
+        if (token === this.scanToken) gate(text);
+      },
+      onError: (kind: QrScanError) => {
+        if (token === this.scanToken) this.dispatch({ type: 'scanFailed', error: kind });
+      },
+    }).then(
+      (scanner) => {
+        if (token !== this.scanToken || this.closed || !this.state.scan) {
+          scanner.stop(); // lecture fermée pendant l'ouverture de la caméra : on la coupe aussitôt
+          return;
+        }
+        this.scanner = scanner;
+        this.dispatch({ type: 'scanActive' });
+      },
+      () => {
+        if (token === this.scanToken) this.dispatch({ type: 'scanFailed', error: 'failed' });
+      },
+    );
+  }
+
+  /**
+   * Un QR code a été lu : on le trie (forme, version, genre de code : `classifyScannedText`), on vérifie la somme de contrôle et la charge utile (`decodeSignalCode`), et
+   * seulement alors on le soumet par le MÊME chemin que « Coller » + « Valider ». Un contenu écarté laisse la caméra ouverte et l'invitation intacte. Vrai : accepté
+   * (la porte `createScanGate` n'en laisse passer qu'un).
+   */
+  private async acceptScanned(text: string, target: ScanTarget, token: number): Promise<boolean> {
+    const stale = (): boolean => token !== this.scanToken || this.closed || this.starting || !this.state.scan;
+    if (stale()) return false;
+    const kind: RtcCodeKind = target === 'invite' ? 'invite' : 'answer';
+    const sorted = classifyScannedText(text, kind);
+    let reason: ScanIgnore | null = sorted.ok ? null : sorted.reason;
+    if (sorted.ok) {
+      try {
+        const desc = await decodeSignalCode(sorted.code, kind);
+        if (target === 'answer' && !(await this.answerIsForActiveInvite(desc))) reason = 'otherInvite';
+      } catch (err) {
+        reason = scanIgnoreFromError(err);
+      }
+    }
+    if (stale()) return false;
+    if (reason !== null || !sorted.ok) {
+      this.scanIgnoredUntil = performance.now() + SCAN_IGNORED_MS;
+      this.dispatch({ type: 'scanIgnored', reason: reason ?? 'notCode' });
+      return false;
+    }
+    this.dispatch({ type: 'scanClosed' }); // lecture réussie : la caméra s'éteint, puis le code suit le chemin du collage
+    if (target === 'invite') {
+      void this.submitJoinCode(sorted.code);
+    } else {
+      const invite = activeInvite(this.state);
+      if (invite) void this.acceptInvite(invite.id, sorted.code);
+    }
+    return true;
+  }
+
+  /**
+   * La réponse lue répond-elle à l'invitation EN COURS ? Sinon (écran d'un invité qui répond encore à une invitation annulée) elle est ignorée : la caméra reste ouverte et
+   * l'invitation n'est pas consommée (elle ne l'aurait pas été non plus par `invite.accept`, mais l'hôte aurait perdu la caméra). Une réponse sans empreinte est acceptée.
+   */
+  private async answerIsForActiveInvite(answer: SignalDesc): Promise<boolean> {
+    if (answer.offerRef === undefined) return true;
+    const code = activeInvite(this.state)?.code;
+    if (!code) return true; // rien à comparer : `acceptInvite` tranchera
+    return answerMatchesOffer(answer, await decodeSignalCode(code, 'invite'));
+  }
+
+  /** Ferme la lecture (annulation, retour, arrière-plan) : la caméra s'éteint. */
+  private closeScan(): void {
+    if (this.state.scan) this.dispatch({ type: 'scanClosed' });
+    else this.stopScanner();
+  }
+
+  /** Éteint la caméra : invalide les réponses tardives et arrête toutes les pistes du flux (idempotent). */
+  private stopScanner(): void {
+    this.scanToken++;
+    const scanner = this.scanner;
+    this.scanner = null;
+    try {
+      scanner?.stop();
+    } catch {
+      /* déjà arrêté */
+    }
+  }
+
+  /** QR code d'un code (grouped ou non) : encode le code NETTOYÉ ; null s'il ne tient pas dans un QR code (texte de repli seul). Même texte = même matrice. */
+  private qrFor(code: string | null): QrMatrix | null {
+    if (!code) return null;
+    const text = cleanCode(code);
+    if (this.qrCache && this.qrCache.text === text) return this.qrCache.matrix;
+    let matrix: QrMatrix | null = null;
+    try {
+      matrix = qrMatrix(text);
+    } catch {
+      matrix = null;
+    }
+    this.qrCache = { text, matrix };
+    return matrix;
+  }
+
   // ───────────────────────────── Invité ─────────────────────────────
 
   private onChooseJoin(): void {
@@ -606,9 +849,12 @@ export class NetLobbyScene extends Phaser.Scene {
     );
   }
 
-  /** WebRTC : valide le code collé, produit le code de réponse, puis attend que l'hôte le colle (le canal s'ouvre alors tout seul). */
-  private async submitJoinCode(): Promise<void> {
-    const check = checkPastedCode(this.dom?.getValue('joinCode') ?? '');
+  /**
+   * WebRTC : valide le code collé (ou `scanned`, lu par la caméra : même chemin), produit le code de réponse (affiché en QR code et en texte), puis attend que
+   * l'hôte le lise ou le colle (le canal s'ouvre alors tout seul).
+   */
+  private async submitJoinCode(scanned?: string): Promise<void> {
+    const check = checkPastedCode(scanned ?? this.dom?.getValue('joinCode') ?? '');
     if (!check.ok) {
       this.fail(messageFromCodeCheck(check.error));
       return;
@@ -686,6 +932,10 @@ export class NetLobbyScene extends Phaser.Scene {
   }
 
   private goBack(): void {
+    if (this.state.scan) {
+      this.closeScan(); // Échap / B ferment d'abord la caméra, sans quitter l'écran
+      return;
+    }
     if (backOutcome(this.state) === 'menu') {
       if (needsCloseConfirm(this.state, this.currentLobby())) {
         const now = performance.now();
@@ -710,6 +960,7 @@ export class NetLobbyScene extends Phaser.Scene {
       this.goBack();
       return;
     }
+    if (this.state.scan) return; // caméra ouverte : seul « retour » (la fermer) agit, la navigation ne touche pas aux lignes cachées derrière
     if (rows.length === 0) return;
     const idx = Math.max(
       0,
@@ -819,6 +1070,7 @@ export class NetLobbyScene extends Phaser.Scene {
     this.rows = [];
     const fields: DomFieldSpec[] = [];
     const buttons: DomButtonSpec[] = [];
+    const media: RenderMedia = { qrs: [], labels: [], camera: null, backdrop: false };
     const s = this.state;
     const lobby = this.currentLobby();
     const ctx = { lobby, localSlot: this.localSlot(), rtcSupported: this.rtcSupported };
@@ -835,10 +1087,10 @@ export class NetLobbyScene extends Phaser.Scene {
         this.renderChoose(action, rowSpecs, fields);
         break;
       case 'host':
-        this.renderHost(lobby, action, rowSpecs, fields, buttons);
+        this.renderHost(lobby, action, rowSpecs, fields, buttons, media);
         break;
       case 'join':
-        this.renderJoin(action, rowSpecs, fields, buttons);
+        this.renderJoin(action, rowSpecs, fields, buttons, media);
         break;
       case 'guest':
         this.renderGuest(lobby, action, rowSpecs);
@@ -846,7 +1098,10 @@ export class NetLobbyScene extends Phaser.Scene {
     }
     for (const spec of rowSpecs) this.rows.push(this.createRow(spec));
 
-    if (s.message) {
+    if (s.message && media.backdrop) {
+      // feuille portrait : le fond cache le canvas, le message passe en DOM
+      media.labels.push({ id: 'message', rect: portraitMessageRect(this.metrics), text: t(s.message.key, s.message.params), tone: s.message.tone === 'error' ? 'bad' : 'accent', px: 26, align: 'center' });
+    } else if (s.message) {
       this.track(
         createText(this, GAME_WIDTH / 2, MESSAGE_Y, t(s.message.key, s.message.params), {
           size: 'sm',
@@ -863,7 +1118,47 @@ export class NetLobbyScene extends Phaser.Scene {
       this.selectedId = this.rows.find((r) => r.spec.kind !== 'info' && r.spec.enabled)?.spec.id ?? this.rows.find((r) => r.spec.kind !== 'info')?.spec.id ?? '';
     }
     this.applySelection();
-    this.dom?.sync(fields, buttons);
+    this.dom?.sync(fields, buttons, media);
+    // Un QR code ou la caméra à l'écran : la manette virtuelle (stick translucide) en recouvrirait des modules → masquée tant qu'ils sont affichés.
+    setVirtualPadSuspended(media.qrs.length > 0 || media.camera !== null);
+  }
+
+  // ── Aides de rendu des panneaux QR ──
+
+  /** Texte d'un panneau QR : dessiné dans le canvas (paysage) ou étiquette DOM (feuille portrait, où le fond cache le canvas). */
+  private textAt(sheet: boolean, media: RenderMedia, id: string, rect: LogicalRect, content: string, tone: DomTone, size: 'sm' | 'md', center = false): void {
+    if (sheet) {
+      media.labels.push({ id, rect, text: content, tone, px: size === 'md' ? 26 : 22, align: center ? 'center' : 'left' });
+      return;
+    }
+    const color = tone === 'accent' ? UI_THEME.accent : tone === 'dim' ? UI_THEME.textDim : tone === 'bad' ? UI_THEME.bad : UI_THEME.text;
+    const t0 = this.track(
+      createText(this, center ? rect.x + rect.w / 2 : rect.x + 6, rect.y + rect.h / 2, '', { size, color, origin: center ? [0.5, 0.5] : [0, 0.5], align: center ? 'center' : 'left', wrapWidth: rect.w - 12, lineSpacing: 4 }),
+    );
+    fit(t0, content, rect.w - 12);
+  }
+
+  /** Zone caméra de la lecture en cours : consigne selon la cible, message d'état (ouverture, contenu ignoré, conseils), bouton « Annuler ». */
+  private cameraSpec(rect: LogicalRect): DomCameraSpec | null {
+    const sc = this.state.scan;
+    if (!sc) return null;
+    const status =
+      sc.ignored !== null
+        ? { text: t(scanIgnoredKey(sc.ignored, sc.target)), tone: 'bad' as DomTone }
+        : sc.phase === 'starting'
+          ? { text: t('net.scan.starting'), tone: 'dim' as DomTone }
+          : { text: t('net.scan.tips'), tone: 'dim' as DomTone };
+    return { id: 'camera', rect, caption: t(sc.target === 'invite' ? 'net.scan.aim.invite' : 'net.scan.aim.answer'), status, cancelLabel: t('net.scan.cancel'), onCancel: () => this.closeScan() };
+  }
+
+  /** Bouton de scan, ou (caméra indisponible) la raison traduite à sa place : le copier-coller reste le repli. */
+  private scanControl(sheet: boolean, media: RenderMedia, buttons: DomButtonSpec[], id: string, label: string, rect: LogicalRect, enabled: boolean, onClick: () => void): void {
+    const state = scanButtonState(this.state, this.scanSupport);
+    if (state.available) {
+      buttons.push({ id, label, rect, enabled, onClick });
+      return;
+    }
+    this.textAt(sheet, media, `${id}Why`, rect, t(`net.scan.error.${state.reason ?? 'failed'}`), 'dim', 'sm');
   }
 
   private track<T extends Phaser.GameObjects.GameObject>(o: T): T {
@@ -899,8 +1194,16 @@ export class NetLobbyScene extends Phaser.Scene {
 
   // ── Étape « salon de l'hôte » ──
 
-  private renderHost(lobby: LobbyState | null, action: (id: LobbyActionId) => LobbyAction | undefined, rows: RowSpec[], fields: DomFieldSpec[], buttons: DomButtonSpec[]): void {
-    this.renderPlayers(lobby);
+  private renderHost(lobby: LobbyState | null, action: (id: LobbyActionId) => LobbyAction | undefined, rows: RowSpec[], fields: DomFieldSpec[], buttons: DomButtonSpec[], media: RenderMedia): void {
+    // invitation prête : panneau QR code (invitation affichée en grand) ; sinon liste des joueurs et panneau compact
+    const active = this.state.transport === 'webrtc' ? activeInvite(this.state) : null;
+    const qrMode = active !== null && (active.status === 'ready' || active.status === 'accepting');
+    const inviteLayout = qrMode ? hostInviteLayout(this.metrics) : null;
+    if (active && inviteLayout?.sheet) {
+      this.renderInviteSheet(active, inviteLayout, fields, buttons, media);
+      return;
+    }
+    if (!qrMode) this.renderPlayers(lobby);
     const me = lobby ? slotOf(lobby, 0) : undefined;
     let y = 100;
     rows.push({
@@ -948,18 +1251,22 @@ export class NetLobbyScene extends Phaser.Scene {
     const webrtc = this.state.transport === 'webrtc';
     const invite = action('invite');
     if (webrtc) {
-      rows.push({
-        id: 'invite',
-        kind: 'action',
-        x: RIGHT_X,
-        y,
-        w: RIGHT_W,
-        label: t('net.lobby.invite.button'),
-        enabled: invite?.enabled === true,
-        blocked: invite?.blocked,
-        confirm: () => void this.startInvite(),
-      });
-      this.renderInvitePanel(fields, buttons);
+      // (la ligne « Inviter » désactivée est retirée pendant une invitation prête : ses boutons prennent sa place)
+      if (!qrMode) {
+        rows.push({
+          id: 'invite',
+          kind: 'action',
+          x: RIGHT_X,
+          y,
+          w: RIGHT_W,
+          label: t('net.lobby.invite.button'),
+          enabled: invite?.enabled === true,
+          blocked: invite?.blocked,
+          confirm: () => void this.startInvite(),
+        });
+      }
+      if (active && inviteLayout) this.renderInviteQr(active, inviteLayout, fields, buttons, media);
+      else this.renderInvitePanel(fields, buttons);
     } else {
       const room = this.roomCode ? `${t('net.lobby.bc.room', { room: this.roomCode })}\n\n` : '';
       this.track(createText(this, RIGHT_X + 10, y + 6, `${room}${t('net.lobby.bc.hostHint')}`, { size: 'sm', color: UI_THEME.textDim, wrapWidth: RIGHT_W - 20, lineSpacing: 4 }));
@@ -973,7 +1280,7 @@ export class NetLobbyScene extends Phaser.Scene {
     rows.push({ id: 'back', kind: 'action', x: RIGHT_X, y: 520 + ROW_STEP, w: BOTTOM_W, label: t('net.lobby.closeRoom'), enabled: true, confirm: () => this.goBack() });
   }
 
-  /** Panneau d'invitation WebRTC (colonne gauche, sous la liste des joueurs) : une invitation active à la fois, les autres en simples lignes d'état. */
+  /** Panneau d'invitation WebRTC compact (colonne gauche, sous la liste des joueurs) : préparation ou échec de l'invitation ; une invitation prête passe au panneau QR code. */
   private renderInvitePanel(fields: DomFieldSpec[], buttons: DomButtonSpec[]): void {
     const x = LEFT_X;
     const w = LEFT_W;
@@ -991,36 +1298,73 @@ export class NetLobbyScene extends Phaser.Scene {
       this.track(createText(this, x + 6, 392, t('net.lobby.invite.creating'), { size: 'sm', color: UI_THEME.textDim }));
       return;
     }
-    if (active.status === 'failed') return;
+    // (invitation prête ou en connexion : panneau QR code, `renderInviteQr`)
+  }
+
+  /**
+   * Panneau d'invitation (paysage) : QR code de l'invitation le plus grand possible dans la colonne gauche, texte + « Copier » dessous (repli) ; à droite, « Scanner la
+   * réponse » + « Annuler », puis la zone de collage de la réponse (repli). Pendant la lecture, la caméra prend la place du QR code.
+   */
+  private renderInviteQr(active: InviteView, L: HostInviteLayout, fields: DomFieldSpec[], buttons: DomButtonSpec[], media: RenderMedia): void {
+    const busy = active.status === 'accepting';
+    const scanning = this.state.scan?.target === 'answer';
+    const sheet = L.sheet;
+    if (!scanning) this.textAt(sheet, media, 'qrHeader', L.header, busy ? t('net.qr.host.accepting') : t('net.qr.host.show'), 'accent', 'md');
+    if (scanning) {
+      media.camera = this.cameraSpec(sheet ? scanZoneLayout(this.metrics).zone : L.qr);
+    } else {
+      const matrix = this.qrFor(active.code);
+      if (matrix) media.qrs.push({ id: 'inviteQr', rect: L.qr, matrix, label: t('net.qr.alt.invite') });
+      else this.textAt(sheet, media, 'qrTooBig', L.qr, t('net.qr.tooBig'), 'bad', 'sm', true);
+    }
     const code = `inviteCode${active.id}`;
     const answer = `inviteAnswer${active.id}`;
-    const busy = active.status === 'accepting';
-    this.track(createText(this, x + 6, 376, t('net.lobby.invite.code'), { size: 'sm', color: UI_THEME.text }));
-    fields.push({ id: code, kind: 'textarea', rect: { x, y: 398, w: 410, h: 80 }, value: active.code ?? '', readOnly: true, label: t('net.lobby.invite.code') });
-    buttons.push({ id: `${code}Copy`, label: t('net.lobby.copy'), rect: { x: x + 420, y: 398, w: 160, h: 80 }, onClick: () => this.copyField(code) });
-    this.track(createText(this, x + 6, 488, t('net.lobby.invite.answer'), { size: 'sm', color: UI_THEME.text }));
-    fields.push({ id: answer, kind: 'textarea', rect: { x, y: 510, w: 280, h: 80 }, value: '', readOnly: busy, label: t('net.lobby.invite.answer') });
-    buttons.push({ id: `${answer}Paste`, label: t('net.lobby.paste'), rect: { x: x + 290, y: 510, w: 130, h: 80 }, enabled: !busy, onClick: () => this.pasteInto(answer) });
-    buttons.push({ id: `${answer}Ok`, label: t('net.lobby.validate'), rect: { x: x + 430, y: 510, w: 150, h: 80 }, enabled: !busy, onClick: () => void this.acceptInvite(active.id) });
-    if (busy) this.track(createText(this, x + 6, 600, t('net.lobby.invite.accepting'), { size: 'sm', color: UI_THEME.accent }));
+    fields.push({ id: code, kind: 'textarea', rect: L.code, value: active.code ?? '', readOnly: true, label: t('net.lobby.invite.code') });
+    buttons.push({ id: `${code}Copy`, label: t('net.lobby.copy'), rect: L.copy, onClick: () => this.copyField(code) });
+    this.scanControl(sheet, media, buttons, `inviteScan${active.id}`, t('net.scan.answer.button'), L.scan, !busy && !scanning, () => this.openScan('answer'));
+    buttons.push({ id: `inviteCancel${active.id}`, label: t('net.lobby.invite.cancel'), rect: L.cancel, onClick: () => this.dismissInvite(active.id) });
+    fields.push({ id: answer, kind: 'textarea', rect: L.answer, value: '', readOnly: busy, placeholder: t('net.qr.answer.placeholder'), label: t('net.lobby.invite.answer') });
+    buttons.push({ id: `${answer}Paste`, label: t('net.lobby.paste'), rect: L.paste, enabled: !busy, onClick: () => this.pasteInto(answer) });
+    buttons.push({ id: `${answer}Ok`, label: t('net.lobby.validate'), rect: L.validate, enabled: !busy, onClick: () => void this.acceptInvite(active.id) });
+  }
+
+  /** Feuille portrait de l'invitation : tout en DOM sur un fond opaque (le canvas 16:9 est un bandeau minuscule) ; la caméra, si elle est ouverte, prend toute la feuille. */
+  private renderInviteSheet(active: InviteView, L: HostInviteLayout, fields: DomFieldSpec[], buttons: DomButtonSpec[], media: RenderMedia): void {
+    media.backdrop = true;
+    if (this.state.scan?.target === 'answer') {
+      media.camera = this.cameraSpec(scanZoneLayout(this.metrics).zone);
+      return;
+    }
+    this.renderInviteQr(active, L, fields, buttons, media);
+    if (L.back) buttons.push({ id: 'sheetBack', label: t('net.lobby.closeRoom'), rect: L.back, onClick: () => this.goBack() });
   }
 
   // ── Étape « connexion de l'invité » ──
 
-  private renderJoin(action: (id: LobbyActionId) => LobbyAction | undefined, rows: RowSpec[], fields: DomFieldSpec[], buttons: DomButtonSpec[]): void {
+  private renderJoin(action: (id: LobbyActionId) => LobbyAction | undefined, rows: RowSpec[], fields: DomFieldSpec[], buttons: DomButtonSpec[], media: RenderMedia): void {
     const s = this.state;
     const cx = GAME_WIDTH / 2;
-    const backRow = (y: number): void => {
-      rows.push({ id: 'back', kind: 'action', x: 390, y, w: 500, label: t('net.lobby.back'), enabled: true, confirm: () => this.goBack() });
+    const backRow = (y: number, x = 390, w = 500): void => {
+      rows.push({ id: 'back', kind: 'action', x, y, w, label: t('net.lobby.back'), enabled: true, confirm: () => this.goBack() });
     };
     this.track(createText(this, cx, 72, t('net.lobby.join'), { size: 'md', color: UI_THEME.textDim, origin: [0.5, 0.5], align: 'center' }));
 
     if (s.join === 'code' && s.transport === 'webrtc') {
-      this.track(createText(this, 140, 120, t('net.lobby.join.code'), { size: 'md', color: UI_THEME.text }));
-      fields.push({ id: 'joinCode', kind: 'textarea', rect: { x: 140, y: 164, w: 1000, h: 150 }, value: '', placeholder: t('net.lobby.code.placeholder'), label: t('net.lobby.join.code') });
-      buttons.push({ id: 'joinPaste', label: t('net.lobby.paste'), rect: { x: 140, y: 334, w: 220, h: 56 }, onClick: () => this.pasteInto('joinCode') });
-      buttons.push({ id: 'joinOk', label: t('net.lobby.validate'), rect: { x: 380, y: 334, w: 220, h: 56 }, enabled: action('submitCode')?.enabled === true, onClick: () => void this.submitJoinCode() });
-      backRow(520);
+      const L = guestCodeLayout(this.metrics);
+      const scanning = s.scan?.target === 'invite';
+      if (L.sheet) media.backdrop = true;
+      if (scanning) {
+        // la caméra prend la place du reste (aucune ligne : seul « retour » / « Annuler » la ferme)
+        media.camera = this.cameraSpec(scanZoneLayout(this.metrics).zone);
+        return;
+      }
+      this.scanControl(L.sheet, media, buttons, 'joinScan', t('net.scan.invite.button'), L.scan, true, () => this.openScan('invite'));
+      this.textAt(L.sheet, media, 'joinLabel', L.label, t('net.lobby.join.code'), 'normal', 'md');
+      fields.push({ id: 'joinCode', kind: 'textarea', rect: L.field, value: '', placeholder: t('net.lobby.code.placeholder'), label: t('net.lobby.join.code') });
+      buttons.push({ id: 'joinPaste', label: t('net.lobby.paste'), rect: L.paste, onClick: () => this.pasteInto('joinCode') });
+      buttons.push({ id: 'joinOk', label: t('net.lobby.validate'), rect: L.validate, enabled: action('submitCode')?.enabled === true, onClick: () => void this.submitJoinCode() });
+      if (L.sheet && L.back) buttons.push({ id: 'sheetBack', label: t('net.lobby.back'), rect: L.back, onClick: () => this.goBack() });
+      else backRow(520);
       return;
     }
     if (s.join === 'creating') {
@@ -1029,11 +1373,19 @@ export class NetLobbyScene extends Phaser.Scene {
       return;
     }
     if (s.join === 'answer' && s.answerCode) {
-      this.track(createText(this, 140, 120, t('net.lobby.join.answer'), { size: 'md', color: UI_THEME.text }));
-      fields.push({ id: 'joinAnswer', kind: 'textarea', rect: { x: 140, y: 164, w: 1000, h: 150 }, value: s.answerCode, readOnly: true, label: t('net.lobby.join.answer') });
-      buttons.push({ id: 'joinCopy', label: t('net.lobby.copy'), rect: { x: 140, y: 334, w: 220, h: 56 }, onClick: () => this.copyField('joinAnswer') });
-      this.track(createText(this, cx, 440, t('net.lobby.join.answerHint'), { size: 'sm', color: UI_THEME.textDim, origin: [0.5, 0.5], align: 'center', wrapWidth: 900 }));
-      backRow(520);
+      // code de réponse en QR code (l'hôte le lit), texte + « Copier » en repli
+      const L = guestAnswerLayout(this.metrics);
+      if (L.sheet) media.backdrop = true;
+      this.textAt(L.sheet, media, 'answerCaption', L.caption, t('net.qr.guest.show'), 'accent', 'md');
+      const matrix = this.qrFor(s.answerCode);
+      if (matrix) media.qrs.push({ id: 'answerQr', rect: L.qr, matrix, label: t('net.qr.alt.answer') });
+      else this.textAt(L.sheet, media, 'qrTooBig', L.qr, t('net.qr.tooBig'), 'bad', 'sm', true);
+      if (!L.sheet) this.textAt(false, media, 'answerHint', L.hint, t('net.qr.guest.hint'), 'dim', 'sm');
+      this.textAt(L.sheet, media, 'answerLabel', L.label, t('net.qr.guest.fallback'), 'dim', 'sm');
+      fields.push({ id: 'joinAnswer', kind: 'textarea', rect: L.code, value: s.answerCode, readOnly: true, label: t('net.lobby.join.answer') });
+      buttons.push({ id: 'joinCopy', label: t('net.lobby.copy'), rect: L.copy, onClick: () => this.copyField('joinAnswer') });
+      if (L.sheet) buttons.push({ id: 'sheetBack', label: t('net.lobby.back'), rect: L.back, onClick: () => this.goBack() });
+      else backRow(L.back.y, L.back.x, L.back.w);
       return;
     }
     if (s.join === 'failed') {
