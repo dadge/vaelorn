@@ -11,6 +11,7 @@ import type { PlayerId, PlayerState, RoomDef } from '../core/types';
 import { LEVELS } from '../levels';
 import { mapZone } from './mapZone';
 import {
+  MAP_LONG_PRESS_MS,
   MAP_REVEAL_HALF_H_TILES,
   MAP_REVEAL_HALF_W_TILES,
   MAP_SCALE_MAX_SHARED,
@@ -25,6 +26,7 @@ import {
   MARKER_DOWN_LINE,
   MARKER_HEAL_HALF,
   MARKER_SMALL_MAP_FACTOR,
+  MapPress,
   blinkPulse,
   computeMarkers,
   createMapMemory,
@@ -728,5 +730,42 @@ describe('pions : priorité d\'affichage et taille minimale lisible', () => {
     expect(MARKER_HEAL_HALF).toBeGreaterThan(MARKER_DOT_RADIUS);
     expect(MARKER_DOWN_HALF).toBeGreaterThan(MARKER_HEAL_HALF);
     expect(MARKER_DOWN_LINE).toBeGreaterThanOrEqual(3); // un trait de 1,5 px (ancien rendu à 640x360) n'était plus un ✕ lisible
+  });
+});
+
+describe('appui long sur le panneau (MapPress)', () => {
+  it('bascule quand la durée atteint le seuil, exactement au seuil', () => {
+    const p = new MapPress();
+    p.down(1000);
+    expect(p.up(1000 + MAP_LONG_PRESS_MS - 1)).toBeNull();
+    p.down(2000);
+    expect(p.up(2000 + MAP_LONG_PRESS_MS)).toBe('toggle');
+    p.down(3000);
+    expect(p.up(3000 + MAP_LONG_PRESS_MS * 10)).toBe('toggle'); // au-delà aussi
+  });
+
+  it('appui court : rien ; up sans down : rien ; cancel annule ; après un up, un nouvel appui repart de zéro', () => {
+    const p = new MapPress();
+    expect(p.up(500)).toBeNull(); // jamais de down
+    expect(p.pressing).toBe(false);
+    p.down(100);
+    expect(p.pressing).toBe(true);
+    expect(p.up(100 + MAP_LONG_PRESS_MS - 1)).toBeNull();
+    expect(p.pressing).toBe(false);
+    p.down(100);
+    p.cancel();
+    expect(p.pressing).toBe(false);
+    expect(p.up(100 + MAP_LONG_PRESS_MS * 2)).toBeNull(); // annulé : même une longue durée ne compte plus
+    p.down(5000);
+    expect(p.up(5000 + MAP_LONG_PRESS_MS)).toBe('toggle');
+    expect(p.pressing).toBe(false);
+  });
+
+  it('un second down pendant un appui en cours repart du nouveau début', () => {
+    const p = new MapPress();
+    p.down(0);
+    p.down(1000); // re-appui (rebond) : on repart de 1000
+    expect(p.up(1000 + MAP_LONG_PRESS_MS - 1)).toBeNull();
+    expect(p.up(1000 + MAP_LONG_PRESS_MS)).toBeNull(); // up sans down actif
   });
 });

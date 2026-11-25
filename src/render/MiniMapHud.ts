@@ -4,10 +4,15 @@
  * `miniMap.ts` (pure, testée) ; ce fichier ne fait que dessiner.
  *
  * Intégration (lot C) :
- *   const map = new MiniMapHud({ ctx, layout });           // une seule instance pour toute la partie (pas une par vue)
- *   map.setVisible(loadMapVisible());                      // préférence mémorisée (touche Tab : `saveMapVisible`)
+ *   const map = new MiniMapHud({ ctx, layout, onToggle });  // une seule instance pour toute la partie (pas une par vue) ; `onToggle` : bascule demandée
+ *   map.setVisible(loadMapVisible());                      // préférence mémorisée (touche Tab / appui long : `saveMapVisible`)
  *   map.update(state, room, dtMs, timeMs, centerOf);       // chaque frame, MÊME carte masquée (la découverte continue)
  *   map.destroy();                                         // à l'arrêt de la scène
+ *
+ * `onToggle` est appelé sur un **appui long** (≥ `MAP_LONG_PRESS_MS`) sur le panneau — ou sur le petit **onglet** en coin de panneau —
+ * au tactile comme à la souris, là où Tab n'existe pas. L'onglet **reste visible même carte masquée** (Phaser ne hit-test pas un objet
+ * invisible) : c'est la poignée qui permet de réafficher la carte au même endroit. La scène branche dessus la même bascule que Tab
+ * (préférence + toast).
  * `centerOf(v)` (centre monde de la caméra de la vue `v`, optionnel) : la carte s'estompe quand un héros passe sous elle dans l'une des vues (bord droit à 1 vue, centre de l'écran à 2-4 vues).
  *
  * Rendu : le terrain est un `CanvasTexture` d'UN pixel par tuile (mis à jour tuile par tuile, uniquement pour les tuiles nouvellement découvertes),
@@ -24,6 +29,7 @@ import type { ViewContext } from '../entities/common';
 import { HUD_DEPTH } from './hud';
 import {
   MAP_TILE,
+  MapPress,
   MARKER_DOT_RADIUS,
   MARKER_DOWN_HALF,
   MARKER_DOWN_LINE,
@@ -71,11 +77,20 @@ export const MAP_TILE_CSS: Readonly<Record<number, string>> = {
 export const MAP_HERO_FADE_ALPHA = 0.25;
 /** Constante de temps (ms) du fondu quand un héros passe sous la carte. */
 export const MAP_FADE_MS = 150;
+/** Taille (px écran) de l'onglet cliquable en coin supérieur droit du panneau : appui long = bascule ; visible même carte masquée. */
+export const MAP_TAB_SIZE = 26;
+/** Opacité de l'onglet : carte visible / carte masquée (plus visible pour signaler qu'on peut la réafficher). */
+export const MAP_TAB_ALPHA = 0.35;
+export const MAP_TAB_ALPHA_HIDDEN = 0.6;
 
 /** Ce dont la carte a besoin : le contexte de vue et la disposition de l'écran (un `HudEnv` convient). */
 export interface MiniMapEnv {
   ctx: ViewContext;
   layout: SplitLayout;
+  /** Bascule demandée par un appui long sur le panneau (la scène y branche la même action que Tab). */
+  onToggle?: () => void;
+  /** Horloge (ms) des appuis longs ; défaut : `scene.time.now`. Injectée dans les tests. */
+  nowMs?: () => number;
 }
 
 type Arc = Phaser.GameObjects.Arc;
@@ -94,8 +109,14 @@ let instanceCounter = 0;
 export class MiniMapHud {
   private readonly ctx: ViewContext;
   private readonly layout: SplitLayout;
+  private readonly onToggle?: () => void;
+  private readonly now: () => number;
+  /** État de l'appui long en cours sur le panneau (tactile / souris). */
+  private readonly press = new MapPress();
   private readonly textureBase: string;
   private readonly panel: Phaser.GameObjects.Rectangle;
+  /** Onglet cliquable en coin de panneau (appui long = bascule) ; reste visible carte masquée, le panneau non. */
+  private readonly tab: Phaser.GameObjects.Rectangle;
   private readonly frame: Gfx;
   private readonly markerObjs: MarkerObjs[] = [];
   private image: Phaser.GameObjects.Image | null = null;
@@ -119,12 +140,27 @@ export class MiniMapHud {
   constructor(env: MiniMapEnv) {
     this.ctx = env.ctx;
     this.layout = env.layout;
+    this.onToggle = env.onToggle;
+    this.now = env.nowMs ?? ((): number => (this.ctx.scene as unknown as { time?: { now?: number } }).time?.now ?? 0);
     this.textureBase = `minimap_${instanceCounter++}`;
     const scene = env.ctx.scene;
     const reg = <T extends Phaser.GameObjects.GameObject>(o: T): T => env.ctx.rig.registerHud(o);
 
     this.panel = reg(scene.add.rectangle(0, 0, 10, 10, MAP_PANEL_COLOR, MAP_PANEL_ALPHA));
     this.panel.setOrigin(0, 0).setDepth(MAP_DEPTH);
+    // Appui long (tactile ou souris) sur le panneau : bascule l'affichage (la hit area suit le `setSize` du panneau).
+    this.panel.setInteractive();
+    this.panel.on('pointerdown', this.onPressDown);
+    this.panel.on('pointerup', this.onPressUp);
+    this.panel.on('pointerout', this.onPressOut);
+    // Onglet en coin de panneau : même appui long, et LUI reste visible (donc cliquable) quand la carte est masquée — Phaser ne
+    // hit-test pas un objet invisible — pour pouvoir réafficher la carte au même endroit.
+    this.tab = reg(scene.add.rectangle(0, 0, MAP_TAB_SIZE, MAP_TAB_SIZE, MAP_FRAME_COLOR, MAP_TAB_ALPHA));
+    this.tab.setOrigin(1, 0).setDepth(MAP_DEPTH + 0.15).setVisible(false);
+    this.tab.setInteractive();
+    this.tab.on('pointerdown', this.onPressDown);
+    this.tab.on('pointerup', this.onPressUp);
+    this.tab.on('pointerout', this.onPressOut);
     this.frame = reg(scene.add.graphics());
     this.frame.setDepth(MAP_DEPTH + 0.1);
 
@@ -143,6 +179,7 @@ export class MiniMapHud {
       this.markerObjs.push({ ring, dot, heal, down });
     }
     this.panel.setVisible(false);
+    this.tab.setVisible(false);
     this.frame.setVisible(false);
   }
 
@@ -184,11 +221,31 @@ export class MiniMapHud {
     this.applyVisibility();
   }
 
+  /** Contact sur le panneau : début d'un appui long. */
+  private readonly onPressDown = (): void => {
+    if (this.destroyed) return;
+    this.press.down(this.now());
+  };
+
+  /** Relâchement : bascule si l'appui a duré assez longtemps (`MAP_LONG_PRESS_MS`). */
+  private readonly onPressUp = (): void => {
+    if (this.destroyed) return;
+    if (this.press.up(this.now()) === 'toggle') this.onToggle?.();
+  };
+
+  /** Le pointeur quitte la zone avant le relâchement : appui annulé. */
+  private readonly onPressOut = (): void => {
+    this.press.cancel();
+  };
+
   private applyVisibility(): void {
     const show = this.visible && this.placement !== null;
     this.panel.setVisible(show);
     this.frame.setVisible(show);
     this.image?.setVisible(show);
+    // L'onglet reste visible dès qu'il y a un placement, même carte masquée : c'est la poignée pour réafficher la carte.
+    this.tab.setVisible(this.placement !== null);
+    this.tab.setAlpha(this.fade * (this.visible ? MAP_TAB_ALPHA : MAP_TAB_ALPHA_HIDDEN));
     if (!show) {
       for (const m of this.markerObjs) {
         m.ring.setVisible(false);
@@ -232,6 +289,7 @@ export class MiniMapHud {
     this.placement = placement;
     const { panel, map, scale } = placement;
     this.panel.setPosition(panel.x, panel.y).setSize(panel.w, panel.h);
+    this.tab.setPosition(panel.x + panel.w, panel.y); // coin supérieur droit du panneau
     this.frame.clear();
     this.frame.lineStyle(1, MAP_FRAME_COLOR, MAP_FRAME_ALPHA);
     this.frame.strokeRect(panel.x + 0.5, panel.y + 0.5, panel.w - 1, panel.h - 1);
@@ -319,6 +377,7 @@ export class MiniMapHud {
       this.panel.setAlpha(this.fade);
       this.frame.setAlpha(this.fade);
       this.image?.setAlpha(this.fade);
+      this.tab.setAlpha(this.fade * (this.visible ? MAP_TAB_ALPHA : MAP_TAB_ALPHA_HIDDEN));
     }
   }
 
@@ -359,7 +418,15 @@ export class MiniMapHud {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.panel.off('pointerdown', this.onPressDown);
+    this.panel.off('pointerup', this.onPressUp);
+    this.panel.off('pointerout', this.onPressOut);
+    this.tab.off('pointerdown', this.onPressDown);
+    this.tab.off('pointerup', this.onPressUp);
+    this.tab.off('pointerout', this.onPressOut);
+    this.press.cancel();
     this.panel.destroy();
+    this.tab.destroy();
     this.frame.destroy();
     this.image?.destroy();
     this.image = null;

@@ -86,6 +86,17 @@ import { noticeForClose, noticeForEnd, type ClientSessionApi, type HostSessionAp
 import { clearNetRuntime, getClientSession, getHostSession } from '../net/netRuntime';
 import { NetGameHud } from './NetGameHud';
 import { NET_EMPTY_FRAME, SnapshotGate, composeHostInputs, levelEndAction, localNetFrame, lostPeers, playerDisplayName, stallStatus } from './netGame';
+import { computeMobileUi } from '../mobile/device';
+import { readEnvironment } from '../mobile/mobileUi';
+
+/** Appareil tactile (pointeur principal grossier) ? Faux si l'environnement est illisible. */
+function isTouchDevice(): boolean {
+  try {
+    return computeMobileUi(readEnvironment()).touch;
+  } catch {
+    return false;
+  }
+}
 
 /** Durée (ms) de la célébration avant d'enchaîner sur le dialogue de fin de niveau. */
 const CELEBRATION_MS = 3200;
@@ -235,7 +246,8 @@ export class GameScene extends Phaser.Scene {
     getMusic().setMuted(muted);
   };
   /**
-   * Tab : affiche / masque la minicarte (préférence mémorisée, avec un court message dans chaque vue). M est déjà le « son » (onMute) :
+   * Tab (clavier) ou appui long sur le panneau (tactile / souris, via `MiniMapHud.onToggle`) : affiche / masque la minicarte
+   * (préférence mémorisée, avec un court message dans chaque vue). M est déjà le « son » (onMute) :
    * la carte prend Tab, la touche de carte habituelle des jeux, qu'aucune action ne lie (voir src/input/defaultBindings.ts).
    */
   private readonly onToggleMap = (e?: KeyboardEvent): void => {
@@ -450,12 +462,13 @@ export class GameScene extends Phaser.Scene {
     if (this.layout.teamPanel) this.teamPanel = new TeamPanelHud(env, this.layout.teamPanel, state.players);
     // Minicarte : partie normale et partie réseau (hôte / invité) ; jamais en démo ni en tutoriel (leur écran reste inchangé).
     if (!demo && !tut) {
-      this.miniMap = new MiniMapHud(env);
+      // Appui long tactile sur le panneau = même bascule que Tab (préférence + toast dans chaque vue).
+      this.miniMap = new MiniMapHud({ ...env, onToggle: () => this.onToggleMap() });
       this.miniMap.setVisible(loadMapVisible());
     }
     this.overlay = new GameOverlay(this.ctx, level);
     this.pauseMenu = new PauseMenu(this.ctx);
-    if (this.miniMap) this.pauseMenu.setMapHelp(true); // rappel de la touche Tab (partie normale et réseau ; jamais en démo ni en tutoriel)
+    if (this.miniMap) this.pauseMenu.setMapHelp(true, isTouchDevice()); // rappel : touche Tab, ou appui long sur appareil tactile (jamais en démo ni en tutoriel)
     if (demo) {
       // Démo : pilote automatique sur le joueur 0, aucun son, aucune bannière ; bandeau « DÉMO » + invite clignotants.
       this.sfx.setMuted(true);

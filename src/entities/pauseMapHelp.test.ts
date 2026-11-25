@@ -1,6 +1,6 @@
 /**
- * Menu pause : le rappel de la touche de la minicarte (`map.help`, « Tab : afficher / masquer le plan ») n'apparaît que dans une partie avec carte
- * (ni démo ni tutoriel : leur menu reste inchangé), dans les deux langues.
+ * Menu pause : le rappel de la minicarte (`map.help`, « Tab : afficher / masquer le plan » ; `map.helpTouch`, « appui long sur le plan », sur appareil
+ * tactile) n'apparaît que dans une partie avec carte (ni démo ni tutoriel : leur menu reste inchangé), dans les deux langues.
  */
 import { describe, expect, it } from 'vitest';
 import { makeFakeViewContext, type FakeGameObject } from '../render/hudTestKit';
@@ -31,5 +31,21 @@ describe('menu pause : aide de la touche de la minicarte', () => {
     menu.setMapHelp(false);
     expect(inner.controls.text).toBe(base);
     expect(inner.panel.height).toBe(baseHeight);
+  });
+
+  it.each(['fr', 'en'] as Language[])('appareil tactile : la ligne d\'aide dit « appui long sur le plan » au lieu de « Tab » (%s)', (lang) => {
+    setLanguage(lang);
+    const { ctx } = makeFakeViewContext(3, 1);
+    const menu = new PauseMenu(ctx);
+    const inner = menu as unknown as PauseInternals;
+    menu.show();
+    menu.setMapHelp(true, true);
+    expect(inner.controls.text).toContain(t('map.helpTouch'));
+    expect(inner.controls.text).not.toContain(t('map.help'));
+    expect(inner.controls.text).not.toContain('Tab');
+    // retour au clavier : la ligne « Tab » réapparaît
+    menu.setMapHelp(true, false);
+    expect(inner.controls.text).toContain(t('map.help'));
+    expect(inner.controls.text).not.toContain(t('map.helpTouch'));
   });
 });

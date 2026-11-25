@@ -420,6 +420,8 @@ export class PauseMenu {
   private tutorialMode = false;
   /** Partie avec minicarte (pas en démo ni en tutoriel) : le rappel de la touche Tab s'ajoute aux commandes. */
   private mapHelp = false;
+  /** Appareil tactile : le rappel dit « appui long sur le plan » au lieu de « Tab ». */
+  private mapHelpTouch = false;
 
   constructor(ctx: ViewContext) {
     const cx = GAME_WIDTH / 2;
@@ -441,9 +443,10 @@ export class PauseMenu {
     this.tutorialMode = on;
   }
 
-  /** Ajoute (ou retire) au rappel des commandes la ligne « Tab : afficher / masquer le plan » (partie avec minicarte seulement : ni démo ni tutoriel). */
-  setMapHelp(on: boolean): void {
+  /** Ajoute (ou retire) au rappel des commandes la ligne de la minicarte (partie avec minicarte seulement : ni démo ni tutoriel). `touch` : appareil tactile → « appui long sur le plan » au lieu de « Tab ». */
+  setMapHelp(on: boolean, touch = false): void {
     this.mapHelp = on;
+    this.mapHelpTouch = touch;
     this.panel.setSize(520, on ? 448 : 392); // une ligne de plus (la ligne des commandes peut déjà occuper 5 lignes)
     this.retranslate();
   }
@@ -509,7 +512,7 @@ export class PauseMenu {
     this.hint.setText(this.confirmingQuit ? t(this.tutorialMode ? 'tutorial.quit.confirm' : 'game.pause.quit.confirm') : t('game.pause.hint'));
     // rappel des commandes : déplacement, action, spécial et appeler (boutons dédiés), pause
     const lines = `${t('controls.keyboard')} : ${t('controls.keyboard.move')} - ${t('game.pause.controls.keyboard')}\n${t('controls.gamepad')} : ${t('controls.gamepad.move')} - ${t('game.pause.controls.gamepad')}`;
-    this.controls.setText(this.mapHelp ? `${lines}\n${t('map.help')}` : lines);
+    this.controls.setText(this.mapHelp ? `${lines}\n${t(this.mapHelpTouch ? 'map.helpTouch' : 'map.help')}` : lines);
     this.refreshItems();
   }
 

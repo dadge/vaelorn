@@ -28,8 +28,11 @@
  *  Pions (affichage) : `markerPriority(m)` / `markerDotDepth(...)` : ordre de dessin (à terre > à soigner > appel > normal) ; `markerSizeFactor(scale)` : taille
  *  des pions selon l'échelle de la carte (plus gros quand la carte est petite : ils restent lisibles).
  *  Préférence :
- *   - `loadMapVisible()` / `saveMapVisible(v)`          : visible / masquée (touche Tab), en localStorage, tout en try/catch.
- *  Textes : clés `map.shown` / `map.hidden` (toast de bascule, `mapToggleMessageKey(visible)`) et `map.help` (ligne d'aide du menu pause : touche Tab).
+ *   - `loadMapVisible()` / `saveMapVisible(v)`          : visible / masquée (touche Tab OU appui long tactile sur le panneau), en localStorage, tout en try/catch.
+ *  Appui long (tactile / souris, où Tab n'existe pas) :
+ *   - `MAP_LONG_PRESS_MS`, `MapPress`                   : `down` / `up` / `cancel` d'un appui sur le panneau ; `up` rend « toggle » si la durée atteint le seuil.
+ *  Textes : clés `map.shown` / `map.hidden` (toast de bascule, `mapToggleMessageKey(visible)`), `map.help` (ligne d'aide du menu pause : touche Tab)
+ *  et `map.helpTouch` (même ligne sur appareil tactile : appui long sur le plan).
  */
 import { GAME_HEIGHT, GAME_WIDTH, LIGHT_EMPTY_TILES, MAX_PLAYERS, PLAYER_COLORS, TILE } from '../core/constants';
 import { isCrossLow } from '../core/autoCall';
@@ -565,9 +568,45 @@ export function heroesUnderMap(
   return false;
 }
 
-// ───────────────────────────── Préférence (touche Tab) ─────────────────────────────
+// ───────────────────────────── Appui long (tactile / souris) ─────────────────────────────
 
-/** Clé `localStorage` de l'état visible / masqué de la carte. */
+/** Durée (ms) d'un appui long sur le panneau de la minicarte pour basculer son affichage (au tactile / à la souris, où la touche Tab n'existe pas). */
+export const MAP_LONG_PRESS_MS = 600;
+
+/**
+ * État d'un appui long sur le panneau de la minicarte (logique pure, testée) : `down` au contact, `up` au relâchement
+ * (« toggle » si la durée atteint `MAP_LONG_PRESS_MS`), `cancel` si le pointeur quitte la zone avant le relâchement.
+ */
+export class MapPress {
+  private startMs = -1;
+
+  /** Début d'un appui à `nowMs`. */
+  down(nowMs: number): void {
+    this.startMs = nowMs;
+  }
+
+  /** Relâchement à `nowMs` : « toggle » si l'appui a duré assez longtemps, sinon `null` ; termine l'appui dans tous les cas. */
+  up(nowMs: number): 'toggle' | null {
+    const s = this.startMs;
+    this.startMs = -1;
+    if (s < 0) return null;
+    return nowMs - s >= MAP_LONG_PRESS_MS ? 'toggle' : null;
+  }
+
+  /** Annule un appui en cours (pointeur sorti de la zone). */
+  cancel(): void {
+    this.startMs = -1;
+  }
+
+  /** Un appui est en cours. */
+  get pressing(): boolean {
+    return this.startMs >= 0;
+  }
+}
+
+// ───────────────────────────── Préférence (touche Tab / appui long) ─────────────────────────────
+
+/** Clé `localStorage` de l'état visible / masqué de la carte (touche Tab ou appui long tactile : même préférence). */
 export const MAP_VISIBLE_STORAGE_KEY = 'vaelorn.minimap';
 
 /** Accès (minimal) au stockage : `localStorage` en jeu, un faux objet dans les tests. */
@@ -602,7 +641,7 @@ export function saveMapVisible(visible: boolean, storage: MapStorage | null = de
   }
 }
 
-/** Clé i18n du toast de bascule (touche Tab) selon le nouvel état. */
+/** Clé i18n du toast de bascule (touche Tab ou appui long) selon le nouvel état. */
 export function mapToggleMessageKey(visible: boolean): 'map.shown' | 'map.hidden' {
   return visible ? 'map.shown' : 'map.hidden';
 }

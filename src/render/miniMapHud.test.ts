@@ -1,7 +1,8 @@
 /**
  * Dessin de la minicarte avec une scène Phaser factice : texture créée à la taille de la salle, tuiles peintes UNE fois (nouvelles
- * seulement), rien repeint quand rien ne change, pions (point / anneau / croix) selon l'état, carte masquée mais découverte qui continue,
- * remise à zéro par salle, estompage sous un héros (1 vue), destruction propre.
+ * seulement), rien repeint quand rien ne change, pions (point / anneau / croix) selon l'état, carte masquée mais découverte qui continue
+ * (seul l'onglet reste visible), appui long sur le panneau / l'onglet = bascule, remise à zéro par salle, estompage sous un héros (1 vue),
+ * destruction propre.
  */
 import { describe, expect, it } from 'vitest';
 import { TILE } from '../core/constants';
@@ -9,9 +10,9 @@ import { makeTestRoom } from '../core/levelValidation';
 import { createPlayerState } from '../core/players';
 import type { GameState, PlayerId, PlayerState, RoomDef } from '../core/types';
 import type { ViewContext } from '../entities/common';
-import { MAP_HERO_FADE_ALPHA, MAP_DEPTH, MiniMapHud } from './MiniMapHud';
+import { MAP_HERO_FADE_ALPHA, MAP_DEPTH, MAP_TAB_ALPHA_HIDDEN, MiniMapHud } from './MiniMapHud';
 import { mapZone } from './mapZone';
-import { MARKER_DOWN_DOT_ALPHA, MARKER_SMALL_MAP_FACTOR } from './miniMap';
+import { MAP_LONG_PRESS_MS, MARKER_DOWN_DOT_ALPHA, MARKER_SMALL_MAP_FACTOR } from './miniMap';
 import { computeLayout } from './splitscreen';
 
 // ───────────────────────────── Faux Phaser ─────────────────────────────
@@ -29,8 +30,31 @@ class FakeObj {
   h = 0;
   textureKey = '';
   draws = 0;
+  interactive = false;
+  input = { alwaysEnabled: false };
+  private readonly listeners = new Map<string, ((...args: never[]) => void)[]>();
   constructor(kind: string) {
     this.kind = kind;
+  }
+  setInteractive(): this {
+    this.interactive = true;
+    return this;
+  }
+  on(ev: string, cb: (...args: never[]) => void): this {
+    const list = this.listeners.get(ev) ?? [];
+    list.push(cb);
+    this.listeners.set(ev, list);
+    return this;
+  }
+  off(ev: string, cb: (...args: never[]) => void): this {
+    const list = this.listeners.get(ev) ?? [];
+    const i = list.indexOf(cb);
+    if (i >= 0) list.splice(i, 1);
+    return this;
+  }
+  /** Déclenche un événement pointer (test). */
+  emit(ev: string): void {
+    for (const cb of [...(this.listeners.get(ev) ?? [])]) cb();
   }
   setOrigin(): this {
     return this;
@@ -139,8 +163,9 @@ class FakeCanvasTexture {
   }
 }
 
-function makeEnv(playerCount: number) {
+function makeEnv(playerCount: number, opts: { onToggle?: () => void } = {}) {
   const objs: FakeObj[] = [];
+  let now = 0;
   const textures = new Map<string, FakeCanvasTexture>();
   const make = (kind: string) => (): FakeObj => {
     const o = new FakeObj(kind);
@@ -182,7 +207,21 @@ function makeEnv(playerCount: number) {
     zoom: layout.zoom,
     playerCount,
   } as unknown as ViewContext;
-  return { ctx, layout, objs, textures, registered };
+  return {
+    ctx,
+    layout,
+    objs,
+    textures,
+    registered,
+    onToggle: opts.onToggle,
+    nowMs: () => now,
+    setNow: (v: number) => {
+      now = v;
+    },
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
 }
 
 function hero(id: PlayerId, tx: number, ty: number, over: Partial<PlayerState> = {}): PlayerState {
@@ -264,7 +303,11 @@ describe('MiniMapHud (scène factice)', () => {
       p.pos.x = x * TILE;
       hud.update(stateOf([p], x * 100), r, 16, x * 100);
     }
-    expect(env.objs.filter((o) => o.visible)).toHaveLength(0);
+    // carte masquée : seul l'onglet (2e rectangle, en coin de panneau) reste visible — poignée pour réafficher la carte
+    const visibles = env.objs.filter((o) => o.visible);
+    expect(visibles).toHaveLength(1);
+    expect(visibles[0].kind).toBe('rect');
+    expect(visibles[0]).toBe(env.objs.filter((o) => o.kind === 'rect')[1]);
     hud.setVisible(true);
     hud.update(stateOf([p], 4000), r, 16, 4000);
     const tex = [...env.textures.values()][0];
@@ -460,5 +503,95 @@ describe('MiniMapHud (scène factice)', () => {
     h1.update(stateOf([hero(0, 10, 10)]), room(), 16, 0);
     h2.update(stateOf([hero(0, 10, 10)]), room(), 16, 0);
     expect([...a.textures.keys()][0]).not.toBe([...b.textures.keys()][0]);
+  });
+});
+
+describe('appui long sur le panneau / l\'onglet (bascule tactile / souris)', () => {
+  const rectsOf = (env: ReturnType<typeof makeEnv>): FakeObj[] => env.objs.filter((o) => o.kind === 'rect');
+  const panelOf = (env: ReturnType<typeof makeEnv>): FakeObj => rectsOf(env)[0];
+  const tabOf = (env: ReturnType<typeof makeEnv>): FakeObj => rectsOf(env)[1];
+
+  it('panneau et onglet sont interactifs ; carte masquée : le panneau s\'efface mais l\'onglet reste visible (poignée)', () => {
+    const env = makeEnv(1);
+    const hud = new MiniMapHud(env);
+    hud.update(stateOf([hero(0, 20, 15)]), room(), 16, 0);
+    const panel = panelOf(env);
+    const tab = tabOf(env);
+    expect(panel.interactive).toBe(true);
+    expect(tab.interactive).toBe(true);
+    expect(tab.visible).toBe(true);
+    // l'onglet est posé sur le coin supérieur droit du panneau
+    const pl = hud.currentPlacement!;
+    expect([tab.x, tab.y]).toEqual([pl.panel.x + pl.panel.w, pl.panel.y]);
+    hud.setVisible(false);
+    expect(panel.visible).toBe(false);
+    expect(tab.visible).toBe(true); // réaffichable au même endroit
+    expect(tab.alpha).toBeCloseTo(MAP_TAB_ALPHA_HIDDEN, 5); // fondu à 1 ici
+  });
+
+  it('appui long (>= seuil) appelle onToggle ; appui court non ; sortie de zone annule ; up sans down ne fait rien', () => {
+    let toggles = 0;
+    const env = makeEnv(1, { onToggle: () => { toggles++; } });
+    const hud = new MiniMapHud(env);
+    hud.update(stateOf([hero(0, 20, 15)]), room(), 16, 0);
+    const panel = panelOf(env);
+    env.setNow(1000);
+    panel.emit('pointerdown');
+    env.advance(MAP_LONG_PRESS_MS + 100);
+    panel.emit('pointerup');
+    expect(toggles).toBe(1);
+    env.setNow(5000);
+    panel.emit('pointerdown');
+    env.advance(100);
+    panel.emit('pointerup');
+    expect(toggles).toBe(1);
+    env.setNow(9000);
+    panel.emit('pointerdown');
+    env.advance(MAP_LONG_PRESS_MS + 100);
+    panel.emit('pointerout'); // doigt sorti avant le relâchement : annulé
+    panel.emit('pointerup');
+    expect(toggles).toBe(1);
+    panel.emit('pointerup'); // up sans down
+    expect(toggles).toBe(1);
+  });
+
+  it('seuil exact : MAP_LONG_PRESS_MS - 1 ne bascule pas, MAP_LONG_PRESS_MS bascule ; via l\'onglet aussi, même carte masquée', () => {
+    let toggles = 0;
+    const env = makeEnv(2, { onToggle: () => { toggles++; } });
+    const hud = new MiniMapHud(env);
+    hud.update(stateOf([hero(0, 20, 15)]), room(), 16, 0);
+    const panel = panelOf(env);
+    const tab = tabOf(env);
+    env.setNow(0);
+    panel.emit('pointerdown');
+    env.advance(MAP_LONG_PRESS_MS - 1);
+    panel.emit('pointerup');
+    expect(toggles).toBe(0);
+    tab.emit('pointerdown'); // l'onglet porte aussi la bascule
+    env.advance(MAP_LONG_PRESS_MS);
+    tab.emit('pointerup');
+    expect(toggles).toBe(1);
+    hud.setVisible(false); // masquée : seul l'onglet reste visible et actif
+    tab.emit('pointerdown');
+    env.advance(MAP_LONG_PRESS_MS + 50);
+    tab.emit('pointerup');
+    expect(toggles).toBe(2);
+  });
+
+  it('destroy retire les écouteurs du panneau et de l\'onglet : plus aucune bascule ensuite', () => {
+    let toggles = 0;
+    const env = makeEnv(1, { onToggle: () => { toggles++; } });
+    const hud = new MiniMapHud(env);
+    hud.update(stateOf([hero(0, 20, 15)]), room(), 16, 0);
+    const panel = panelOf(env);
+    const tab = tabOf(env);
+    hud.destroy();
+    env.setNow(0);
+    panel.emit('pointerdown');
+    tab.emit('pointerdown');
+    env.advance(MAP_LONG_PRESS_MS + 100);
+    panel.emit('pointerup');
+    tab.emit('pointerup');
+    expect(toggles).toBe(0);
   });
 });
